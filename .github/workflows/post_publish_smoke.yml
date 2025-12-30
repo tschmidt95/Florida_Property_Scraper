@@ -34,8 +34,8 @@ jobs:
           set -euo pipefail
           TAG="${CHECK_TAG}"
           REPO=ghcr.io/tschmidt95/florida-scraper
-          ATTEMPTS=8
-          SLEEP=15
+          ATTEMPTS=12
+          SLEEP=20
           i=1
           until docker pull "${REPO}:${TAG}"; do
             if [ "$i" -ge "$ATTEMPTS" ]; then
@@ -95,10 +95,10 @@ jobs:
           set -euo pipefail
           TAG="${CHECK_TAG}"
           REPO=ghcr.io/tschmidt95/florida-scraper
-          echo "Initial check failed; waiting 60s before retry..."
-          sleep 60
-          ATTEMPTS=6
-          SLEEP=10
+          echo "Initial check failed; waiting 90s before retry..."
+          sleep 90
+          ATTEMPTS=8
+          SLEEP=15
           i=1
           until docker pull "${REPO}:${TAG}"; do
             if [ "$i" -ge "$ATTEMPTS" ]; then

@@ -1,0 +1,60 @@
+name: Image monitor
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # daily at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to check (default: latest)'
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      CHECK_TAG: ${{ github.event.inputs.tag || 'latest' }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image (with limited retries)
+        run: |
+          set -euo pipefail
+          TAG="${CHECK_TAG}"
+          REPO=ghcr.io/tschmidt95/florida-scraper
+          ATTEMPTS=6
+          SLEEP=15
+          i=1
+          until docker pull "${REPO}:${TAG}"; do
+            if [ "$i" -ge "$ATTEMPTS" ]; then
+              echo "ERROR: failed to pull ${REPO}:${TAG} after ${ATTEMPTS} attempts"
+              echo "Check publish runs: https://github.com/${{ github.repository }}/actions/runs?query=tag%3A${TAG}"
+              exit 1
+            fi
+            echo "Pull failed, waiting ${SLEEP}s before retry ($i/$ATTEMPTS)..."
+            i=$((i+1))
+            sleep "$SLEEP"
+          done
+
+      - name: Run import smoke check
+        run: |
+          docker run --rm ghcr.io/tschmidt95/florida-scraper:${CHECK_TAG} python - <<'PY'
+          import importlib.util, sys
+          spec = importlib.util.find_spec("florida_property_scraper")
+          if spec is None:
+              print("ERROR: import failed")
+              sys.exit(2)
+          print("OK:", spec.origin)
+          PY
