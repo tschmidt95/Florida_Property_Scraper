@@ -22,8 +22,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull published image
-        run: docker pull ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }}
+      - name: Pull published image (with retries)
+        run: |
+          set -euo pipefail
+          TAG=${{ github.event.release.tag_name }}
+          REPO=ghcr.io/tschmidt95/florida-scraper
+          ATTEMPTS=8
+          SLEEP=15
+          i=1
+          until docker pull "${REPO}:${TAG}"; do
+            if [ "$i" -ge "$ATTEMPTS" ]; then
+              echo "ERROR: failed to pull ${REPO}:${TAG} after ${ATTEMPTS} attempts"
+              echo "Tip: the image may not have been published yet; wait a bit and check the publish workflow logs."
+              exit 1
+            fi
+            echo "Pull failed, waiting ${SLEEP}s before retry ($i/$ATTEMPTS)..."
+            i=$((i+1))
+            sleep "$SLEEP"
+          done
 
       - name: Run import smoke check
         run: |
