@@ -16,4 +16,8 @@ Replace `<owner>/<repo>` and `<your-tag>` with the repository and tag to inspect
 
 If you want, you can also dispatch the workflow manually with the `tag` of a known-published image for immediate verification.
 
+### Scheduled image monitoring
+
+A daily scheduled job runs at 02:00 UTC and checks `ghcr.io/tschmidt95/florida-scraper:latest` by default (it can be dispatched manually with a specific `tag`). This provides ongoing verification that published images remain importable.
+
 ---
