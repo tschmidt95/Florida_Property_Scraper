@@ -62,4 +62,49 @@ jobs:
 
       - name: Show image digest (for logs)
         run: |
-          docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }} || true
+          docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/tschmidt95/florida-scraper:${CHECK_TAG} || true
+
+  delayed-retry:
+    needs: smoke-check
+    runs-on: ubuntu-latest
+    if: ${{ needs.smoke-check.result == 'failure' }}
+    env:
+      CHECK_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait and retry pull + import check
+        run: |
+          set -euo pipefail
+          TAG="${CHECK_TAG}"
+          REPO=ghcr.io/tschmidt95/florida-scraper
+          echo "Initial check failed; waiting 60s before retry..."
+          sleep 60
+          ATTEMPTS=6
+          SLEEP=10
+          i=1
+          until docker pull "${REPO}:${TAG}"; do
+            if [ "$i" -ge "$ATTEMPTS" ]; then
+              echo "ERROR: failed to pull ${REPO}:${TAG} after ${ATTEMPTS} attempts"
+              exit 1
+            fi
+            echo "Pull failed, waiting ${SLEEP}s before retry ($i/$ATTEMPTS)..."
+            i=$((i+1))
+            sleep "$SLEEP"
+          done
+          docker run --rm "${REPO}:${TAG}" python - <<'PY'
+          import importlib.util, sys
+          spec = importlib.util.find_spec("florida_property_scraper")
+          if spec is None:
+              print("ERROR: import failed")
+              sys.exit(2)
+          print("OK:", spec.origin)
+          PY
