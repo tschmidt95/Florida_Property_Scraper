@@ -50,7 +50,7 @@ jobs:
 
       - name: Run import smoke check
         run: |
-          docker run --rm ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }} \
+          docker run --rm ghcr.io/tschmidt95/florida-scraper:${CHECK_TAG} \
             python - <<'PY'
           import importlib.util, sys
           spec = importlib.util.find_spec("florida_property_scraper")
