@@ -21,6 +21,14 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: List repository files (debug)
+        run: |
+          echo "PWD: $(pwd)"
+          echo "Root files:"
+          ls -la
+          echo "Repo tree (top-level):"
+          ls -la . | sed -n '1,200p'
+
       - name: Install test dependencies and package
         if: ${{ steps.check_secret.outputs.present == 'true' }}
         run: |
