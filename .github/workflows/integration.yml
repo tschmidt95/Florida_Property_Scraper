@@ -13,22 +13,25 @@ jobs:
     if: ${{ secrets.SCRAPER_API_KEY != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+            - name: Check SCRAPER_API_KEY secret
+        id: check_secret
+        run: |
+          if [ -z "${{ secrets.SCRAPER_API_KEY }}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install test dependencies and package
+        if: ${{ steps.check_secret.outputs.present == 'true' }}
         run: |
-          python -m pip install -r requirements.txt -q || true
-          python -m pip install -r requirements-integration.txt -q || true
-          python -m pip install -q pytest
-          python -m pip install -e . -q
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-integration.txt
+          python -m pip install -e ".[test]" || python -m pip install -e .
 
       - name: Run integration tests
+        if: ${{ steps.check_secret.outputs.present == 'true' }}
         env:
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
-        run: pytest -q -m integration
+        run: python -m pytest -q -m integration
