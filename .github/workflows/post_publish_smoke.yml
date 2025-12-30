@@ -3,6 +3,11 @@ name: Post-publish smoke check
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to check (optional, overrides release tag)'
+        required: false
 
 permissions:
   contents: read
@@ -11,6 +16,8 @@ permissions:
 jobs:
   smoke-check:
     runs-on: ubuntu-latest
+    env:
+      CHECK_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -22,12 +29,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull published image
-        run: docker pull ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }}
+      - name: Pull published image (with retries)
+        run: |
+          set -euo pipefail
+          TAG="${CHECK_TAG}"
+          REPO=ghcr.io/tschmidt95/florida-scraper
+          ATTEMPTS=8
+          SLEEP=15
+          i=1
+          until docker pull "${REPO}:${TAG}"; do
+            if [ "$i" -ge "$ATTEMPTS" ]; then
+              echo "ERROR: failed to pull ${REPO}:${TAG} after ${ATTEMPTS} attempts"
+              echo "Tip: the image may not have been published yet; wait a bit and check the publish workflow logs."
+              exit 1
+            fi
+            echo "Pull failed, waiting ${SLEEP}s before retry ($i/$ATTEMPTS)..."
+            i=$((i+1))
+            sleep "$SLEEP"
+          done
 
       - name: Run import smoke check
         run: |
-          docker run --rm ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }} \
+          docker run --rm ghcr.io/tschmidt95/florida-scraper:${CHECK_TAG} \
             python - <<'PY'
           import importlib.util, sys
           spec = importlib.util.find_spec("florida_property_scraper")
