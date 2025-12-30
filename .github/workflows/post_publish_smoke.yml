@@ -1,0 +1,42 @@
+name: Post-publish smoke check
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  smoke-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull published image
+        run: docker pull ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }}
+
+      - name: Run import smoke check
+        run: |
+          docker run --rm ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }} \
+            python - <<'PY'
+          import importlib.util, sys
+          spec = importlib.util.find_spec("florida_property_scraper")
+          if spec is None:
+              print("ERROR: import failed")
+              sys.exit(2)
+          print("OK:", spec.origin)
+          PY
+
+      - name: Show image digest (for logs)
+        run: |
+          docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/tschmidt95/florida-scraper:${{ github.event.release.tag_name }} || true
