@@ -1,0 +1,2 @@
+# Add integration-only Python dependencies here, e.g.:
+# requests
