@@ -67,7 +67,7 @@ jobs:
   delayed-retry:
     needs: smoke-check
     runs-on: ubuntu-latest
-    if: ${{ needs.smoke-check.result == 'failure' }}
+    if: ${{ needs.smoke-check.conclusion == 'failure' }}
     env:
       CHECK_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
     steps:
