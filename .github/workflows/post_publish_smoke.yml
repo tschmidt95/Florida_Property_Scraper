@@ -41,6 +41,7 @@ jobs:
             if [ "$i" -ge "$ATTEMPTS" ]; then
               echo "ERROR: failed to pull ${REPO}:${TAG} after ${ATTEMPTS} attempts"
               echo "Tip: the image may not have been published yet; wait a bit and check the publish workflow logs."
+              echo "Helpful debug: view publish workflow runs for this tag: https://github.com/${{ github.repository }}/actions/runs?query=tag%3A${TAG}"
               exit 1
             fi
             echo "Pull failed, waiting ${SLEEP}s before retry ($i/$ATTEMPTS)..."
