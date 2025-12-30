@@ -67,10 +67,18 @@ jobs:
   delayed-retry:
     needs: smoke-check
     runs-on: ubuntu-latest
-    if: ${{ needs.smoke-check.conclusion == 'failure' }}
+    if: ${{ always() }}
     env:
       CHECK_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
     steps:
+      - name: Check whether initial smoke-check failed
+        run: |
+          echo "Initial job conclusion: '${{ needs.smoke-check.conclusion }}'"
+          if [ "${{ needs.smoke-check.conclusion }}" != "failure" ]; then
+            echo "Previous smoke-check did not fail; skipping delayed retry."
+            exit 0
+          fi
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
