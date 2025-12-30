@@ -3,6 +3,11 @@ name: Post-publish smoke check
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to check (optional, overrides release tag)'
+        required: false
 
 permissions:
   contents: read
@@ -11,6 +16,8 @@ permissions:
 jobs:
   smoke-check:
     runs-on: ubuntu-latest
+    env:
+      CHECK_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -25,7 +32,7 @@ jobs:
       - name: Pull published image (with retries)
         run: |
           set -euo pipefail
-          TAG=${{ github.event.release.tag_name }}
+          TAG="${CHECK_TAG}"
           REPO=ghcr.io/tschmidt95/florida-scraper
           ATTEMPTS=8
           SLEEP=15
