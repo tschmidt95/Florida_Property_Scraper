@@ -33,12 +33,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install test dependencies and package
+        - name: Install test dependencies and package
         run: |
-          python -m pip install -r requirements.txt -q || true
-          python -m pip install -q pytest
-          python -m pip install -e . -q
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          # Try to install test extras; fall back to editable package if extras are not defined
+          python -m pip install -e ".[test]" || python -m pip install -e .
 
+      - name: Quick smoke import
+        run: python -c "import importlib.util; print(importlib.util.find_spec('florida_property_scraper'))"
+
+      - name: Run tests (skip integration)
+        run: python -m pytest -q -m "not integration"
       - name: Run tests
         run: pytest -q
 
