@@ -11,8 +11,7 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: |
-      contains(github.event.issue.labels.*.name, 'monitor-failure')
+    if: ${{ github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'monitor-failure') }}
     steps:
       - name: Determine provider and webhook
         run: |
