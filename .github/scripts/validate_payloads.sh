@@ -18,9 +18,8 @@ npx --yes ajv-cli validate -s .github/schemas/slack_payload.json -d "$slack_file
 
 echo "Validating generic payload..."
 generic_file=/tmp/generic_payload.json
-jq -n --arg repo "owner/repo" --arg issue "https://example.com/issue/1" --arg note "Test alert" '{test: true, repo: $repo, issue: $issue, note: $note}' > "$generic_file"
+jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body "Test body" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: $body}' > "$generic_file"
 npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
-
 # Validate Teams payload
 echo "Validating teams payload..."
 teams_file=/tmp/teams_payload.json
