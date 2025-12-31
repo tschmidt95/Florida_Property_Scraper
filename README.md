@@ -31,8 +31,10 @@ We provide a **template** workflow that can send an external notification (Slack
 - Notes: the template is intentionally non-invasive (it exits if `ALERT_WEBHOOK_URL` is not configured). When you add the secret, the workflow will start posting notifications on new `monitor-failure` issues.
 
 Testing:
-1. Add secrets `ALERT_WEBHOOK_URL` (required) and optionally `ALERT_PROVIDER` (`slack` or `teams`).
+1. Add secrets `ALERT_WEBHOOK_URL` (required) and optionally `ALERT_PROVIDER` (`slack`, `teams`, or `generic`).
 2. Create a test issue with label `monitor-failure` to trigger the notification.
-3. The workflow will send a JSON payload appropriate for the selected provider and log the webhook response status and a short response body excerpt in the action logs (helps with debugging).
+3. The workflow will send a provider-specific payload (Slack Blocks for `slack`, actionable card for `teams`) and log the webhook response status and a short response body excerpt in the action logs (helps with debugging).
+4. If you want a richer Slack message (blocks with button), use `ALERT_PROVIDER=slack` (default). For Teams actionable card use `ALERT_PROVIDER=teams`.
+
 
 ---

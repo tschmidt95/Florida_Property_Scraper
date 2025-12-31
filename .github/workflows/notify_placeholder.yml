@@ -44,10 +44,12 @@ jobs:
           echo "Sending notification using provider: $PROVIDER"
 
           if [ "$PROVIDER" = "slack" ]; then
-            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: (":rotating_light: *" + $title + "*\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+            # Slack Blocks payload (rich message with button)
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" \
+              '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | fromjson? // $body_raw))}}, {type: "section", fields: [{type: "mrkdwn", text: "*Repo:* '" + "'${GITHUB_REPOSITORY}'" + "'"}, {type: "mrkdwn", text: "*Issue:* <" + $url + "|" + $title + ">"}]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]}] }')
           elif [ "$PROVIDER" = "teams" ]; then
-            # Simple Teams message card text
-            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: ("**" + $title + "**\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+            # Teams message card with action button
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" '{title: $title, text: ($body_raw | fromjson? // $body_raw), potentialAction: [{"@type": "OpenUri", name: "View issue", targets: [{os: "default", uri: $url}]}]}')
           else
             # Generic structured payload
             payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: ($body | fromjson? // $body)}')
