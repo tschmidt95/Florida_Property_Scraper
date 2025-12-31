@@ -1,0 +1,52 @@
+name: Manual notify debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_url:
+        description: 'Issue URL to use for the test'
+        required: true
+      issue_title:
+        description: 'Issue title to use for the test'
+        required: true
+      issue_body:
+        description: 'Issue body to use for the test'
+        required: false
+
+permissions:
+  secrets: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print context
+        run: |
+          echo "Repo: $GITHUB_REPOSITORY"
+          echo "Issue URL: ${{ github.event.inputs.issue_url }}"
+          echo "Issue title: ${{ github.event.inputs.issue_title }}"
+          echo "ALERT_WEBHOOK_URL_TEST set: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}"
+          echo "ALERT_PROVIDER: '${{ secrets.ALERT_PROVIDER }}'"
+
+      - name: Send payload to ALERT_WEBHOOK_URL_TEST
+        run: |
+          set -euo pipefail
+          TEST_URL='${{ secrets.ALERT_WEBHOOK_URL_TEST }}'
+          if [ -z "$TEST_URL" ]; then
+            echo "ALERT_WEBHOOK_URL_TEST not set; failing the job to surface in logs"
+            exit 1
+          fi
+
+          payload=$(jq -n --arg repo "${GITHUB_REPOSITORY}" --arg issue "${{ github.event.inputs.issue_url }}" \
+            --arg title "${{ github.event.inputs.issue_title }}" --arg body "${{ github.event.inputs.issue_body }}" \
+            '{test: true, repo: $repo, issue: $issue, title: $title, body: $body}')
+
+          echo "Payload: $payload"
+          RESP_FILE="/tmp/notify_test_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || true)
+          echo "HTTP status: $STATUS_CODE"
+          echo "Response body (first 400 chars):"
+          head -c 400 "$RESP_FILE" || true
+
+      - name: Done
+        run: echo "Manual notify debug finished"
