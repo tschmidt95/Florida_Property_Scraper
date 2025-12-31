@@ -14,32 +14,51 @@ jobs:
     if: |
       contains(github.event.issue.labels.*.name, 'monitor-failure')
     steps:
-      - name: Show placeholder notice
+      - name: Determine provider and webhook
         run: |
-          echo "This workflow is a template. It will send notifications to the destination defined in the ALERT_WEBHOOK_URL secret when enabled."
+          # Use ALERT_PROVIDER secret to select payload format (slack|teams|generic). Default to slack.
+          PROVIDER="${{ secrets.ALERT_PROVIDER }}"
+          if [ -z "$PROVIDER" ]; then
+            PROVIDER=slack
+          fi
 
-      - name: Fail early if no webhook configured (no-op placeholder)
-        run: |
           if [ -z "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
             echo "No ALERT_WEBHOOK_URL is configured. This is a template placeholder; add the secret to enable notifications."
             exit 0
           fi
 
-      - name: Send notification to webhook (example)
-        if: ${{ secrets.ALERT_WEBHOOK_URL != '' }}
-        env:
-          ALERT_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          echo "PROVIDER=$PROVIDER" >> $GITHUB_ENV
+          echo "WEBHOOK_URL=${{ secrets.ALERT_WEBHOOK_URL }}" >> $GITHUB_ENV
+
+      - name: Build and send notification payload
         run: |
+          set -euo pipefail
+          PROVIDER="${PROVIDER}"
+          WEBHOOK_URL="${WEBHOOK_URL}"
+
           ISSUE_URL="${{ github.event.issue.html_url }}"
           ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_BODY=$(jq -Rs . <<< "${{ github.event.issue.body }}")
+          ISSUE_BODY_RAW="${{ github.event.issue.body }}"
+          ISSUE_BODY=$(jq -Rs . <<< "$ISSUE_BODY_RAW")
 
-          # Example payload for Slack incoming webhook; adjust as needed for your destination.
-          payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: ("[ALERT] " + $title + "\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+          echo "Sending notification using provider: $PROVIDER"
 
-          echo "Sending notification to webhook..."
-          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$ALERT_URL" || true
-          echo "Notification step completed (response ignored)."
+          if [ "$PROVIDER" = "slack" ]; then
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: (":rotating_light: *" + $title + "*\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+          elif [ "$PROVIDER" = "teams" ]; then
+            # Simple Teams message card text
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: ("**" + $title + "**\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+          else
+            # Generic structured payload
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: ($body | fromjson? // $body)}')
+          fi
+
+          # Send and capture response (status + body) for diagnostics; do NOT print webhook URL.
+          RESP_FILE="/tmp/notify_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || true)
+          echo "Webhook response status: $STATUS_CODE"
+          echo "Response body (first 500 chars):"
+          head -c 500 "$RESP_FILE" || true
 
       - name: Done
-        run: echo "Notification placeholder workflow executed."
+        run: echo "Notification template executed (no-op if secret not provided)."
