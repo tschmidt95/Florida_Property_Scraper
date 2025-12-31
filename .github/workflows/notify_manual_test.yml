@@ -27,19 +27,6 @@ jobs:
             exit 0
           fi
 
-        id: issue
-        run: |
-          ISSUE_NUMBER=${{ github.event.inputs.issue_number }}
-          echo "Fetching issue $ISSUE_NUMBER"
-          gh api repos/${{ github.repository }}/issues/$ISSUE_NUMBER --jq '. | {html_url: .html_url, title: .title, body: .body}' > /tmp/issue.json
-          cat /tmp/issue.json
-          echo "ISSUE_HTML=$(jq -r .html_url /tmp/issue.json)" >> $GITHUB_ENV
-          echo "ISSUE_TITLE=$(jq -r .title /tmp/issue.json)" >> $GITHUB_ENV
-          ISSUE_BODY=$(jq -r .body /tmp/issue.json)
-          # Preserve raw body separately
-          echo "ISSUE_BODY_RAW<<EOF" >> $GITHUB_ENV
-          echo "$ISSUE_BODY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
 
       - name: Determine provider and webhook
         run: |
