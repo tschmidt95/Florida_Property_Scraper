@@ -22,7 +22,7 @@ jobs:
           node-version: 18
 
       - name: Install package-lock only
-        run: npm ci --package-lock-only
+        run: npm install --package-lock-only --no-audit --no-fund
 
       - name: Commit package-lock if changed
         run: |
