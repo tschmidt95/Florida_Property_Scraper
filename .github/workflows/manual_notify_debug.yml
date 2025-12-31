@@ -41,8 +41,26 @@ jobs:
 
           echo "Payload: $payload"
           RESP_FILE="/tmp/notify_test_resp_$$.txt"
-          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || true)
-          echo "HTTP status: $STATUS_CODE"
+
+          # Retry with exponential backoff
+          MAX_ATTEMPTS=3
+          SLEEP=2
+          STATUS_CODE=0
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || echo 000)
+            echo "Attempt $i returned $STATUS_CODE"
+            if [ "$STATUS_CODE" -ge 200 ] && [ "$STATUS_CODE" -lt 300 ]; then
+              echo "Test webhook succeeded on attempt $i"
+              break
+            fi
+            if [ $i -lt $MAX_ATTEMPTS ]; then
+              echo "Sleeping $SLEEP seconds before retry..."
+              sleep $SLEEP
+              SLEEP=$(( SLEEP * 2 ))
+            fi
+          done
+
+          echo "Final HTTP status: $STATUS_CODE"
           echo "Response body (first 400 chars):"
           head -c 400 "$RESP_FILE" || true
 

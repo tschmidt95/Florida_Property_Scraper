@@ -37,8 +37,26 @@ jobs:
           echo 'Sending test payload to ALERT_WEBHOOK_URL_TEST...'
           payload=$(jq -n --arg repo "${{ github.repository }}" --arg issue "${{ github.event.issue.html_url || github.event.inputs.issue_url }}" '{test: true, repo: $repo, issue: $issue, note: "Test alert from notify template"}')
           RESP_FILE="/tmp/notify_test_resp_$$.txt"
-          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || true)
-          echo "Test webhook response status: $STATUS_CODE"
+
+          # Retry loop with exponential backoff
+          MAX_ATTEMPTS=3
+          SLEEP=2
+          STATUS_CODE=0
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || echo 000)
+            echo "Attempt $i returned $STATUS_CODE"
+            if [ "$STATUS_CODE" -ge 200 ] && [ "$STATUS_CODE" -lt 300 ]; then
+              echo "Test webhook succeeded on attempt $i"
+              break
+            fi
+            if [ $i -lt $MAX_ATTEMPTS ]; then
+              echo "Sleeping $SLEEP seconds before retry..."
+              sleep $SLEEP
+              SLEEP=$(( SLEEP * 2 ))
+            fi
+          done
+
+          echo "Final test webhook response status: $STATUS_CODE"
           echo "Test response body (first 500 chars):"
           head -c 500 "$RESP_FILE" || true
 
@@ -61,7 +79,25 @@ jobs:
           fi
 
           RESP_FILE="/tmp/notify_resp_$$.txt"
-          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "${{ env.WEBHOOK_URL }}" || true)
+
+          # Retry loop with exponential backoff
+          MAX_ATTEMPTS=3
+          SLEEP=2
+          STATUS_CODE=0
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "${{ env.WEBHOOK_URL }}" || echo 000)
+            echo "Attempt $i returned $STATUS_CODE"
+            if [ "$STATUS_CODE" -ge 200 ] && [ "$STATUS_CODE" -lt 300 ]; then
+              echo "Webhook succeeded on attempt $i"
+              break
+            fi
+            if [ $i -lt $MAX_ATTEMPTS ]; then
+              echo "Sleeping $SLEEP seconds before retry..."
+              sleep $SLEEP
+              SLEEP=$(( SLEEP * 2 ))
+            fi
+          done
+
           echo "Webhook response status: $STATUS_CODE"
           echo "Response body (first 500 chars):"
           head -c 500 "$RESP_FILE" || true
