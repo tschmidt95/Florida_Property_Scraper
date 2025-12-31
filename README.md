@@ -20,4 +20,6 @@ If you want, you can also dispatch the workflow manually with the `tag` of a kno
 
 A daily scheduled job runs at 02:00 UTC and checks `ghcr.io/tschmidt95/florida-scraper:latest` by default (it can be dispatched manually with a specific `tag`). This provides ongoing verification that published images remain importable.
 
+If the scheduled monitor fails repeatedly (default threshold: 3 consecutive failures), an automatic GitHub Issue will be created (label `monitor-failure`) to notify maintainers and centralize triage.
+
 ---

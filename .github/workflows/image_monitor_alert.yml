@@ -1,0 +1,70 @@
+name: Image monitor alert
+
+on:
+  workflow_run:
+    workflows: ["Image monitor"]
+    types: [completed]
+
+permissions:
+  issues: write
+  actions: read
+  contents: read
+
+jobs:
+  alert:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check recent Image monitor runs and open issue if repeated failures
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const workflow_id = 'image_monitor.yml'; // workflow file name
+            const threshold = 3;
+
+            // List recent runs for the Image monitor workflow
+            const resp = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id, per_page: threshold });
+            const runs = resp.data.workflow_runs || [];
+
+            core.info(`Found ${runs.length} recent runs. Checking for ${threshold} consecutive failures.`);
+
+            const top = runs.slice(0, threshold);
+            const allFailed = top.length >= threshold && top.every(r => r.conclusion === 'failure');
+            if (!allFailed) {
+              core.info('Recent runs are not all failures; no alert will be created.');
+              return;
+            }
+
+            // Avoid duplicate alerts: check for an open issue with the same title
+            const issueTitle = `Image monitor failing (${threshold} consecutive failures)`;
+            const { data: openIssues } = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'monitor-failure' });
+            if (openIssues.find(i => i.title === issueTitle)) {
+              core.info('An open alert already exists; skipping issue creation.');
+              return;
+            }
+
+            // Build issue body with links to recent runs
+            const latestRun = context.payload.workflow_run;
+            const bodyLines = [];
+            bodyLines.push(`The Image monitor workflow has failed ${threshold} times in a row.`);
+            bodyLines.push('');
+            bodyLines.push(`Latest run: ${latestRun.html_url}`);
+            bodyLines.push('');
+            bodyLines.push('Recent runs:');
+            for (const r of top) {
+              bodyLines.push(`- ${r.html_url} — ${r.conclusion}`);
+            }
+            bodyLines.push('');
+            bodyLines.push('Please investigate the publish pipeline or registry availability.');
+
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title: issueTitle,
+              body: bodyLines.join('\n'),
+              labels: ['monitor-failure']
+            });
+
+            core.info('Created alert issue.');
