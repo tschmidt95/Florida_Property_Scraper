@@ -48,7 +48,7 @@ jobs:
           echo "PROVIDER=$PROVIDER" >> $GITHUB_ENV
           echo "WEBHOOK_URL=${{ secrets.ALERT_WEBHOOK_URL }}" >> $GITHUB_ENV
 
-      - name: "Optional: send test payload to ALERT_WEBHOOK_URL_TEST"
+      - name: 'Optional: send test payload to ALERT_WEBHOOK_URL_TEST'
         if: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}
         run: |
           set -euo pipefail

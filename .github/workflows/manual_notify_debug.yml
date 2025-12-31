@@ -65,9 +65,8 @@ jobs:
           head -c 400 "$RESP_FILE" || true
 
       - name: Upload test response
-          if: always()
-          uses: actions/upload-artifact@v4
-          with:
-            name: manual-notify-resp
-            path: /tmp/notify_test_resp_*.txt
-
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-notify-resp
+          path: /tmp/notify_test_resp_*.txt
