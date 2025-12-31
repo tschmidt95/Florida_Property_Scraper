@@ -1,0 +1,27 @@
+name: Issues event debug
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  dump-event:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print event env
+        run: |
+          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
+          echo "EVENT_PATH=$GITHUB_EVENT_PATH"
+          echo "Repository: $GITHUB_REPOSITORY"
+
+      - name: Save event payload
+        run: |
+          mkdir -p /tmp/event
+          cat "$GITHUB_EVENT_PATH" > /tmp/event/payload.json
+          echo "Saved payload to /tmp/event/payload.json"
+
+      - name: Upload event payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: issues-event-payload
+          path: /tmp/event/payload.json
