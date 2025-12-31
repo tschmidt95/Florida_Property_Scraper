@@ -1,0 +1,66 @@
+name: Notify runner debug (e2e)
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  secrets: read
+
+jobs:
+  notify-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print context
+        run: |
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Issue: ${{ github.event.issue.html_url }}"
+
+      - name: Prepare payloads and send test to ALERT_WEBHOOK_URL_TEST
+        if: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}
+        run: |
+          set -euo pipefail
+          TEST_URL='${{ secrets.ALERT_WEBHOOK_URL_TEST }}'
+          ISSUE_URL='${{ github.event.issue.html_url }}'
+          ISSUE_TITLE='${{ github.event.issue.title }}'
+          ISSUE_BODY_RAW='${{ github.event.issue.body }}'
+          payload=$(jq -n --arg repo "${GITHUB_REPOSITORY}" --arg issue "$ISSUE_URL" --arg title "$ISSUE_TITLE" --arg body "$ISSUE_BODY_RAW" '{test: true, repo: $repo, issue: $issue, title: $title, body: $body}')
+          RESP_FILE="/tmp/notify_test_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || true)
+          echo "Test HTTP status: $STATUS_CODE"
+          head -c 400 "$RESP_FILE" || true
+
+      - name: Build provider payload and send to ALERT_WEBHOOK_URL
+        run: |
+          set -euo pipefail
+          WEBHOOK_URL='${{ secrets.ALERT_WEBHOOK_URL }}'
+          PROVIDER='${{ secrets.ALERT_PROVIDER }}'
+          if [ -z "$PROVIDER" ]; then PROVIDER=slack; fi
+          ISSUE_URL='${{ github.event.issue.html_url }}'
+          ISSUE_TITLE='${{ github.event.issue.title }}'
+          ISSUE_BODY_RAW='${{ github.event.issue.body }}'
+
+          if [ "$PROVIDER" = "slack" ]; then
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" --arg repo "${GITHUB_REPOSITORY}" '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | fromjson? // $body_raw))}}, {type: "section", fields: [{type: "mrkdwn", text: ("*Repo:* " + $repo)}, {type: "mrkdwn", text: ("*Issue:* <" + $url + "|" + $title + ">")}]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]}] }')
+          elif [ "$PROVIDER" = "teams" ]; then
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" '{title: $title, text: ($body_raw | fromjson? // $body_raw), potentialAction: [{"@type": "OpenUri", name: "View issue", targets: [{os: "default", uri: $url}]}]}')
+          else
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY_RAW" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: ($body | fromjson? // $body)}')
+          fi
+
+          RESP_FILE="/tmp/notify_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || true)
+          echo "Webhook HTTP status: $STATUS_CODE"
+          head -c 500 "$RESP_FILE" || true
+
+      - name: Upload responses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notify-e2e-responses
+          path: |
+            /tmp/notify_test_resp_*.txt
+            /tmp/notify_resp_*.txt
+
+      - name: Done
+        run: echo "Notify E2E finished"
