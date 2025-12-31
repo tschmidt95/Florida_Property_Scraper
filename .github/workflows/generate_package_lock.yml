@@ -19,7 +19,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          # Pin Node to a specific patch version for reproducible CI
+          node-version: '18.20.8'
 
       - name: Install package-lock only
         run: npm install --package-lock-only --no-audit --no-fund
