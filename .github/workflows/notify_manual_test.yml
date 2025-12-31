@@ -1,4 +1,5 @@
 name: Manual notify test
+# NOTE: minor whitespace-only edit to refresh workflow registration (safe)
 
 on:
   workflow_dispatch:
