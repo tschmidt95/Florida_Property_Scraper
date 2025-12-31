@@ -28,8 +28,6 @@ jobs:
 
       - name: Determine provider and webhook
         run: |
-      - name: Determine provider and webhook
-        run: |
           # Use ALERT_PROVIDER secret to select payload format (slack|teams|generic). Default to slack.
           PROVIDER="${{ secrets.ALERT_PROVIDER }}"
           if [ -z "$PROVIDER" ]; then
