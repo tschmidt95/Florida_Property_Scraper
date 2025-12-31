@@ -1,0 +1,8 @@
+{
+  "name": "florida-property-scraper-ci",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "ajv-cli": "5.0.0"
+  }
+}
