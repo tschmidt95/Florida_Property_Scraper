@@ -9,29 +9,23 @@ on:
 
 permissions:
   issues: read
-  secrets: read
 
 jobs:
   run-notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Fetch issue data
-        id: issue
+      - name: "Guard: only run for issues labeled 'monitor-failure' or workflow_dispatch"
         run: |
-          ISSUE_NUMBER=${{ github.event.inputs.issue_number }}
-          echo "Fetching issue $ISSUE_NUMBER"
-          gh api repos/${{ github.repository }}/issues/$ISSUE_NUMBER --jq '. | {html_url: .html_url, title: .title, body: .body}' > /tmp/issue.json
-          cat /tmp/issue.json
-          echo "ISSUE_HTML=$(jq -r .html_url /tmp/issue.json)" >> $GITHUB_ENV
-          echo "ISSUE_TITLE=$(jq -r .title /tmp/issue.json)" >> $GITHUB_ENV
-          ISSUE_BODY=$(jq -r .body /tmp/issue.json)
-          # Preserve raw body separately
-          echo "ISSUE_BODY_RAW<<EOF" >> $GITHUB_ENV
-          echo "$ISSUE_BODY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
+            if ! jq -r '.issue.labels[]?.name' "$GITHUB_EVENT_PATH" | grep -qx 'monitor-failure'; then
+              echo "Not a monitor-failure issue; skipping."
+              exit 0
+            fi
+          elif [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "Not an issues or workflow_dispatch event; skipping."
+            exit 0
+          fi
+
 
       - name: Determine provider and webhook
         run: |

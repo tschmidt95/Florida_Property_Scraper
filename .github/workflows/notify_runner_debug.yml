@@ -4,13 +4,21 @@ on:
   issues:
     types: [opened, labeled]
 
-permissions:
-  secrets: read
-
 jobs:
   notify-e2e:
     runs-on: ubuntu-latest
     steps:
+      - name: "Guard: only run for issues labeled 'monitor-failure' or workflow_dispatch"
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
+            if ! jq -r '.issue.labels[]?.name' "$GITHUB_EVENT_PATH" | grep -qx 'monitor-failure'; then
+              echo "Not a monitor-failure issue; skipping."
+              exit 0
+            fi
+          elif [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "Not an issues or workflow_dispatch event; skipping."
+            exit 0
+          fi
       - name: Print context
         run: |
           echo "Event: $GITHUB_EVENT_NAME"
