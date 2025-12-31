@@ -1,6 +1,7 @@
 name: Notify on monitor-failure (v2)
 
 on:
+  push: {}
   issues:
     types: [opened, labeled]
   workflow_dispatch:

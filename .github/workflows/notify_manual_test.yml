@@ -1,6 +1,7 @@
 name: Manual notify test
 
 on:
+  push: {}
   workflow_dispatch:
     inputs:
       issue_number:
@@ -14,7 +15,7 @@ jobs:
   run-notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Guard: only run for issues labeled 'monitor-failure' or workflow_dispatch
+      - name: "Guard: only run for issues labeled 'monitor-failure' or workflow_dispatch"
         run: |
           if [ "$GITHUB_EVENT_NAME" = "issues" ]; then
             if ! jq -r '.issue.labels[]?.name' "$GITHUB_EVENT_PATH" | grep -qx 'monitor-failure'; then
