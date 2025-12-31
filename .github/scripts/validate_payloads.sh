@@ -27,10 +27,7 @@ jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg bod
 
 npx --yes ajv-cli validate -s .github/schemas/teams_payload.json -d "$teams_file" || (echo "Teams payload failed schema validation"; cat "$teams_file"; exit 1)
 
-# Intentionally fail to test PR-check: validate an empty payload against the generic schema (should fail)
-echo "Running intentional failing validation to prove PR-check blocks malformed payloads"
-echo '{}' > /tmp/bad_generic.json
-npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d /tmp/bad_generic.json || (echo "Intentional failure: bad generic payload did not validate (expected)"; exit 1)
+# (Removed intentional failing check) - CI will validate real payloads; unit tests cover negative cases.
 
 echo "Validating teams payload..."
 teams=$(jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" '{title: $title, text: $body_raw, potentialAction: [{"@type": "OpenUri", name: "View issue", targets: [{os: "default", uri: $url}]}]}')
