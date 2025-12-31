@@ -1,7 +1,6 @@
 name: Notify runner debug (e2e)
 
 on:
-  push: {}
   issues:
     types: [opened, labeled]
 

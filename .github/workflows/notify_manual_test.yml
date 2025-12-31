@@ -1,7 +1,6 @@
 name: Manual notify test
 
 on:
-  push: {}
   workflow_dispatch:
     inputs:
       issue_number:
