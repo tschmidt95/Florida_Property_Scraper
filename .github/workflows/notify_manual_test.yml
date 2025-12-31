@@ -1,0 +1,93 @@
+name: Manual notify test
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to use for the test'
+        required: true
+
+permissions:
+  issues: read
+  secrets: read
+
+jobs:
+  run-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch issue data
+        id: issue
+        run: |
+          ISSUE_NUMBER=${{ github.event.inputs.issue_number }}
+          echo "Fetching issue $ISSUE_NUMBER"
+          gh api repos/${{ github.repository }}/issues/$ISSUE_NUMBER --jq '. | {html_url: .html_url, title: .title, body: .body}' > /tmp/issue.json
+          cat /tmp/issue.json
+          echo "ISSUE_HTML=$(jq -r .html_url /tmp/issue.json)" >> $GITHUB_ENV
+          echo "ISSUE_TITLE=$(jq -r .title /tmp/issue.json)" >> $GITHUB_ENV
+          ISSUE_BODY=$(jq -r .body /tmp/issue.json)
+          # Preserve raw body separately
+          echo "ISSUE_BODY_RAW<<EOF" >> $GITHUB_ENV
+          echo "$ISSUE_BODY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Determine provider and webhook
+        run: |
+          PROVIDER="${{ secrets.ALERT_PROVIDER }}"
+          if [ -z "$PROVIDER" ]; then
+            PROVIDER=slack
+          fi
+
+          if [ -z "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            echo "No ALERT_WEBHOOK_URL is configured. Exiting (set the secret to enable notifications)."
+            exit 0
+          fi
+
+          echo "PROVIDER=$PROVIDER" >> $GITHUB_ENV
+          echo "WEBHOOK_URL=${{ secrets.ALERT_WEBHOOK_URL }}" >> $GITHUB_ENV
+
+      - name: Optional: send test payload to ALERT_WEBHOOK_URL_TEST
+        if: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}
+        run: |
+          set -euo pipefail
+          TEST_URL='${{ secrets.ALERT_WEBHOOK_URL_TEST }}'
+          echo 'Sending test payload to ALERT_WEBHOOK_URL_TEST...'
+          payload=$(jq -n --arg repo "${{ github.repository }}" --arg issue "${ISSUE_HTML}" '{test: true, repo: $repo, issue: $issue, note: "Test alert from manual notify"}')
+          RESP_FILE="/tmp/notify_test_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$TEST_URL" || true)
+          echo "Test webhook response status: $STATUS_CODE"
+          echo "Test response body (first 500 chars):"
+          head -c 500 "$RESP_FILE" || true
+
+      - name: Build and send notification payload
+        run: |
+          set -euo pipefail
+          PROVIDER="$PROVIDER"
+          WEBHOOK_URL="$WEBHOOK_URL"
+
+          ISSUE_URL="$ISSUE_HTML"
+          ISSUE_TITLE="$ISSUE_TITLE"
+          ISSUE_BODY_RAW="$ISSUE_BODY_RAW"
+          ISSUE_BODY=$(jq -Rs . <<< "$ISSUE_BODY_RAW")
+
+          echo "Sending notification using provider: $PROVIDER"
+
+          if [ "$PROVIDER" = "slack" ]; then
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" \
+              '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | fromjson? // $body_raw))}}, {type: "section", fields: [{type: "mrkdwn", text: "*Repo:* '" + "'${GITHUB_REPOSITORY}'" + "'"}, {type: "mrkdwn", text: "*Issue:* <" + $url + "|" + $title + ">"}]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]}] }')
+          elif [ "$PROVIDER" = "teams" ]; then
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body_raw "$ISSUE_BODY_RAW" '{title: $title, text: ($body_raw | fromjson? // $body_raw), potentialAction: [{"@type": "OpenUri", name: "View issue", targets: [{os: "default", uri: $url}]}]}')
+          else
+            payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: ($body | fromjson? // $body)}')
+          fi
+
+          RESP_FILE="/tmp/notify_resp_$$.txt"
+          STATUS_CODE=$(curl -sS -w "%{http_code}" -o "$RESP_FILE" -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" || true)
+          echo "Webhook response status: $STATUS_CODE"
+          echo "Response body (first 500 chars):"
+          head -c 500 "$RESP_FILE" || true
+
+      - name: Done
+        run: echo "Manual notify test executed."
