@@ -22,4 +22,12 @@ A daily scheduled job runs at 02:00 UTC and checks `ghcr.io/tschmidt95/florida-s
 
 If the scheduled monitor fails repeatedly (default threshold: 3 consecutive failures), an automatic GitHub Issue will be created (label `monitor-failure`) to notify maintainers and centralize triage.
 
+### Optional: External notifications (template)
+
+We provide a **template** workflow that can send an external notification (Slack, Microsoft Teams, webhook endpoints) when an issue labeled `monitor-failure` is opened.
+
+- File: `.github/workflows/notify_placeholder.yml`
+- How to enable: add a repository secret named `ALERT_WEBHOOK_URL` with your webhook URL (Slack, Teams, or custom). The workflow uses a simple POST payload; you may need to adjust the payload format depending on your destination.
+- Notes: the template is intentionally non-invasive (it exits if `ALERT_WEBHOOK_URL` is not configured). When you add the secret, the workflow will start posting notifications on new `monitor-failure` issues.
+
 ---
