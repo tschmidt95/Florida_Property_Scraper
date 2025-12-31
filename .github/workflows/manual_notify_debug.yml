@@ -13,8 +13,6 @@ on:
         description: 'Issue body to use for the test'
         required: false
 
-permissions:
-  secrets: read
 
 jobs:
   debug:
