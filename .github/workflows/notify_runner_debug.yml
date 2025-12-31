@@ -25,10 +25,14 @@ jobs:
           echo "Issue: ${{ github.event.issue.html_url }}"
 
       - name: Prepare payloads and send test to ALERT_WEBHOOK_URL_TEST
-        if: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}
         run: |
           set -euo pipefail
           TEST_URL='${{ secrets.ALERT_WEBHOOK_URL_TEST }}'
+          if [ -z "$TEST_URL" ]; then
+            echo "ALERT_WEBHOOK_URL_TEST not set; skipping optional test payload."
+            exit 0
+          fi
+
           ISSUE_URL='${{ github.event.issue.html_url }}'
           ISSUE_TITLE='${{ github.event.issue.title }}'
           ISSUE_BODY_RAW='${{ github.event.issue.body }}'

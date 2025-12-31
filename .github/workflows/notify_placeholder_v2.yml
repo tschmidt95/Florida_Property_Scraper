@@ -43,10 +43,14 @@ jobs:
           echo "WEBHOOK_URL=${{ secrets.ALERT_WEBHOOK_URL }}" >> $GITHUB_ENV
 
       - name: "Optional: send test payload to ALERT_WEBHOOK_URL_TEST"
-        if: ${{ secrets.ALERT_WEBHOOK_URL_TEST != '' }}
         run: |
           set -euo pipefail
           TEST_URL='${{ secrets.ALERT_WEBHOOK_URL_TEST }}'
+          if [ -z "$TEST_URL" ]; then
+            echo "ALERT_WEBHOOK_URL_TEST not set; skipping optional test payload."
+            exit 0
+          fi
+
           echo 'Sending test payload to ALERT_WEBHOOK_URL_TEST...'
           payload=$(jq -n --arg repo "${{ github.repository }}" --arg issue "${{ github.event.issue.html_url || github.event.inputs.issue_url }}" '{test: true, repo: $repo, issue: $issue, note: "Test alert from notify template"}')
           RESP_FILE="/tmp/notify_test_resp_$$.txt"
