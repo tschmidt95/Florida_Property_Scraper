@@ -2,14 +2,36 @@
 set -euo pipefail
 
 echo "Validating generic payload..."
-generic=$(jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body "Test body" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: $body}')
-# Ensure required keys exist
-echo "$generic" | jq -e 'has("alert_type") and has("title") and has("url") and has("body")' >/dev/null || { echo "Generic payload missing required fields"; echo "$generic"; exit 1; }
+generic_file=/tmp/generic_payload.json
+jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body "Test body" '{alert_type: "image_monitor_failure", title: $title, url: $url, body: $body}' > "$generic_file"
+
+# Validate against JSON Schema using ajv (npx)
+echo "Validating generic payload against schema..."
+npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
 
 echo "Validating slack payload..."
-slack=$(jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" --arg repo "owner/repo" '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | tostring))}}, {type: "section", fields: [{type: "mrkdwn", text: ("*Repo:* " + $repo)}, {type: "mrkdwn", text: ("*Issue:* <" + $url + "|" + $title + ">")} ]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]} ] }')
-# Check that blocks array exists and first block has a section
-echo "$slack" | jq -e '.blocks and (.blocks | length) > 0 and .blocks[0].type == "section"' >/dev/null || { echo "Slack payload invalid"; echo "$slack"; exit 1; }
+slack_file=/tmp/slack_payload.json
+jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" --arg repo "owner/repo" '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | tostring))}}, {type: "section", fields: [{type: "mrkdwn", text: ("*Repo:* " + $repo)}, {type: "mrkdwn", text: ("*Issue:* <" + $url + "|" + $title + ">")} ]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]} ] }' > "$slack_file"
+
+# Validate against schema
+npx --yes ajv-cli validate -s .github/schemas/slack_payload.json -d "$slack_file" || (echo "Slack payload failed schema validation"; cat "$slack_file"; exit 1)
+
+echo "Validating generic payload..."
+generic_file=/tmp/generic_payload.json
+jq -n --arg repo "owner/repo" --arg issue "https://example.com/issue/1" --arg note "Test alert" '{test: true, repo: $repo, issue: $issue, note: $note}' > "$generic_file"
+npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
+
+# Validate Teams payload
+echo "Validating teams payload..."
+teams_file=/tmp/teams_payload.json
+jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" --arg repo "owner/repo" '{"@type": "MessageCard", "@context": "https://schema.org/extensions", "themeColor": "0078D7", "summary": $title, "sections": [{"activityTitle": $title, "activitySubtitle": $repo, "text": $body_raw}, {"potentialAction": [{"@type": "OpenUri", "name": "View issue", "targets": [{"os": "default", "uri": $url}]}]}]}' > "$teams_file"
+
+npx --yes ajv-cli validate -s .github/schemas/teams_payload.json -d "$teams_file" || (echo "Teams payload failed schema validation"; cat "$teams_file"; exit 1)
+
+# Intentionally fail to test PR-check: validate an empty payload against the generic schema (should fail)
+echo "Running intentional failing validation to prove PR-check blocks malformed payloads"
+echo '{}' > /tmp/bad_generic.json
+npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d /tmp/bad_generic.json || (echo "Intentional failure: bad generic payload did not validate (expected)"; exit 1)
 
 echo "Validating teams payload..."
 teams=$(jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" '{title: $title, text: $body_raw, potentialAction: [{"@type": "OpenUri", name: "View issue", targets: [{os: "default", uri: $url}]}]}')
