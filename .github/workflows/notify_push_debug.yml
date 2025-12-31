@@ -1,0 +1,25 @@
+name: Notify push debug (temp)
+
+on:
+  push: {}
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print event info
+        run: |
+          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Ref: $GITHUB_REF"
+          echo "SHA: $GITHUB_SHA"
+      - name: Dump event payload
+        if: ${{ always() }}
+        run: |
+          if [ -f "$GITHUB_EVENT_PATH" ]; then
+            echo "Event payload:" 
+            head -n 200 "$GITHUB_EVENT_PATH" || true
+          else
+            echo "No event payload available"
+          fi
