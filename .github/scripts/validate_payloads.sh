@@ -7,26 +7,26 @@ jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg bod
 
 # Validate against JSON Schema using ajv (npx)
 echo "Validating generic payload against schema..."
-npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" --all-formats || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
+npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
 
 echo "Validating slack payload..."
 slack_file=/tmp/slack_payload.json
 jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" --arg repo "owner/repo" '{blocks: [ {type: "section", text: {type: "mrkdwn", text: (":rotating_light: *" + $title + "*\n" + ($body_raw | tostring))}}, {type: "section", fields: [{type: "mrkdwn", text: ("*Repo:* " + $repo)}, {type: "mrkdwn", text: ("*Issue:* <" + $url + "|" + $title + ">")} ]}, {type: "actions", elements: [{type: "button", text: {type: "plain_text", text: "View issue"}, url: $url}]} ] }' > "$slack_file"
 
 # Validate against schema
-npx --yes ajv-cli validate -s .github/schemas/slack_payload.json -d "$slack_file" --all-formats || (echo "Slack payload failed schema validation"; cat "$slack_file"; exit 1)
+npx --yes ajv-cli validate -s .github/schemas/slack_payload.json -d "$slack_file" || (echo "Slack payload failed schema validation"; cat "$slack_file"; exit 1)
 
 echo "Validating generic payload..."
 generic_file=/tmp/generic_payload.json
 jq -n --arg repo "owner/repo" --arg issue "https://example.com/issue/1" --arg note "Test alert" '{test: true, repo: $repo, issue: $issue, note: $note}' > "$generic_file"
-npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" --all-formats || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
+npx --yes ajv-cli validate -s .github/schemas/generic_payload.json -d "$generic_file" || (echo "Generic payload failed schema validation"; cat "$generic_file"; exit 1)
 
 # Validate Teams payload
 echo "Validating teams payload..."
 teams_file=/tmp/teams_payload.json
 jq -n --arg title "Test title" --arg url "https://example.com/issue/1" --arg body_raw "Test body" --arg repo "owner/repo" '{"@type": "MessageCard", "@context": "https://schema.org/extensions", "themeColor": "0078D7", "summary": $title, "sections": [{"activityTitle": $title, "activitySubtitle": $repo, "text": $body_raw}, {"potentialAction": [{"@type": "OpenUri", "name": "View issue", "targets": [{"os": "default", "uri": $url}]}]}]}' > "$teams_file"
 
-npx --yes ajv-cli validate -s .github/schemas/teams_payload.json -d "$teams_file" --all-formats --all-formats || (echo "Teams payload failed schema validation"; cat "$teams_file"; exit 1)
+npx --yes ajv-cli validate -s .github/schemas/teams_payload.json -d "$teams_file" || (echo "Teams payload failed schema validation"; cat "$teams_file"; exit 1)
 
 # Intentionally fail to test PR-check: validate an empty payload against the generic schema (should fail)
 echo "Running intentional failing validation to prove PR-check blocks malformed payloads"
