@@ -3,6 +3,7 @@ name: Notify on monitor-failure (template)
 on:
   issues:
     types: [opened, labeled]
+  workflow_dispatch:
 
 permissions:
   issues: read
@@ -11,7 +12,7 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'monitor-failure') }}
+    if: ${{ (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'monitor-failure')) || github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Determine provider and webhook
         run: |
