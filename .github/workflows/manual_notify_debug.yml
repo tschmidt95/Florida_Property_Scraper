@@ -64,7 +64,7 @@ jobs:
           echo "Response body (first 400 chars):"
           head -c 400 "$RESP_FILE" || true
 
-        - name: Upload test response
+      - name: Upload test response
           if: always()
           uses: actions/upload-artifact@v4
           with:
