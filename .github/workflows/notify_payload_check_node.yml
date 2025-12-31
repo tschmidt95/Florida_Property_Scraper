@@ -18,7 +18,7 @@ jobs:
 
       - name: Install ajv-cli (pinned)
         # Pin ajv-cli to a specific version for reproducible CI
-        run: npm install -g ajv-cli@5.1.0
+        run: npm install -g ajv-cli@5.0.0
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
