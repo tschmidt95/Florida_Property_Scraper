@@ -1,0 +1,45 @@
+name: Notify on monitor-failure (template)
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  issues: read
+  secrets: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.issue.labels.*.name, 'monitor-failure')
+    steps:
+      - name: Show placeholder notice
+        run: |
+          echo "This workflow is a template. It will send notifications to the destination defined in the ALERT_WEBHOOK_URL secret when enabled."
+
+      - name: Fail early if no webhook configured (no-op placeholder)
+        run: |
+          if [ -z "${{ secrets.ALERT_WEBHOOK_URL }}" ]; then
+            echo "No ALERT_WEBHOOK_URL is configured. This is a template placeholder; add the secret to enable notifications."
+            exit 0
+          fi
+
+      - name: Send notification to webhook (example)
+        if: ${{ secrets.ALERT_WEBHOOK_URL != '' }}
+        env:
+          ALERT_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          ISSUE_URL="${{ github.event.issue.html_url }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(jq -Rs . <<< "${{ github.event.issue.body }}")
+
+          # Example payload for Slack incoming webhook; adjust as needed for your destination.
+          payload=$(jq -n --arg title "$ISSUE_TITLE" --arg url "$ISSUE_URL" --arg body "$ISSUE_BODY" '{text: ("[ALERT] " + $title + "\n" + $url + "\n" + ($body | fromjson? // $body)) }')
+
+          echo "Sending notification to webhook..."
+          curl -sS -X POST -H 'Content-Type: application/json' -d "$payload" "$ALERT_URL" || true
+          echo "Notification step completed (response ignored)."
+
+      - name: Done
+        run: echo "Notification placeholder workflow executed."
