@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Teams message card",
+  "type": "object",
+  "required": ["title","text"],
+  "properties": {
+    "title": {"type": "string"},
+    "text": {"type": ["string","object"]},
+    "potentialAction": {"type": "array"}
+  },
+  "additionalProperties": true
+}
