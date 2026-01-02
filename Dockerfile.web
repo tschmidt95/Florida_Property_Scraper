@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Copy repository
+COPY . /app
+
+# Install package and Flask
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir -e . \
+    && python -m pip install --no-cache-dir flask
+
+EXPOSE 5000
+
+CMD ["python", "web_app.py"]

@@ -6,6 +6,8 @@ from .scraper import FloridaPropertyScraper
 def main():
     parser = argparse.ArgumentParser(description="Florida property scraper CLI")
     parser.add_argument("--query", help="Owner name or address to search", required=False)
+    parser.add_argument("--name", help="Owner name (paired with --address)", required=False)
+    parser.add_argument("--address", help="Owner address (paired with --name)", required=False)
     parser.add_argument("--api-key", help="ScrapingBee API key (overrides SCRAPINGBEE_API_KEY env var)", required=False)
     parser.add_argument("--timeout", type=int, default=10, help="Request timeout in seconds")
     parser.add_argument("--no-stop", dest="stop_after_first", action="store_false", help="Search all counties instead of stopping after first result")
@@ -32,7 +34,7 @@ def main():
             query = input("Enter owner name or address to search: ")
 
     api_key = args.api_key or os.environ.get("SCRAPINGBEE_API_KEY")
-    scraper = FloridaPropertyScraper(scrapingbee_api_key=api_key, timeout=args.timeout, stop_after_first=args.stop_after_first, log_level=args.log_level, demo=args.demo)
+    scraper = FloridaPropertyScraper(scrapingbee_api_key=api_key, timeout=args.timeout, stop_after_first=args.stop_after_first, log_level=args.log_level, demo=args.demo, backend=args.backend)
     results = scraper.search_all_counties(query)
     print(f"Found {len(results)} properties:")
     for i, result in enumerate(results):

@@ -1,2 +1,2 @@
 requests
-scrapingbee
+scrapingbeescrapy==2.13.3

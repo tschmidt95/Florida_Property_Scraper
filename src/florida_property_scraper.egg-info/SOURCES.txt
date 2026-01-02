@@ -1,0 +1,16 @@
+LICENSE
+README.md
+setup.py
+src/florida_property_scraper/__init__.py
+src/florida_property_scraper/__main__.py
+src/florida_property_scraper/scraper.py
+src/florida_property_scraper.egg-info/PKG-INFO
+src/florida_property_scraper.egg-info/SOURCES.txt
+src/florida_property_scraper.egg-info/dependency_links.txt
+src/florida_property_scraper.egg-info/entry_points.txt
+src/florida_property_scraper.egg-info/requires.txt
+src/florida_property_scraper.egg-info/top_level.txt
+tests/test_backends.py
+tests/test_payload_validation.py
+tests/test_schema_files.py
+tests/test_smoke.py

@@ -1,0 +1,2 @@
+[console_scripts]
+florida_property_scraper = florida_property_scraper.__main__:main
