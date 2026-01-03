@@ -57,14 +57,37 @@ class ScrapyAdapter:
 
         # Build start_urls from kwargs if provided (adapter will be extended later)
         start_urls = kwargs.get("start_urls")
+        spider_name = kwargs.get("spider_name")
         if not start_urls:
             # Nothing to crawl yet
             return []
 
-        process = CrawlerProcess(settings={})
-        process.crawl(GenericSpider, start_urls=start_urls)
-        process.start()  # blocking
+        # Collect items via signals
+        items = []
+        def collect_item(item, response, spider):
+            # item may be an Item or dict-like
+            items.append(dict(item))
 
-        # Note: extracting items from a CrawlerProcess in-proc requires item pipelines
-        # or signals to capture scraped items; for now the spider is a placeholder.
-        return results
+        try:
+            from scrapy import signals
+            # Use a CrawlerProcess to run spider and collect items
+            process = CrawlerProcess(settings={})
+
+            # Determine spider class: if spider_name provided, import from spiders package
+            if spider_name:
+                try:
+                    module = __import__('florida_property_scraper.backend.spiders.' + spider_name + '_spider', fromlist=['*'])
+                    SpiderCls = getattr(module, ''.join([p.capitalize() for p in spider_name.split('_')]) + 'Spider')
+                except Exception:
+                    SpiderCls = GenericSpider
+            else:
+                SpiderCls = GenericSpider
+
+            crawler = process.create_crawler(SpiderCls)
+            crawler.signals.connect(collect_item, signals.item_scraped)
+            process.crawl(crawler, start_urls=start_urls)
+            process.start()  # blocking
+        except Exception:  # pragma: no cover - errors when Scrapy isn't available or spider fails
+            return []
+
+        return items
