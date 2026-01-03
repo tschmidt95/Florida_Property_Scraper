@@ -1,6 +1,7 @@
 import os
 import pytest
 
+
 @pytest.mark.integration
 def test_integration_placeholder():
     """Placeholder integration test that verifies secret is present.
