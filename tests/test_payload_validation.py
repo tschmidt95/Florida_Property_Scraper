@@ -107,7 +107,11 @@ def test_generic_invalid_cases(payload):
     {},  # missing blocks
     {"blocks": []},  # minItems=1
     {"blocks": "not an array"},  # wrong type
-    {"blocks": [{"text": {"type": "mrkdwn", "text": "t"}}]},  # item missing required 'type'
+    {
+        "blocks": [
+            {"text": {"type": "mrkdwn", "text": "t"}},
+        ],
+    },  # item missing required 'type'
     {"blocks": [{"type": 123}]},  # type wrong type
 ])
 def test_slack_invalid_cases(payload):
