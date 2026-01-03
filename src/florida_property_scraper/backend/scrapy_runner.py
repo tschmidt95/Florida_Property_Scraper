@@ -61,23 +61,23 @@ def main():
         },
     }
 
-    SpiderCls = SPIDERS.get(args.spider_name)
-    if not SpiderCls:
+    # Normalize spider name: allow either 'alachua' or 'alachua_spider'
+    spider_key = args.spider_name
+    normalized = spider_key[:-7] if spider_key.endswith("_spider") else spider_key
+
+    SpiderCls = SPIDERS.get(spider_key) or SPIDERS.get(normalized)
     if not SpiderCls:
         try:
             module_name = (
                 "florida_property_scraper.backend.spiders."
-                f"{args.spider_name}_spider"
+                f"{normalized}_spider"
             )
             module = __import__(module_name, fromlist=['*'])
             class_name = (
-                "".join(p.capitalize() for p in args.spider_name.split("_"))
+                "".join(p.capitalize() for p in normalized.split("_"))
                 + "Spider"
             )
             SpiderCls = getattr(module, class_name)
-        except Exception as exc:
-            print(json.dumps({'error': str(exc)}))
-            sys.exit(1)
         except Exception as exc:
             print(json.dumps({'error': str(exc)}))
             sys.exit(1)
