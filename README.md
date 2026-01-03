@@ -3,6 +3,32 @@ Scan properties and look up owner information in Florida
 
 ---
 
+## Getting started (local)
+
+- Create and activate a virtual environment:
+
+  python -m venv .venv
+  source .venv/bin/activate
+
+- Install the package and test deps:
+
+  python -m pip install --upgrade pip setuptools wheel
+  python -m pip install -e .[test]
+
+- Run smoke tests:
+
+  python -m pytest -q tests/test_smoke.py
+
+- Run the Flask demo app (after installing Flask):
+
+  python web_app.py  # open http://localhost:5000 and enable Demo mode
+
+- Run the Scrapy runner against a local fixture:
+
+  python -m florida_property_scraper.backend.scrapy_runner --spider-name broward_spider --start-urls '["file:///absolute/path/to/tests/fixtures/broward_sample.html"]'
+
+---
+
 ## Post-publish smoke check (automated)
 
 We run a post-publish smoke check after a release is published that pulls the published GHCR image and performs a minimal import test to ensure the package is present and importable.
