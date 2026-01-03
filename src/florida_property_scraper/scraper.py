@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class FloridaPropertyScraper:
-class FloridaPropertyScraper:
     def __init__(
         self,
         scrapingbee_api_key: Optional[str] = None,
