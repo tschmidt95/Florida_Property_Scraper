@@ -75,11 +75,19 @@ class ScrapyAdapter:
 
             # Determine spider class: if spider_name provided, import from spiders package
             if spider_name:
+                # Prefer explicit registry for safety
                 try:
-                    module = __import__('florida_property_scraper.backend.spiders.' + spider_name + '_spider', fromlist=['*'])
-                    SpiderCls = getattr(module, ''.join([p.capitalize() for p in spider_name.split('_')]) + 'Spider')
+                    from .spiders import SPIDERS
+                    SpiderCls = SPIDERS.get(spider_name)
                 except Exception:
-                    SpiderCls = GenericSpider
+                    SpiderCls = None
+
+                if not SpiderCls:
+                    try:
+                        module = __import__('florida_property_scraper.backend.spiders.' + spider_name + '_spider', fromlist=['*'])
+                        SpiderCls = getattr(module, ''.join([p.capitalize() for p in spider_name.split('_')]) + 'Spider')
+                    except Exception:
+                        SpiderCls = GenericSpider
             else:
                 SpiderCls = GenericSpider
 
