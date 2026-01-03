@@ -16,10 +16,13 @@ HTML = """
   <div style="margin-top:8px">or</div>
   <div style="margin-top:8px">
     <input name="query" style="width:620px" placeholder="Owner name or address (single-field query)" value="{{query|default('')}}" />
+    </div>
+  <div style="margin-top:8px">
+    <label><input type="checkbox" name="demo" {% if demo %}checked{% endif %}/> Demo mode (no network)</label>
+  </div>
   </div>
   <button type="submit" style="margin-top:8px">Run</button>
-</form>
-<pre style="margin-top:16px; padding:12px; background:#f6f6f6; border:1px solid #ddd;">{{output|default('')}}</pre>
+</form>  <div style="margin-top:8px; color:#c33;">{% if demo %}Running in <strong>DEMO</strong> mode — results are canned and no network requests are made.{% endif %}</div><pre style="margin-top:16px; padding:12px; background:#f6f6f6; border:1px solid #ddd;">{{output|default('')}}</pre>
 """
 
 @app.route("/", methods=["GET", "POST"])
