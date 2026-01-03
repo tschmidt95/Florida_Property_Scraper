@@ -108,13 +108,6 @@ class ScrapyAdapter:
                 delay *= 2
 
         # Surface runner outputs to stderr for easier debugging in CI
-        sys.stderr.write(f"Scrapy runner finished with returncode={proc.returncode if proc else 'N/A'}\n")
-        sys.stderr.write(f"Runner STDOUT:\n{last_stdout}\n")
-        if last_stderr:
-            sys.stderr.write(f"Runner STDERR:\n{last_stderr}\n")
-
-        return []
-        # Surface runner outputs to stderr for easier debugging in CI
         rc = proc.returncode if proc else "N/A"
         sys.stderr.write(f"Scrapy runner finished with returncode={rc}\n")
         sys.stderr.write("Runner STDOUT:\n")
