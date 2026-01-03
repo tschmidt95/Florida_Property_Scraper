@@ -1,7 +1,9 @@
 from pathlib import Path
 from scrapy.http import TextResponse
 
-from florida_property_scraper.backend.spiders.broward_spider import BrowardSpider
+from florida_property_scraper.backend.spiders.broward_spider import (
+    BrowardSpider,
+)
 
 
 def test_broward_parse_from_fixture():
