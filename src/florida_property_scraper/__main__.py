@@ -115,8 +115,9 @@ def main():
     print(f"Found {len(results)} properties:")
     for i, result in enumerate(results):
         print(
-            f"{i+1}. {result.get('county', 'Unknown')}: {result.get('owner', 'N/A')} - "
-            f"{result.get('address', 'N/A')} - Value: {result.get('value', 'N/A')}"
+            f"{i+1}. {result.get('county', 'Unknown')}: "
+            f"{result.get('owner', 'N/A')} - {result.get('address', 'N/A')} - "
+            f"Value: {result.get('value', 'N/A')}"
         )
         if "property_id" in result:
             details = scraper.get_detailed_info(
