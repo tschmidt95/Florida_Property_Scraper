@@ -26,7 +26,7 @@ If the scheduled monitor fails repeatedly (default threshold: 3 consecutive fail
 
 We provide a **template** workflow that can send an external notification (Slack, Microsoft Teams, webhook endpoints) when an issue labeled `monitor-failure` is opened.
 
-- File: `.github/workflows/notify_placeholder.yml`
+- File: `.github/workflows/notify_placeholder_v2.yml` (v2 replaces legacy `notify_placeholder.yml`)
 - How to enable: add a repository secret named `ALERT_WEBHOOK_URL` with your webhook URL (Slack, Teams, or custom). If you want to select provider-specific payloads, also add `ALERT_PROVIDER` with one of `slack`, `teams`, or `generic` (defaults to `slack`).
 - Notes: the template is intentionally non-invasive (it exits if `ALERT_WEBHOOK_URL` is not configured). When you add the secret, the workflow will start posting notifications on new `monitor-failure` issues.
 
