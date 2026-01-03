@@ -10,6 +10,7 @@ from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
+
 class FloridaPropertyScraper:
     def __init__(self, scrapingbee_api_key: Optional[str] = None, timeout: int = 10, stop_after_first: bool = True, log_level: Optional[str] = None, demo: bool = False, backend: str = 'scrapy'):
         """Create a scraper.
