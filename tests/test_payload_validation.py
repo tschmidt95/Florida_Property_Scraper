@@ -62,8 +62,8 @@ def test_teams_payload_validates():
 def test_teams_payload_rejects_invalid_shape():
     schema = load_schema("teams_payload.json")
     payload = {"foo": "bar"}
-    # If schema is permissive this may pass; we assert that missing expected keys raises
-    # ValidationError
+    # If schema is permissive this may pass; we assert that missing
+    # expected keys raise ValidationError
     try:
         validate(instance=payload, schema=schema)
     except ValidationError:
