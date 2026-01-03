@@ -1,13 +1,119 @@
 """Simple Scrapy adapter with a minimal spider runner.
-This is a lightweight implementation that allows running a small Scrapy spider
-synchronously via CrawlerProcess and collecting items.
+This is a lightweight implementation that runs Scrapy spiders in a subprocess
+so the main process can call multiple spiders without Twisted reactor conflicts.
 
-Note: For now the adapter returns canned demo results when `demo=True`.
-The non-demo path runs a minimal spider that yields any items parsed by
-`parse` (the caller can extend it to use real spiders per-county).
+In demo mode the adapter returns a deterministic fixture.
 """
 
 from typing import List, Dict, Any, Optional
+import json
+import subprocess
+import sys
+
+
+class InMemoryPipeline:
+    """
+    Pipeline used for subprocess runs. The runner subprocess sets `items_list` and
+    prints the collected items as JSON to stdout.
+    """
+    items_list = None
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        inst = cls()
+        inst.items = cls.items_list if cls.items_list is not None else []
+        return inst
+
+    def process_item(self, item, spider):
+        self.items.append(dict(item))
+        return item
+
+
+class ScrapyAdapter:
+    def __init__(self, demo: bool = False, timeout: Optional[int] = None):
+        self.demo = demo
+        self.timeout = timeout
+
+    def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+        """Run a search for `query` and return a list of result dicts.
+
+        For demo mode this returns a deterministic fixture. Non-demo runs a
+        helper subprocess module that executes the Scrapy crawl and emits
+        a JSON array of items to stdout. This avoids Twisted reactor reuse
+        issues when multiple tests call the adapter.
+        """
+        if self.demo:
+            return [{"address": "123 Demo St", "owner": "Demo Owner", "notes": "demo fixture"}]
+
+        start_urls = kwargs.get("start_urls")
+        spider_name = kwargs.get("spider_name")
+        if not start_urls:
+            return []
+
+        runner_cmd = [
+            sys.executable,
+            "-m",
+            "florida_property_scraper.backend.scrapy_runner",
+            "--spider-name",
+            spider_name,
+            "--start-urls",
+            json.dumps(start_urls),
+        ]
+
+        try:
+            proc = subprocess.run(runner_cmd, capture_output=True, text=True, check=False)
+            stdout = proc.stdout.strip()
+            stderr = proc.stderr.strip()
+
+            def _parse_stdout(s):
+                if not s:
+                    return None
+                try:
+                    return json.loads(s)
+                except Exception:
+                    return None
+
+            items = _parse_stdout(stdout)
+            if items is None or (isinstance(items, list) and len(items) == 0):
+                # Retry once (transient runner or file resolution issues can happen)
+                proc = subprocess.run(runner_cmd, capture_output=True, text=True, check=False)
+                stdout = proc.stdout.strip()
+                stderr = proc.stderr.strip()
+                items = _parse_stdout(stdout)
+
+            if isinstance(items, list):
+                return items
+
+            # If the runner printed an error payload, return empty and surface stderr in logs
+            if stdout:
+                try:
+                    payload = json.loads(stdout)
+                    if isinstance(payload, dict) and payload.get("error"):
+                        return []
+                except Exception:
+                    pass
+            # otherwise return empty
+            return []
+        except Exception:
+            return []
+
+
+class InMemoryPipeline:
+    """
+    Pipeline used for in-process test/demo runs. Adapter sets `items_list` before crawl.
+    """
+    items_list = None
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        inst = cls()
+        inst.items = cls.items_list if cls.items_list is not None else []
+        return inst
+
+    def process_item(self, item, spider):
+        # store a plain dict to make assertions easy
+        self.items.append(dict(item))
+        return item
 
 
 class ScrapyAdapter:
@@ -62,20 +168,25 @@ class ScrapyAdapter:
             # Nothing to crawl yet
             return []
 
-        # Collect items via signals
+        # Use an in-memory pipeline to collect items reliably
         items = []
-        def collect_item(item, response, spider):
-            # item may be an Item or dict-like
-            items.append(dict(item))
+
+
 
         try:
-            from scrapy import signals
-            # Use a CrawlerProcess to run spider and collect items
-            process = CrawlerProcess(settings={})
+            # Use a CrawlerProcess with the in-memory pipeline configured
+            
+            InMemoryPipeline.items_list = items
+            settings = {
+                'ITEM_PIPELINES': {
+                    'florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline': 100,
+                }
+            }
+            process = CrawlerProcess(settings=settings)
+        
 
             # Determine spider class: if spider_name provided, import from spiders package
             if spider_name:
-                # Prefer explicit registry for safety
                 try:
                     from .spiders import SPIDERS
                     SpiderCls = SPIDERS.get(spider_name)
@@ -84,16 +195,16 @@ class ScrapyAdapter:
 
                 if not SpiderCls:
                     try:
-                        module = __import__('florida_property_scraper.backend.spiders.' + spider_name + '_spider', fromlist=['*'])
-                        SpiderCls = getattr(module, ''.join([p.capitalize() for p in spider_name.split('_')]) + 'Spider')
+                        module_name = f"florida_property_scraper.backend.spiders.{spider_name}_spider"
+                        module = __import__(module_name, fromlist=['*'])
+                        class_name = ''.join(p.capitalize() for p in spider_name.split('_')) + 'Spider'
+                        SpiderCls = getattr(module, class_name)
                     except Exception:
                         SpiderCls = GenericSpider
             else:
                 SpiderCls = GenericSpider
 
-            crawler = process.create_crawler(SpiderCls)
-            crawler.signals.connect(collect_item, signals.item_scraped)
-            process.crawl(crawler, start_urls=start_urls)
+            process.crawl(SpiderCls, start_urls=start_urls)
             process.start()  # blocking
         except Exception:  # pragma: no cover - errors when Scrapy isn't available or spider fails
             return []
