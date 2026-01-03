@@ -3,7 +3,7 @@ Name: florida_property_scraper
 Version: 0.1.0
 License-File: LICENSE
 Requires-Dist: requests
-Requires-Dist: scrapingbeescrapy==2.13.3
+Requires-Dist: scrapy==2.13.3
 Provides-Extra: test
 Requires-Dist: pytest; extra == "test"
 Requires-Dist: responses; extra == "test"

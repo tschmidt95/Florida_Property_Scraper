@@ -1,5 +1,5 @@
 requests
-scrapingbeescrapy==2.13.3
+scrapy==2.13.3
 
 [test]
 pytest

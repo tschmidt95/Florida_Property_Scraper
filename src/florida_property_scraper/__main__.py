@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--no-stop", dest="stop_after_first", action="store_false", help="Search all counties instead of stopping after first result")
     parser.add_argument("--log-level", default=None, help="Logging level (DEBUG, INFO, etc.)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode with canned responses (no network)")
+    parser.add_argument("--backend", choices=['scrapy','scrapingbee'], default='scrapy', help="Which scraping backend to use (default: scrapy)")
     args = parser.parse_args()
 
     # Determine query from either --query or --name + --address
@@ -33,7 +34,10 @@ def main():
         else:
             query = input("Enter owner name or address to search: ")
 
-    api_key = args.api_key or os.environ.get("SCRAPINGBEE_API_KEY")
+    if args.backend == 'scrapingbee':
+        api_key = args.api_key or os.environ.get("SCRAPINGBEE_API_KEY")
+    else:
+        api_key = None
     scraper = FloridaPropertyScraper(scrapingbee_api_key=api_key, timeout=args.timeout, stop_after_first=args.stop_after_first, log_level=args.log_level, demo=args.demo, backend=args.backend)
     results = scraper.search_all_counties(query)
     print(f"Found {len(results)} properties:")
