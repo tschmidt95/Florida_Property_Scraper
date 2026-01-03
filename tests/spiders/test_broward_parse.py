@@ -5,9 +5,15 @@ from florida_property_scraper.backend.spiders.broward_spider import BrowardSpide
 
 
 def test_broward_parse_from_fixture():
-    path = Path('tests/fixtures/broward_sample.html').resolve()
+    path = Path(
+        'tests/fixtures/broward_sample.html'
+    ).resolve()
     html = path.read_text()
-    response = TextResponse(url='file://' + str(path), body=html, encoding='utf-8')
+    response = TextResponse(
+        url='file://' + str(path),
+        body=html,
+        encoding='utf-8',
+    )
 
     spider = BrowardSpider()
     items = list(spider.parse(response))
