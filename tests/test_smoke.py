@@ -28,7 +28,9 @@ def test_adapter_demo_returns_fixture():
 
 def test_scrapy_runner_on_fixture():
     sample = Path(__file__).parent / "fixtures" / "broward_sample.html"
-    assert sample.exists(), "Fixture missing: tests/fixtures/broward_sample.html"
+    assert sample.exists(), (
+        "Fixture missing: tests/fixtures/broward_sample.html"
+    )
     file_url = sample.resolve().as_uri()
 
     cmd = [
