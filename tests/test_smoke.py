@@ -17,7 +17,11 @@ def test_smoke_import():
 
 def test_adapter_demo_returns_fixture():
     adapter = ScrapyAdapter(demo=True)
-    results = adapter.search("irrelevant", start_urls=["file://unused"], spider_name="broward_spider")
+    results = adapter.search(
+        "irrelevant",
+        start_urls=["file://unused"],
+        spider_name="broward_spider",
+    )
     assert isinstance(results, list)
     assert results and "owner" in results[0]
 
