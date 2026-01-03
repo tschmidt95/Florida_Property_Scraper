@@ -11,7 +11,7 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 class FloridaPropertyScraper:
-    def __init__(self, scrapingbee_api_key: Optional[str] = None, timeout: int = 10, stop_after_first: bool = True, log_level: Optional[str] = None, demo: bool = False):
+    def __init__(self, scrapingbee_api_key: Optional[str] = None, timeout: int = 10, stop_after_first: bool = True, log_level: Optional[str] = None, demo: bool = False, backend: str = 'scrapy'):
         """Create a scraper.
 
         scrapingbee_api_key: optional API key (falls back to SCRAPINGBEE_API_KEY env var)
@@ -25,12 +25,41 @@ class FloridaPropertyScraper:
             level = getattr(logging, log_level.upper(), logging.INFO) if isinstance(log_level, str) else log_level
             logging.basicConfig(level=level)
             logger.setLevel(level)
-        # Allow passing the API key or reading from env var
-        self.scrapingbee_api_key = scrapingbee_api_key or os.environ.get("SCRAPINGBEE_API_KEY")
-        if not self.scrapingbee_api_key and not demo:
-            raise ValueError("SCRAPINGBEE_API_KEY is not set; provide scrapingbee_api_key or set the SCRAPINGBEE_API_KEY env var")
+        # Set backend and conditionally require ScrapingBee key
+        self.backend = backend
+        if self.backend == 'scrapingbee':
+            self.scrapingbee_api_key = scrapingbee_api_key or os.environ.get("SCRAPINGBEE_API_KEY")
+            if not self.scrapingbee_api_key and not demo:
+                raise ValueError(
+                    "SCRAPINGBEE_API_KEY is not set; provide scrapingbee_api_key or set the SCRAPINGBEE_API_KEY env var, "
+                    "or run with --demo to use canned demo data"
+                )
+        else:
+            self.scrapingbee_api_key = None
+
         self.base_url = "https://app.scrapingbee.com/api/v1/"
         self.timeout = timeout
+
+        # Only require ScrapingBee key when using that backend (and not demo)
+        if self.backend == 'scrapingbee':
+            if not scrapingbee_api_key and not demo:
+                raise ValueError(
+                    "SCRAPINGBEE_API_KEY is not set; provide scrapingbee_api_key or set the SCRAPINGBEE_API_KEY env var, "
+                    "or run with --demo to use canned demo data"
+                )
+            self.scrapingbee_api_key = scrapingbee_api_key
+        else:
+            self.scrapingbee_api_key = None
+
+        # Initialize backend adapter (scrapy by default)
+        if self.backend == 'scrapy':
+            from .backend.scrapy_adapter import ScrapyAdapter
+
+            self.adapter = ScrapyAdapter(demo=demo, timeout=timeout)
+        else:
+            from .backend.scrapingbee_adapter import ScrapingBeeAdapter
+
+            self.adapter = ScrapingBeeAdapter(api_key=self.scrapingbee_api_key, demo=demo, timeout=timeout)
         self.stop_after_first = stop_after_first
         self.demo = demo
         # Configure a session with retries/backoff (not used in demo mode)
