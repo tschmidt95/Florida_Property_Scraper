@@ -48,4 +48,3 @@ def test_scrapy_runner_on_fixture():
     data = json.loads(proc.stdout)
     assert isinstance(data, list)
     assert len(data) >= 2
-
