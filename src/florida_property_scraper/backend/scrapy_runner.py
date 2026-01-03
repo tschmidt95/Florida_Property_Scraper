@@ -40,7 +40,7 @@ def main():
 
     # Debug: surface resolved start_urls on stderr to help diagnose intermittent test failures
     import sys as _sys
-    _sys.stderr.write(f"RUNNER start_urls={start_urls}\n")
+    print(f"RUNNER start_urls={start_urls}", file=_sys.stderr, flush=True)
 
     try:
         from scrapy.crawler import CrawlerProcess
@@ -72,7 +72,8 @@ def main():
     process.crawl(SpiderCls, start_urls=start_urls)
     process.start()
 
-    print(json.dumps(InMemoryPipeline.items_list))
+    # Always print the (possibly empty) items array and flush to avoid buffered stdout issues
+    print(json.dumps(InMemoryPipeline.items_list), flush=True)
 
 
 if __name__ == '__main__':

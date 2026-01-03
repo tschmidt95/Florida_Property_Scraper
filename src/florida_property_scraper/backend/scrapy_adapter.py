@@ -61,9 +61,10 @@ class ScrapyAdapter:
         ]
 
         try:
-            proc = subprocess.run(runner_cmd, capture_output=True, text=True, check=False)
-            stdout = proc.stdout.strip()
-            stderr = proc.stderr.strip()
+            MAX_RETRIES = 3
+            delay = 0.05
+            proc = None
+            items = None
 
             def _parse_stdout(s):
                 if not s:
@@ -73,26 +74,43 @@ class ScrapyAdapter:
                 except Exception:
                     return None
 
-            items = _parse_stdout(stdout)
-            if items is None or (isinstance(items, list) and len(items) == 0):
-                # Retry once (transient runner or file resolution issues can happen)
+            import sys as _sys
+            # Log runner invocation for debugging (flush immediately so pytest captures it)
+            print(f"Adapter invoking runner_cmd={runner_cmd}", file=_sys.stderr, flush=True)
+
+            for attempt in range(1, MAX_RETRIES + 1):
                 proc = subprocess.run(runner_cmd, capture_output=True, text=True, check=False)
                 stdout = proc.stdout.strip()
                 stderr = proc.stderr.strip()
+                print(f"Adapter runner attempt={attempt} returncode={proc.returncode}", file=_sys.stderr, flush=True)
+                print(f"Adapter runner stdout snippet={stdout[:300]}", file=_sys.stderr, flush=True)
                 items = _parse_stdout(stdout)
+                if isinstance(items, list) and len(items) > 0:
+                    return items
+                # if runner printed explicit error payload, break early
+                try:
+                    payload = json.loads(stdout) if stdout else None
+                    if isinstance(payload, dict) and payload.get("error"):
+                        break
+                except Exception:
+                    pass
+                # small backoff before retrying
+                if attempt < MAX_RETRIES:
+                    import time
+                    time.sleep(delay)
+                    delay *= 2
+
+            # If we get here, items is either None, empty list, or there was an error
+            # Surface runner stdout/stderr to stderr to aid diagnosis in CI/test logs
+            _sys.stderr.write(
+                f"Scrapy runner finished with returncode={proc.returncode if proc else 'N/A'}\n"
+            )
+            _sys.stderr.write(f"Runner STDOUT:\n{stdout}\n")
+            if stderr:
+                _sys.stderr.write(f"Runner STDERR:\n{stderr}\n")
 
             if isinstance(items, list):
                 return items
-
-            # If the runner printed an error payload, return empty and surface stderr in logs
-            if stdout:
-                try:
-                    payload = json.loads(stdout)
-                    if isinstance(payload, dict) and payload.get("error"):
-                        return []
-                except Exception:
-                    pass
-            # otherwise return empty
             return []
         except Exception:
             return []
