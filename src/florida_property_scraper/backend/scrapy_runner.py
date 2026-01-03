@@ -51,10 +51,14 @@ def main():
         sys.exit(1)
 
     InMemoryPipeline.items_list = []
+    pipeline_key = (
+        "florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline"
+    )
+
     settings = {
-        'ITEM_PIPELINES': {
-            'florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline': 100,
-        }
+        "ITEM_PIPELINES": {
+            pipeline_key: 100,
+        },
     }
 
     SpiderCls = SPIDERS.get(args.spider_name)
