@@ -41,13 +41,18 @@ class ScrapyAdapter:
     def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
         """Run a search and return a list of result dicts.
 
-        For demo mode this returns a deterministic fixture. For non-demo runs we
-        invoke the `scrapy_runner` module in a subprocess which prints a JSON
-        array of items to stdout.
+        For demo mode this returns a deterministic fixture.
+        For non-demo runs we invoke the runner subprocess which emits JSON
+        to stdout.
         """
         if self.demo:
-            return [{"address": "123 Demo St", "owner": "Demo Owner", "notes": "demo fixture"}]
-
+            return [
+                {
+                    "address": "123 Demo St",
+                    "owner": "Demo Owner",
+                    "notes": "demo fixture",
+                }
+            ]
         start_urls = kwargs.get("start_urls")
         spider_name = kwargs.get("spider_name") or ""
         if not start_urls:
@@ -103,8 +108,10 @@ class ScrapyAdapter:
                 delay *= 2
 
         # Surface runner outputs to stderr for easier debugging in CI
-        sys.stderr.write(f"Scrapy runner finished with returncode={proc.returncode if proc else 'N/A'}\n")
-        sys.stderr.write(f"Runner STDOUT:\n{last_stdout}\n")
+        rc = proc.returncode if proc else "N/A"
+        sys.stderr.write(f"Scrapy runner finished with returncode={rc}\n")
+        sys.stderr.write("Runner STDOUT:\n")
+        sys.stderr.write(f"{last_stdout}\n")
         if last_stderr:
             sys.stderr.write(f"Runner STDERR:\n{last_stderr}\n")
 

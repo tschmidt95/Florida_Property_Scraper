@@ -2,7 +2,9 @@ from pathlib import Path
 from urllib.request import pathname2url
 
 from scrapy.http import TextResponse
-from florida_property_scraper.backend.spiders.alachua_spider import AlachuaSpider
+from florida_property_scraper.backend import spiders as spiders_pkg
+
+AlachuaSpider = spiders_pkg.alachua_spider.AlachuaSpider
 
 
 def test_alachua_spider_collects_items():

@@ -17,14 +17,20 @@ def test_smoke_import():
 
 def test_adapter_demo_returns_fixture():
     adapter = ScrapyAdapter(demo=True)
-    results = adapter.search("irrelevant", start_urls=["file://unused"], spider_name="broward_spider")
+    results = adapter.search(
+        "irrelevant",
+        start_urls=["file://unused"],
+        spider_name="broward_spider",
+    )
     assert isinstance(results, list)
     assert results and "owner" in results[0]
 
 
 def test_scrapy_runner_on_fixture():
     sample = Path(__file__).parent / "fixtures" / "broward_sample.html"
-    assert sample.exists(), "Fixture missing: tests/fixtures/broward_sample.html"
+    assert sample.exists(), (
+        "Fixture missing: tests/fixtures/broward_sample.html"
+    )
     file_url = sample.resolve().as_uri()
 
     cmd = [
