@@ -15,7 +15,12 @@ def load_schema(name):
 
 def test_generic_payload_validates():
     schema = load_schema("generic_payload.json")
-    payload = {"alert_type": "image_monitor_failure", "title": "Test title", "url": "https://example.com/issue/1", "body": "Test body"}
+    payload = {
+        "alert_type": "image_monitor_failure",
+        "title": "Test title",
+        "url": "https://example.com/issue/1",
+        "body": "Test body",
+    }
     validate(instance=payload, schema=schema)
 
 
@@ -28,7 +33,11 @@ def test_generic_payload_rejects_missing_field():
 
 def test_slack_payload_validates():
     schema = load_schema("slack_payload.json")
-    payload = {"blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "Test"}}]}
+    payload = {
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Test"}}
+        ]
+    }
     validate(instance=payload, schema=schema)
 
 
@@ -41,14 +50,20 @@ def test_slack_payload_rejects_missing_blocks():
 
 def test_teams_payload_validates():
     schema = load_schema("teams_payload.json")
-    payload = {"@type": "MessageCard", "@context": "https://schema.org/extensions", "summary": "x", "sections": [{"activityTitle": "t"}]}
+    payload = {
+        "@type": "MessageCard",
+        "@context": "https://schema.org/extensions",
+        "summary": "x",
+        "sections": [{"activityTitle": "t"}],
+    }
     validate(instance=payload, schema=schema)
 
 
 def test_teams_payload_rejects_invalid_shape():
     schema = load_schema("teams_payload.json")
     payload = {"foo": "bar"}
-    # If schema is permissive this may pass; we assert that missing expected keys raises ValidationError
+    # If schema is permissive this may pass; we assert that missing
+    # expected keys raise ValidationError
     try:
         validate(instance=payload, schema=schema)
     except ValidationError:
@@ -61,10 +76,26 @@ def test_teams_payload_rejects_invalid_shape():
 
 @pytest.mark.parametrize("payload", [
     {"title": "Missing alert_type"},  # missing required
-    {"alert_type": "x", "title": "t", "url": "ftp://example.com", "body": "b"},  # url pattern
-    {"alert_type": 123, "title": "t", "url": "https://x", "body": "b"},  # wrong type
-    {"alert_type": "x", "title": "t", "url": "https://x", "body": 123},  # body wrong type
-    {"alert_type": "x", "title": "t", "url": "https://x", "body": "b", "extra": "x"}  # additional property
+    {
+        "alert_type": "x",
+        "title": "t",
+        "url": "ftp://example.com",
+        "body": "b",
+    },  # url pattern
+    {"alert_type": 123, "title": "t", "url": "https://x", "body": "b"},
+    {
+        "alert_type": "x",
+        "title": "t",
+        "url": "https://x",
+        "body": 123,
+    },
+    {
+        "alert_type": "x",
+        "title": "t",
+        "url": "https://x",
+        "body": "b",
+        "extra": "x",
+    },
 ])
 def test_generic_invalid_cases(payload):
     schema = load_schema("generic_payload.json")
@@ -76,7 +107,11 @@ def test_generic_invalid_cases(payload):
     {},  # missing blocks
     {"blocks": []},  # minItems=1
     {"blocks": "not an array"},  # wrong type
-    {"blocks": [{"text": {"type": "mrkdwn", "text": "t"}}]},  # item missing required 'type'
+    {
+        "blocks": [
+            {"text": {"type": "mrkdwn", "text": "t"}},
+        ],
+    },  # item missing required 'type'
     {"blocks": [{"type": 123}]},  # type wrong type
 ])
 def test_slack_invalid_cases(payload):
@@ -90,7 +125,7 @@ def test_slack_invalid_cases(payload):
     {"title": 123},  # title must be string
     {"text": 42},  # text must be string or object
     {"potentialAction": "not an array"},  # must be array
-    {"potentialAction": {"foo": "bar"}}  # not an array
+    {"potentialAction": {"foo": "bar"}},  # not an array
 ])
 def test_teams_invalid_cases(payload):
     schema = load_schema("teams_payload.json")
@@ -100,16 +135,32 @@ def test_teams_invalid_cases(payload):
 
 # --- Additional positive edge-case tests ---
 
+
 def test_generic_body_object_valid():
     schema = load_schema("generic_payload.json")
-    payload = {"alert_type": "x", "title": "t", "url": "https://example.com", "body": {"rich": "content"}}
+    payload = {
+        "alert_type": "x",
+        "title": "t",
+        "url": "https://example.com",
+        "body": {"rich": "content"},
+    }
     validate(instance=payload, schema=schema)
+
 
 
 def test_slack_blocks_with_extra_properties_valid():
     schema = load_schema("slack_payload.json")
-    payload = {"blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "T"}, "accessory": {"type": "image"}}]}
+    payload = {
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "T"},
+                "accessory": {"type": "image"},
+            }
+        ]
+    }
     validate(instance=payload, schema=schema)
+
 
 
 def test_teams_text_object_valid():
