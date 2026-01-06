@@ -819,9 +819,11 @@ class CountySpider(scrapy.Spider):
         parcel_field = arcgis.get("parcel_field")
         search_field = arcgis.get("search_field") or address_field
         out_fields = arcgis.get("out_fields") or []
-        if not (search_field and parcel_field and out_fields):
+        if not (search_field and parcel_field and out_fields and address_field):
             return None
-        where = build_where_clause(self.query, search_field, parcel_field)
+        query_has_digits = any(ch.isdigit() for ch in self.query)
+        target_field = address_field if query_has_digits else search_field
+        where = build_where_clause(self.query, target_field, parcel_field)
         return build_query_url(
             arcgis["search_layer_url"],
             where=where,

@@ -163,6 +163,29 @@ ARCGIS_CONFIGS: Dict[str, Dict[str, object]] = {
             "PrimaryLandUse",
         ],
     },
+    "Bay": {
+        "search_layer_url": "https://maps.baycountyfl.gov/arcgis/rest/services/Hosted/Parcels/FeatureServer/0",
+        "search_field": "a2owname",
+        "address_field": "dsiteaddr",
+        "situs_fields": ["dsiteaddr", "dsitezip"],
+        "parcel_field": "a1renum",
+        "owner_fields": ["a2owname"],
+        "mailing_fields": ["a3mailaddr", "a4mailaddr", "a5mailaddr", "a6mailcity", "a7mailst", "a8mailzip"],
+        "zoning_current_field": "zoning",
+        "out_fields": [
+            "a1renum",
+            "a2owname",
+            "a3mailaddr",
+            "a4mailaddr",
+            "a5mailaddr",
+            "a6mailcity",
+            "a7mailst",
+            "a8mailzip",
+            "dsiteaddr",
+            "dsitezip",
+            "zoning",
+        ],
+    },
 }
 
 HCPA_CONFIGS: Dict[str, Dict[str, str]] = {
