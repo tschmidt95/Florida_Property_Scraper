@@ -11,6 +11,7 @@ from florida_property_scraper.scrapy_project.settings import (
     ITEM_PIPELINES,
     ROBOTSTXT_OBEY,
     SPIDER_MODULES,
+    USER_AGENT,
 )
 from florida_property_scraper.scrapy_project.spiders.county_spider import CountySpider
 
@@ -50,6 +51,7 @@ class FloridaPropertyScraper:
             "CONCURRENT_REQUESTS": self.concurrent_requests,
             "DOWNLOAD_TIMEOUT": self.download_timeout,
             "DEFAULT_REQUEST_HEADERS": DEFAULT_REQUEST_HEADERS,
+            "USER_AGENT": USER_AGENT,
             "ITEM_PIPELINES": {
                 **ITEM_PIPELINES,
                 "florida_property_scraper.scrapy_project.pipelines.AppendJsonlPipeline": 800,

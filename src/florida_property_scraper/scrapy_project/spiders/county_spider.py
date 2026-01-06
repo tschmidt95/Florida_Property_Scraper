@@ -84,6 +84,17 @@ class CountySpider(scrapy.Spider):
                 if request:
                     yield request
                     continue
+            lake_config = county.get("lake")
+            if lake_config:
+                lake_mode = "address" if any(ch.isdigit() for ch in self.query) else "property"
+                disclaimer_url = lake_config.get("disclaimer_address") if lake_mode == "address" else lake_config.get("disclaimer_property")
+                if disclaimer_url:
+                    yield scrapy.Request(
+                        disclaimer_url,
+                        callback=self.parse_lake_disclaimer,
+                        meta={"county": county, "lake": lake_config, "lake_mode": lake_mode},
+                    )
+                    continue
             bcpa_config = county.get("bcpa")
             if bcpa_config:
                 request = self._build_bcpa_search_request(county, bcpa_config)
@@ -705,6 +716,81 @@ class CountySpider(scrapy.Spider):
                 yield detail_request
             else:
                 yield self._finalize_item(item)
+            if self.max_items and self.items_seen >= self.max_items:
+                return
+
+    def parse_lake_disclaimer(self, response: scrapy.http.Response):
+        county = response.meta.get("county", {})
+        lake = response.meta.get("lake", {})
+        lake_mode = response.meta.get("lake_mode", "property")
+        hidden_fields = self._extract_hidden_fields(response)
+        if not hidden_fields:
+            self.logger.info("Lake disclaimer fields missing for %s", county.get("name"))
+            return
+        formdata = dict(hidden_fields)
+        formdata["ctl00$cphMain$imgBtnSubmit.x"] = "10"
+        formdata["ctl00$cphMain$imgBtnSubmit.y"] = "10"
+        yield FormRequest(
+            response.url,
+            formdata=formdata,
+            callback=self.parse_lake_search_landing,
+            meta={"county": county, "lake": lake, "lake_mode": lake_mode},
+        )
+
+    def parse_lake_search_landing(self, response: scrapy.http.Response):
+        county = response.meta.get("county", {})
+        lake = response.meta.get("lake", {})
+        lake_mode = response.meta.get("lake_mode", "property")
+        hidden_fields = self._extract_hidden_fields(response)
+        if not hidden_fields:
+            self.logger.info("Lake search fields missing for %s", county.get("name"))
+            return
+        formdata = dict(hidden_fields)
+        query = self.query.strip()
+        if not query:
+            return
+        if lake_mode == "address":
+            formdata["ctl00$cphMain$txtStreet"] = query
+            formdata["ctl00$cphMain$btnSearch"] = "Search"
+            search_url = lake.get("address_search_url") or response.url
+        else:
+            formdata["ctl00$cphMain$txtOwnerName"] = query
+            formdata["ctl00$cphMain$rblRealTangible"] = "Real"
+            formdata["ctl00$cphMain$btnSearch"] = "Search"
+            search_url = lake.get("property_search_url") or response.url
+        yield FormRequest(
+            search_url,
+            formdata=formdata,
+            callback=self.parse_lake_results,
+            meta={"county": county, "lake": lake},
+        )
+
+    def parse_lake_results(self, response: scrapy.http.Response):
+        county = response.meta.get("county", {})
+        rows = response.css("table#cphMain_gvParcels tr")
+        if not rows:
+            self.logger.info("No Lake results found for %s", county.get("name"))
+            return
+        for row in rows:
+            cells = row.css("td")
+            if len(cells) < 4:
+                continue
+            detail_href = row.css("a[href*='property-details.aspx']::attr(href)").get()
+            if not detail_href:
+                continue
+            owner = self._clean_text(cells[1].css("::text").getall())
+            parcel_id = self._clean_text(cells[2].css("::text").getall())
+            city = self._clean_text(cells[4].css("::text").getall()) if len(cells) > 4 else ""
+            item = PropertyItem()
+            item["county"] = county.get("name")
+            item["search_query"] = self.query
+            item["source_url"] = response.url
+            item["owner_name"] = owner
+            item["parcel_id"] = parcel_id
+            if city:
+                item["situs_address"] = city
+            item["property_url"] = response.urljoin(detail_href)
+            yield response.follow(detail_href, callback=self.parse_detail, meta={"item": item})
             if self.max_items and self.items_seen >= self.max_items:
                 return
 

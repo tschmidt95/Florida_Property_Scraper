@@ -172,6 +172,16 @@ VCPA_CONFIGS: Dict[str, Dict[str, str]] = {
     }
 }
 
+LAKE_CONFIGS: Dict[str, Dict[str, str]] = {
+    "Lake": {
+        "base_url": "https://lakecopropappr.com",
+        "disclaimer_property": "https://lakecopropappr.com/property-disclaimer.aspx?to=%2fproperty-search.aspx%3f",
+        "disclaimer_address": "https://lakecopropappr.com/property-disclaimer.aspx?to=%2faddress-search.aspx%3f",
+        "property_search_url": "https://lakecopropappr.com/property-search.aspx",
+        "address_search_url": "https://lakecopropappr.com/address-search.aspx",
+    }
+}
+
 OCPA_CONFIGS: Dict[str, Dict[str, str]] = {
     "Orange": {
         "landing_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx",
@@ -207,6 +217,7 @@ def build_county_sources() -> List[Dict[str, Optional[str]]]:
         bcpa_config = BCPA_CONFIGS.get(entry["name"])
         pbcpa_config = PBCPA_CONFIGS.get(entry["name"])
         vcpa_config = VCPA_CONFIGS.get(entry["name"])
+        lake_config = LAKE_CONFIGS.get(entry["name"])
         ocpa_config = OCPA_CONFIGS.get(entry["name"])
         pasco_config = PASCO_CONFIGS.get(entry["name"])
         sarasota_config = SARASOTA_CONFIGS.get(entry["name"])
@@ -222,6 +233,7 @@ def build_county_sources() -> List[Dict[str, Optional[str]]]:
                     "bcpa": bcpa_config,
                     "pbcpa": pbcpa_config,
                     "vcpa": vcpa_config,
+                    "lake": lake_config,
                     "ocpa": ocpa_config,
                     "pasco": pasco_config,
                     "sarasota": sarasota_config,
@@ -239,6 +251,7 @@ def build_county_sources() -> List[Dict[str, Optional[str]]]:
                     "bcpa": bcpa_config,
                     "pbcpa": pbcpa_config,
                     "vcpa": vcpa_config,
+                    "lake": lake_config,
                     "ocpa": ocpa_config,
                     "pasco": pasco_config,
                     "sarasota": sarasota_config,
