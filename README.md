@@ -46,6 +46,12 @@ If you have another `florida_property_scraper` installed on your system, run the
 ./scripts/run_local.sh --query "SMITH" --counties "Hillsborough" --output ./tmp_results.jsonl
 ```
 
+Smoke test:
+
+```
+python -m florida_property_scraper.cli --query "John Smith" --counties "Orange,Seminole" --max-items 5
+```
+
 By default the CLI now saves as it goes:
 
 - `./results.jsonl` for file output

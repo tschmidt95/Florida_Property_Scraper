@@ -54,10 +54,14 @@ def main():
     else:
         query = input("Enter owner name or address to search: ")
 
+    counties = None
+    if args.counties:
+        counties = [c.strip() for c in args.counties.split(",") if c.strip()]
+
     scraper = FloridaPropertyScraper(log_level=args.log_level, obey_robots=args.obey_robots)
-    results = scraper.search(
+    result = scraper.search(
         query=query,
-        counties=args.counties,
+        counties=counties,
         output_path=None if args.no_output else args.output,
         output_format=args.format,
         append_output=args.append_output,
@@ -67,7 +71,7 @@ def main():
         webhook_url=args.webhook_url,
         zoho_sync=args.zoho_sync,
     )
-    print(f"Found {len(results)} properties")
+    print(f"Found {result.items_count} properties")
 
 
 if __name__ == "__main__":

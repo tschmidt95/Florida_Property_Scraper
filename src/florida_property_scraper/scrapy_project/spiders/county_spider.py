@@ -37,7 +37,7 @@ class CountySpider(scrapy.Spider):
     def __init__(
         self,
         query: str,
-        counties: Optional[str] = None,
+        counties: Optional[List[str]] = None,
         max_items: Optional[int] = None,
         allow_forms: bool = True,
         *args,
@@ -50,10 +50,10 @@ class CountySpider(scrapy.Spider):
         self.items_seen = 0
         self.counties = self._filter_counties(counties)
 
-    def _filter_counties(self, counties: Optional[str]) -> List[Dict[str, Optional[str]]]:
+    def _filter_counties(self, counties: Optional[List[str]]) -> List[Dict[str, Optional[str]]]:
         if not counties:
             return list(COUNTY_SOURCES)
-        requested = {c.strip().lower() for c in counties.split(",") if c.strip()}
+        requested = {c.strip().lower() for c in counties if c and c.strip()}
         filtered = [c for c in COUNTY_SOURCES if c["name"].lower() in requested]
         return filtered or list(COUNTY_SOURCES)
 
