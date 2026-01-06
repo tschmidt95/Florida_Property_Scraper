@@ -141,6 +141,28 @@ ARCGIS_CONFIGS: Dict[str, Dict[str, object]] = {
             "PAR_FUTURE_LNDUSE",
         ],
     },
+    "St. Lucie": {
+        "search_layer_url": "https://map.paslc.gov/arcgis/rest/services/PROD/SLCPA_PublicParcels/MapServer/0",
+        "search_field": "Owners",
+        "address_field": "SiteAddress",
+        "situs_fields": ["SiteAddress"],
+        "parcel_field": "ParcelID",
+        "owner_fields": ["Owner1", "Owner2", "Owner3"],
+        "mailing_fields": ["MailingAddress1", "MailingAddress2", "MailingCityStateZip"],
+        "zoning_current_field": "PrimaryLandUse",
+        "out_fields": [
+            "Owners",
+            "Owner1",
+            "Owner2",
+            "Owner3",
+            "SiteAddress",
+            "ParcelID",
+            "MailingAddress1",
+            "MailingAddress2",
+            "MailingCityStateZip",
+            "PrimaryLandUse",
+        ],
+    },
 }
 
 HCPA_CONFIGS: Dict[str, Dict[str, str]] = {
