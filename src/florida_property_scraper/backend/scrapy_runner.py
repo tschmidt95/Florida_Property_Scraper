@@ -8,11 +8,34 @@ import json
 import sys
 
 
+def resolve_spider_class(spider_name, spiders_registry=None):
+    if spiders_registry is None:
+        from .spiders import SPIDERS
+
+        spiders_registry = SPIDERS
+
+    raw_name = spider_name
+    normalized_name = (
+        raw_name[: -len("_spider")] if raw_name.endswith("_spider") else raw_name
+    )
+
+    SpiderCls = spiders_registry.get(raw_name) or spiders_registry.get(normalized_name)
+    if not SpiderCls:
+        raise KeyError(f"Unknown spider: {spider_name}")
+    return SpiderCls
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--spider-name', required=True)
     parser.add_argument('--start-urls', required=True, help='JSON array of start URLs')
     parser.add_argument('--max-items', type=int, default=None)
+    parser.add_argument('--debug-html', action='store_true')
+    parser.add_argument('--query', default='')
+    parser.add_argument('--pagination', default='none')
+    parser.add_argument('--page-param', default='')
+    parser.add_argument('--form-url', default='')
+    parser.add_argument('--form-fields', default='')
     args = parser.parse_args()
 
     start_urls = json.loads(args.start_urls)
@@ -46,7 +69,6 @@ def main():
     try:
         from scrapy.crawler import CrawlerProcess
         from .scrapy_adapter import InMemoryPipeline
-        from .spiders import SPIDERS
     except Exception as exc:
         print(json.dumps({"error": str(exc)}))
         sys.exit(1)
@@ -65,29 +87,30 @@ def main():
     if args.max_items:
         settings["CLOSESPIDER_ITEMCOUNT"] = args.max_items
 
-    raw_name = args.spider_name
-    normalized_name = (
-        raw_name[: -len("_spider")] if raw_name.endswith("_spider") else raw_name
-    )
+    try:
+        SpiderCls = resolve_spider_class(args.spider_name)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(1)
 
-    SpiderCls = SPIDERS.get(raw_name) or SPIDERS.get(normalized_name)
-    if not SpiderCls:
-        module_name = (
-            "florida_property_scraper.backend.spiders."
-            f"{normalized_name}_spider"
-        )
-        class_name = (
-            "".join(p.capitalize() for p in normalized_name.split("_")) + "Spider"
-        )
+    form_fields = {}
+    if args.form_fields:
         try:
-            module = __import__(module_name, fromlist=["*"])
-            SpiderCls = getattr(module, class_name)
-        except Exception as exc:
-            print(json.dumps({"error": str(exc)}))
-            sys.exit(1)
+            form_fields = json.loads(args.form_fields)
+        except Exception:
+            form_fields = {}
 
     process = CrawlerProcess(settings=settings)
-    process.crawl(SpiderCls, start_urls=start_urls)
+    process.crawl(
+        SpiderCls,
+        start_urls=start_urls,
+        debug_html=args.debug_html,
+        query=args.query,
+        pagination=args.pagination,
+        page_param=args.page_param,
+        form_url=args.form_url,
+        form_fields_template=form_fields,
+    )
     process.start()
 
     # Always print the (possibly empty) items array and flush to avoid buffered stdout issues

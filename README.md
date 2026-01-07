@@ -29,6 +29,22 @@ Scan properties and look up owner information in Florida
 
 ---
 
+## Live mode usage
+
+Run live requests against county sites (network required):
+
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "broward" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "alachua" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "seminole" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "orange" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "palm_beach" --max-items 3
+
+Optional live smoke tests:
+
+  RUN_LIVE_TESTS=1 PYTHONPATH=./src python3 -m pytest -q -m live
+
+---
+
 ## Post-publish smoke check (automated)
 
 We run a post-publish smoke check after a release is published that pulls the published GHCR image and performs a minimal import test to ensure the package is present and importable.

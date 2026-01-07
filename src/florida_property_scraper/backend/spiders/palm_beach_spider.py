@@ -9,8 +9,8 @@ from florida_property_scraper.spider_utils import (
 )
 
 
-class BrowardSpider(Spider):
-    name = "broward_spider"
+class PalmBeachSpider(Spider):
+    name = "palm_beach_spider"
     COLUMNS = [
         "owner",
         "address",
@@ -55,9 +55,9 @@ class BrowardSpider(Spider):
             yield Request(url, meta={"page": 1})
 
     def parse(self, response):
-        items = extract_table_items(response, self.COLUMNS, "broward")
+        items = extract_table_items(response, self.COLUMNS, "palm_beach")
         if not items:
-            items = extract_label_items(response, "broward")
+            items = extract_label_items(response, "palm_beach")
         if items:
             for item in items:
                 item["raw_html"] = truncate_html(item.get("raw_html"))
@@ -65,7 +65,7 @@ class BrowardSpider(Spider):
         elif self.debug_html:
             yield normalize_item(
                 {
-                    "county": "broward",
+                    "county": "palm_beach",
                     "raw_html": response.text[:50000],
                 }
             )
