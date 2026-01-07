@@ -166,6 +166,29 @@ def main():
         help="Overwrite output file instead of appending",
     )
 
+    parser.add_argument(
+        "--no-robots",
+        dest="obey_robots",
+        action="store_false",
+        help="Ignore robots.txt",
+    )
+    parser.add_argument(
+        "--no-forms",
+        dest="allow_forms",
+        action="store_false",
+        help="Skip form discovery for counties without templates",
+    )
+    parser.add_argument(
+        "--webhook-url",
+        help="Webhook URL for pushing normalized leads",
+        required=False,
+    )
+    parser.add_argument(
+        "--zoho-sync",
+        action="store_true",
+        help="Send leads to Zoho CRM (requires ZOHO_ACCESS_TOKEN)",
+    )
+
     args = parser.parse_args()
 
     queries = []
@@ -182,7 +205,6 @@ def main():
         if not queries:
             parser.error("--input-csv must contain at least one query")
     else:
-        # Determine query from either --query or --name + --address
         if args.name:
             if not args.address:
                 parser.error("--address is required when --name is provided")
@@ -190,7 +212,6 @@ def main():
         elif args.query:
             query = args.query
         else:
-            # Interactive prompts - prefer name+address pair
             name = input(
                 "Enter owner name (leave blank to enter a single query): "
             ).strip()

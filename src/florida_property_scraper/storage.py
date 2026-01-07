@@ -1,4 +1,7 @@
+import json
 import sqlite3
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from florida_property_scraper.schema import normalize_item
 
@@ -88,3 +91,330 @@ class SQLiteStorage:
         if self.conn:
             self.conn.close()
             self.conn = None
+
+
+class SQLiteStore:
+    def __init__(self, path: str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(self.path)
+        self.conn.row_factory = sqlite3.Row
+        self._init_schema()
+
+    def _init_schema(self) -> None:
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dedupe_key TEXT UNIQUE,
+                county TEXT,
+                search_query TEXT,
+                owner_name TEXT,
+                contact_phones TEXT,
+                contact_emails TEXT,
+                contact_addresses TEXT,
+                mailing_address TEXT,
+                situs_address TEXT,
+                parcel_id TEXT,
+                property_url TEXT,
+                source_url TEXT,
+                mortgage TEXT,
+                purchase_history TEXT,
+                zoning_current TEXT,
+                zoning_future TEXT,
+                lead_score INTEGER,
+                captured_at TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                started_at TEXT,
+                finished_at TEXT,
+                status TEXT,
+                run_type TEXT DEFAULT 'manual',
+                counties_json TEXT,
+                query TEXT,
+                items_count INTEGER,
+                warnings_json TEXT,
+                errors_json TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                property_uid TEXT NOT NULL,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                situs_address TEXT,
+                owner_name TEXT,
+                mailing_address TEXT,
+                last_sale_date TEXT,
+                last_sale_price REAL,
+                deed_type TEXT,
+                source_url TEXT,
+                raw_json TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                run_id TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_observations_property_time ON observations(property_uid, observed_at DESC)"
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                property_uid TEXT NOT NULL,
+                county TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_at TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                details_json TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(event_type, event_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_property_time ON events(property_uid, event_at DESC)"
+        )
+        self.conn.commit()
+
+    def record_run_start(
+        self,
+        run_id: str,
+        started_at: str,
+        run_type: str,
+        counties: Optional[List[str]],
+        query: str,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO runs (
+                run_id,
+                started_at,
+                status,
+                run_type,
+                counties_json,
+                query,
+                items_count,
+                warnings_json,
+                errors_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                started_at=excluded.started_at,
+                status=excluded.status,
+                run_type=excluded.run_type,
+                counties_json=excluded.counties_json,
+                query=excluded.query
+            """,
+            (
+                run_id,
+                started_at,
+                "started",
+                run_type,
+                json.dumps(counties or [], ensure_ascii=True),
+                query,
+                0,
+                json.dumps([], ensure_ascii=True),
+                json.dumps([], ensure_ascii=True),
+            ),
+        )
+        self.conn.commit()
+
+    def record_run_finish(
+        self,
+        run_id: str,
+        finished_at: str,
+        status: str,
+        items_count: int,
+        warnings: List[str],
+        errors: List[str],
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE runs
+            SET finished_at = ?,
+                status = ?,
+                items_count = ?,
+                warnings_json = ?,
+                errors_json = ?
+            WHERE run_id = ?
+            """,
+            (
+                finished_at,
+                status,
+                items_count,
+                json.dumps(warnings, ensure_ascii=True),
+                json.dumps(errors, ensure_ascii=True),
+                run_id,
+            ),
+        )
+        self.conn.commit()
+
+    def upsert_lead(self, record: Dict[str, Any]) -> None:
+        payload = (
+            record.get("dedupe_key"),
+            record.get("county"),
+            record.get("search_query"),
+            record.get("owner_name"),
+            json.dumps(record.get("contact_phones", []), ensure_ascii=True),
+            json.dumps(record.get("contact_emails", []), ensure_ascii=True),
+            json.dumps(record.get("contact_addresses", []), ensure_ascii=True),
+            record.get("mailing_address"),
+            record.get("situs_address"),
+            record.get("parcel_id"),
+            record.get("property_url"),
+            record.get("source_url"),
+            json.dumps(record.get("mortgage", []), ensure_ascii=True),
+            json.dumps(record.get("purchase_history", []), ensure_ascii=True),
+            record.get("zoning_current"),
+            record.get("zoning_future"),
+            record.get("lead_score"),
+            record.get("captured_at"),
+            json.dumps(record, ensure_ascii=True),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO leads (
+                dedupe_key,
+                county,
+                search_query,
+                owner_name,
+                contact_phones,
+                contact_emails,
+                contact_addresses,
+                mailing_address,
+                situs_address,
+                parcel_id,
+                property_url,
+                source_url,
+                mortgage,
+                purchase_history,
+                zoning_current,
+                zoning_future,
+                lead_score,
+                captured_at,
+                raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dedupe_key) DO UPDATE SET
+                county=excluded.county,
+                search_query=excluded.search_query,
+                owner_name=excluded.owner_name,
+                contact_phones=excluded.contact_phones,
+                contact_emails=excluded.contact_emails,
+                contact_addresses=excluded.contact_addresses,
+                mailing_address=excluded.mailing_address,
+                situs_address=excluded.situs_address,
+                parcel_id=excluded.parcel_id,
+                property_url=excluded.property_url,
+                source_url=excluded.source_url,
+                mortgage=excluded.mortgage,
+                purchase_history=excluded.purchase_history,
+                zoning_current=excluded.zoning_current,
+                zoning_future=excluded.zoning_future,
+                lead_score=excluded.lead_score,
+                captured_at=excluded.captured_at,
+                raw_json=excluded.raw_json
+            """,
+            payload,
+        )
+        self.conn.commit()
+
+    def get_latest_observation(self, property_uid: str) -> Optional[Dict[str, Any]]:
+        row = self.conn.execute(
+            """
+            SELECT * FROM observations
+            WHERE property_uid = ?
+            ORDER BY observed_at DESC
+            LIMIT 1
+            """,
+            (property_uid,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def insert_observation(self, record: Dict[str, Any]) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO observations (
+                property_uid,
+                county,
+                parcel_id,
+                situs_address,
+                owner_name,
+                mailing_address,
+                last_sale_date,
+                last_sale_price,
+                deed_type,
+                source_url,
+                raw_json,
+                observed_at,
+                run_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.get("property_uid"),
+                record.get("county"),
+                record.get("parcel_id"),
+                record.get("situs_address"),
+                record.get("owner_name"),
+                record.get("mailing_address"),
+                record.get("last_sale_date"),
+                record.get("last_sale_price"),
+                record.get("deed_type"),
+                record.get("source_url"),
+                record.get("raw_json"),
+                record.get("observed_at"),
+                record.get("run_id"),
+            ),
+        )
+        self.conn.commit()
+
+    def insert_events(self, events: List[Dict[str, Any]]) -> None:
+        if not events:
+            return
+        self.conn.executemany(
+            """
+            INSERT INTO events (
+                property_uid,
+                county,
+                event_type,
+                event_at,
+                run_id,
+                old_value,
+                new_value,
+                details_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    event.get("property_uid"),
+                    event.get("county"),
+                    event.get("event_type"),
+                    event.get("event_at"),
+                    event.get("run_id"),
+                    event.get("old_value"),
+                    event.get("new_value"),
+                    event.get("details_json"),
+                )
+                for event in events
+            ],
+        )
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()

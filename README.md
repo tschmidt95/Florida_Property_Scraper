@@ -80,4 +80,24 @@ Testing:
 5. If you want a richer Slack message (blocks with button), use `ALERT_PROVIDER=slack` (default). For Teams actionable card use `ALERT_PROVIDER=teams`.
 
 
+## Local run (use repo code)
+
+If you have another `florida_property_scraper` installed on your system, run the local code via:
+
+```
+./scripts/run_local.sh --query "SMITH" --counties "Hillsborough" --output ./tmp_results.jsonl
+```
+
+Smoke test:
+
+```
+python -m florida_property_scraper.cli --query "John Smith" --counties "Orange,Seminole" --max-items 5
+```
+
+By default the CLI now saves as it goes:
+
+- `./results.jsonl` for file output
+- `./leads.sqlite` for SQLite storage (dedupe + scoring)
+
+To disable either, pass `--no-output` and/or `--no-store`.
 ---

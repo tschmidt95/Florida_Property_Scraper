@@ -1,6 +1,6 @@
-"""Package initializer for `florida_property_scraper`.
+"""Package initializer for `florida_property_scraper`."""
 
-Keep public convenience imports here.
-"""
-
+from .run_result import RunResult
 from .scraper import FloridaPropertyScraper
+
+__all__ = ["FloridaPropertyScraper", "RunResult"]
