@@ -8,3 +8,4 @@ eval "$(ssh-agent -s)".pub
 dist/
 build/
 *.egg-info/
+repo_old/
