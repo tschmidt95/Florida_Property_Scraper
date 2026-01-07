@@ -180,3 +180,19 @@ def parse_label_items(html_text, county_slug):
     if owner or address:
         return [ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)]
     return []
+import re
+
+_RESULT_BLOCK_PATTERNS = [
+    r'(<section[^>]+class="search-result"[^>]*>.*?</section>)',
+    r'(<div[^>]+class="result-card"[^>]*>.*?</div>\s*</div>|<div[^>]+class="result-card"[^>]*>.*?</div>)',
+    r'(<article[^>]+class="result-card"[^>]*>.*?</article>)',
+]
+
+def split_result_blocks(html: str) -> list[str]:
+    if not html:
+        return []
+    for pat in _RESULT_BLOCK_PATTERNS:
+        blocks = re.findall(pat, html, flags=re.IGNORECASE | re.DOTALL)
+        if blocks:
+            return blocks
+    return []
