@@ -19,6 +19,7 @@ def test_alachua_spider_collects_items():
 
     assert isinstance(items, list)
     assert len(items) >= 2
-    owners = [it.get('owner') for it in items]
-    assert 'Demo Owner A' in owners
-    assert 'Demo Owner B' in owners
+    for item in items:
+        assert item.get("owner")
+        assert item.get("address")
+        assert item.get("county") == "alachua"

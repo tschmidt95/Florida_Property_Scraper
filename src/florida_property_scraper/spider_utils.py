@@ -18,7 +18,7 @@ def normalize_text(value):
     return " ".join((value or "").split())
 
 
-def truncate_html(value, limit=50000):
+def truncate_html(value, limit=2000):
     return (value or "")[:limit]
 
 
@@ -59,13 +59,9 @@ def _find_address_like(lines):
     return ""
 
 
-def extract_label_items(response, county):
+def extract_label_items_from_nodes(nodes, county):
     items = []
-    containers = response.css(
-        ".result, .record, .card, .search-result, .result-row, "
-        ".result-item, div, li, section, article"
-    )
-    for container in containers:
+    for container in nodes:
         lines = [
             normalize_text(t)
             for t in container.css("::text").getall()
@@ -81,10 +77,21 @@ def extract_label_items(response, county):
                     "county": county,
                     "owner": owner,
                     "address": address,
-                    "raw_html": truncate_html(container.get() or response.text),
+                    "raw_html": truncate_html(container.get() or ""),
                 }
             )
             items.append(item)
+    return items
+
+
+def extract_label_items(response, county):
+    items = extract_label_items_from_nodes(
+        response.css(
+            ".result, .record, .card, .search-result, .result-row, "
+            ".result-item, div, li, section, article"
+        ),
+        county,
+    )
     if items:
         return items
     texts = [

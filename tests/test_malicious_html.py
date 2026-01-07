@@ -21,4 +21,4 @@ def test_malicious_html_handled():
     for item in items:
         for field in REQUIRED_FIELDS:
             assert field in item
-        assert len(item.get("raw_html", "")) <= 50000
+        assert len(item.get("raw_html", "")) <= 2000

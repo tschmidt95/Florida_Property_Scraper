@@ -9,4 +9,4 @@ def test_oversized_response_truncated():
     spider = PalmBeachSpider(start_urls=["file://big"], debug_html=True)
     items = list(spider.parse(resp))
     assert items
-    assert len(items[0].get("raw_html", "")) <= 50000
+    assert len(items[0].get("raw_html", "")) <= 2000
