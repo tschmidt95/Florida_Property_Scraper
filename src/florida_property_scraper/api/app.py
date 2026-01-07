@@ -1,65 +1,61 @@
-import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+try:
+    from fastapi import FastAPI
+    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    FASTAPI_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    FastAPI = None
+    FileResponse = None
+    JSONResponse = None
+    StaticFiles = None
+    FASTAPI_AVAILABLE = False
 
 from florida_property_scraper.api.geojson import to_featurecollection
 from florida_property_scraper.map_layer.registry import get_provider
-from florida_property_scraper.routers.registry import enabled_jurisdictions
-from florida_property_scraper.storage_postgis import PostGISStorage
+from florida_property_scraper.routers.registry import get_router
 
 
-app = FastAPI()
+ROOT = Path(__file__).resolve().parents[2]
+WEB_DIR = ROOT / "web"
+_router = get_router("fl")
 
 
-def _get_storage():
-    if os.getenv("POSTGIS_ENABLED") == "1":
-        return PostGISStorage.from_env()
-    return None
-
-
-@app.get("/parcels")
-def parcels(state: str, county: str, bbox: str, zoom: int):
-    storage = _get_storage()
-    if storage:
-        features = storage.query_bbox(bbox)
-    else:
-        provider = get_provider(state, county)
-        features = provider.fetch_features(bbox, zoom, state, county)
-    return to_featurecollection(features, county)
-
-
-@app.get("/parcels/{parcel_id}")
-def parcel(parcel_id: str, state: str, county: str):
-    storage = _get_storage()
-    if storage:
-        feature = storage.get_by_parcel_id(parcel_id)
-    else:
-        provider = get_provider(state, county)
-        feature = provider.fetch_feature(parcel_id, state, county)
-    if not feature:
-        raise HTTPException(status_code=404, detail="Parcel not found")
-    return feature
-
-
-@app.get("/counties")
-def counties(state: str = "fl"):
-    return enabled_jurisdictions(state)
-
-
-@app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.get("/")
-def index():
-    base = Path(__file__).resolve().parents[1] / "web" / "map.html"
-    return FileResponse(base)
+def counties():
+    return {"counties": list(_router.enabled_counties())}
 
 
-@app.get("/static/{path:path}")
-def static_assets(path: str):
-    base = Path(__file__).resolve().parents[1] / "web"
-    return FileResponse(base / path)
+app = FastAPI() if FASTAPI_AVAILABLE else None
+
+
+if app:
+    @app.get("/health")
+    def health_route():
+        return health()
+
+    @app.get("/counties")
+    def counties_route():
+        return counties()
+
+    @app.get("/parcels")
+    def parcels(state: str = "fl", county: str = "broward", bbox: str = "", zoom: int = 12):
+        provider = get_provider(state, county)
+        features = provider.fetch_features(bbox=bbox, zoom=zoom, state=state, county=county)
+        return JSONResponse(to_featurecollection(features, county))
+
+    @app.get("/parcels/{parcel_id}")
+    def parcel(parcel_id: str, state: str = "fl", county: str = "broward"):
+        provider = get_provider(state, county)
+        feature = provider.fetch_feature(parcel_id=parcel_id, state=state, county=county)
+        return JSONResponse(feature)
+
+    @app.get("/")
+    def index():
+        return FileResponse(WEB_DIR / "map.html")
+
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
