@@ -56,11 +56,15 @@ class OrangeSpider(Spider):
             items = extract_label_items(response, "orange")
         if items:
             for item in items:
+                item["state"] = "fl"
+                item["jurisdiction"] = item.get("county", "orange")
                 item["raw_html"] = truncate_html(item.get("raw_html"))
                 yield normalize_item(item)
         elif self.debug_html:
             yield normalize_item(
                 {
+                    "state": "fl",
+                    "jurisdiction": "orange",
                     "county": "orange",
                     "raw_html": truncate_html(response.text),
                 }
