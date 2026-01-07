@@ -56,15 +56,11 @@ class HillsboroughSpider(Spider):
             items = extract_label_items(response, "hillsborough")
         if items:
             for item in items:
-                item["state"] = "fl"
-                item["jurisdiction"] = item.get("county", "hillsborough")
                 item["raw_html"] = truncate_html(item.get("raw_html"))
                 yield normalize_item(item)
         elif self.debug_html:
             yield normalize_item(
                 {
-                    "state": "fl",
-                    "jurisdiction": "hillsborough",
                     "county": "hillsborough",
                     "raw_html": truncate_html(response.text),
                 }

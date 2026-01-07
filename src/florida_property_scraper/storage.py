@@ -26,8 +26,6 @@ class SQLiteStorage:
             """
             CREATE TABLE IF NOT EXISTS properties (
                 id INTEGER PRIMARY KEY,
-                state TEXT,
-                jurisdiction TEXT,
                 county TEXT NOT NULL,
                 owner_id INTEGER NOT NULL,
                 address TEXT NOT NULL,
@@ -43,12 +41,6 @@ class SQLiteStorage:
             )
             """
         )
-        cur.execute("PRAGMA table_info(properties)")
-        columns = {row[1] for row in cur.fetchall()}
-        if "state" not in columns:
-            cur.execute("ALTER TABLE properties ADD COLUMN state TEXT")
-        if "jurisdiction" not in columns:
-            cur.execute("ALTER TABLE properties ADD COLUMN jurisdiction TEXT")
         self.conn.commit()
 
     def save_items(self, items):
@@ -68,8 +60,6 @@ class SQLiteStorage:
             cur.execute(
                 """
                 INSERT OR IGNORE INTO properties (
-                    state,
-                    jurisdiction,
                     county,
                     owner_id,
                     address,
@@ -80,11 +70,9 @@ class SQLiteStorage:
                     zoning,
                     property_class,
                     raw_html
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    normalized.get("state", "fl"),
-                    normalized.get("jurisdiction", normalized.get("county", "")),
                     normalized.get("county", ""),
                     owner_id,
                     normalized.get("address", ""),

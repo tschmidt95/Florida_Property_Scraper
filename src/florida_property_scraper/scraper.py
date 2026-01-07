@@ -7,13 +7,12 @@ from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 
 from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
-from florida_property_scraper.routers.fl import canonicalize_jurisdiction_name
-from florida_property_scraper.routers.registry import (
+from florida_property_scraper.county_router import (
     build_start_urls,
-    enabled_jurisdictions,
-    get_entry,
+    canonicalize_county_name,
+    enabled_counties,
+    get_county_entry,
 )
-from florida_property_scraper.schema import normalize_item
 from florida_property_scraper.identity import compute_property_uid
 from florida_property_scraper.run_result import RunResult
 from florida_property_scraper.scrapy_project.settings import (
@@ -43,7 +42,6 @@ class FloridaPropertyScraper:
         debug_html: bool = False,
         per_county_limit: Optional[int] = None,
         delay_ms: Optional[int] = None,
-        state: str = "fl",
         obey_robots: bool = ROBOTSTXT_OBEY,
         concurrent_requests: int = CONCURRENT_REQUESTS,
         download_timeout: int = DOWNLOAD_TIMEOUT,
@@ -58,7 +56,6 @@ class FloridaPropertyScraper:
         self.max_items = max_items
         self.per_county_limit = per_county_limit
         self.delay_ms = delay_ms
-        self.state = state or "fl"
         self.failures: List[Dict] = []
         self.last_log_entries: List[Dict] = []
         self.adapter = ScrapyAdapter(demo=demo, timeout=timeout, live=live)
@@ -107,13 +104,11 @@ class FloridaPropertyScraper:
             )
             return demo_results
         if counties:
-            slugs = [
-                canonicalize_jurisdiction_name(c) for c in counties if c.strip()
-            ]
+            slugs = [canonicalize_county_name(c) for c in counties if c.strip()]
         else:
-            slugs = enabled_jurisdictions(self.state)
+            slugs = enabled_counties()
         for idx, slug in enumerate(slugs):
-            start_urls = build_start_urls(self.state, slug, query)
+            start_urls = build_start_urls(slug, query)
             if not start_urls:
                 self.failures.append(
                     {
@@ -125,7 +120,7 @@ class FloridaPropertyScraper:
                 self.last_log_entries.append(
                     {
                         "county": slug,
-                        "spider": get_entry(self.state, slug).get("spider_key"),
+                        "spider": get_county_entry(slug).get("spider_key"),
                         "start_urls": [],
                         "items_found": 0,
                         "status": "skipped",
@@ -133,7 +128,7 @@ class FloridaPropertyScraper:
                     }
                 )
                 continue
-            entry = get_entry(self.state, slug)
+            entry = get_county_entry(slug)
             attempts = 0
             last_error = ""
             results = []
@@ -181,13 +176,7 @@ class FloridaPropertyScraper:
                 }
             )
             if results:
-                for item in results:
-                    normalized = normalize_item(item)
-                    normalized["state"] = self.state
-                    if not normalized.get("county"):
-                        normalized["county"] = slug
-                    normalized["jurisdiction"] = normalized.get("county", "")
-                    all_results.append(normalized)
+                all_results.extend(results)
                 if stop_after_first:
                     break
             if delay_ms and idx < len(slugs) - 1:

@@ -1,7 +1,5 @@
 REQUIRED_FIELDS = [
     "county",
-    "state",
-    "jurisdiction",
     "owner",
     "address",
     "land_size",
@@ -18,12 +16,6 @@ def normalize_item(item):
     if item is None:
         item = {}
     normalized = {field: item.get(field, "") for field in REQUIRED_FIELDS}
-    if not normalized.get("state"):
-        normalized["state"] = "fl"
-    if not normalized.get("county"):
-        normalized["county"] = item.get("jurisdiction", "")
-    if not normalized.get("jurisdiction"):
-        normalized["jurisdiction"] = normalized.get("county", "")
     for key, value in item.items():
         if key not in normalized:
             normalized[key] = value

@@ -267,7 +267,7 @@ def _update_router(
         f"        \"notes\": \"Generated entry.\",\n"
         f"    }},\n"
     )
-    marker = "_ENTRIES = {"
+    marker = "_COUNTY_ENTRIES = {"
     if marker in content:
         content = content.replace(marker, marker + "\n" + entry, 1)
         router_path.write_text(content, encoding="utf-8")
@@ -278,14 +278,11 @@ def main() -> int:
     parser.add_argument("--slug", required=True)
     parser.add_argument("--url-template", required=True)
     parser.add_argument("--columns", required=True)
-    parser.add_argument("--state", default="fl")
     parser.add_argument(
         "--pagination", default="none", choices=["none", "page_param", "next_link"]
     )
     parser.add_argument("--needs-form-post", action="store_true")
     parser.add_argument("--needs-js", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     slug = args.slug.strip().lower()
@@ -294,38 +291,8 @@ def main() -> int:
         raise SystemExit(1)
 
     base = Path(__file__).resolve().parents[1]
-    result = scaffold_county(
-        base_dir=base,
-        slug=slug,
-        columns=columns,
-        url_template=args.url_template,
-        pagination=args.pagination,
-        needs_form_post=args.needs_form_post,
-        needs_js=args.needs_js,
-        state=args.state,
-        dry_run=args.dry_run,
-        force=args.force,
-    )
-    if args.dry_run:
-        for entry in result.get("planned", []):
-            print(entry)
-    return 0
-
-
-def scaffold_county(
-    base_dir: Path,
-    slug: str,
-    columns: list,
-    url_template: str,
-    pagination: str,
-    needs_form_post: bool,
-    needs_js: bool,
-    state: str,
-    dry_run: bool = False,
-    force: bool = False,
-) -> dict:
-    spiders_dir = base_dir / "src" / "florida_property_scraper" / "backend" / "spiders"
-    tests_dir = base_dir / "tests"
+    spiders_dir = base / "src" / "florida_property_scraper" / "backend" / "spiders"
+    tests_dir = base / "tests"
     fixtures_dir = tests_dir / "fixtures"
 
     class_name = "".join(part.capitalize() for part in slug.split("_")) + "Spider"
@@ -335,87 +302,55 @@ def scaffold_county(
     test_path = tests_dir / f"test_{slug}_spider_integration.py"
     realistic_test_path = tests_dir / f"test_{slug}_spider_realistic_fixture.py"
 
-    planned = []
-
-    def _plan_write(path: Path, allow_overwrite: bool) -> None:
-        if path.exists():
-            if allow_overwrite:
-                planned.append(f"overwrite:{path}")
-            else:
-                planned.append(f"skip:{path}")
-        else:
-            planned.append(f"create:{path}")
-
-    _plan_write(spider_path, force)
-    _plan_write(fixture_path, force)
-    _plan_write(realistic_fixture_path, force)
-    _plan_write(test_path, force)
-    _plan_write(realistic_test_path, force)
-
-    if dry_run:
-        return {"planned": planned}
-
-    if force or not spider_path.exists():
-        spider_path.write_text(
-            SPIDER_TEMPLATE.format(
-                class_name=class_name,
-                slug=slug,
-            ),
-            encoding="utf-8",
-        )
+    spider_path.write_text(
+        SPIDER_TEMPLATE.format(
+            class_name=class_name,
+            slug=slug,
+        ),
+        encoding="utf-8",
+    )
 
     slug_title = slug.replace("_", " ").title()
     row_one = _render_row(columns, slug_title, 1)
     row_two = _render_row(columns, slug_title, 2)
-    if force or not fixture_path.exists():
-        fixture_path.write_text(
-            FIXTURE_TEMPLATE.format(slug=slug, row_one=row_one, row_two=row_two),
-            encoding="utf-8",
-        )
+    fixture_path.write_text(
+        FIXTURE_TEMPLATE.format(slug=slug, row_one=row_one, row_two=row_two),
+        encoding="utf-8",
+    )
     realistic_row_one = _render_realistic_row(columns, slug_title, 1)
     realistic_row_two = _render_realistic_row(columns, slug_title, 2)
-    if force or not realistic_fixture_path.exists():
-        realistic_fixture_path.write_text(
-            REALISTIC_TEMPLATE.format(
-                row_one=realistic_row_one, row_two=realistic_row_two
-            ),
-            encoding="utf-8",
-        )
+    realistic_fixture_path.write_text(
+        REALISTIC_TEMPLATE.format(row_one=realistic_row_one, row_two=realistic_row_two),
+        encoding="utf-8",
+    )
 
-    if force or not test_path.exists():
-        test_path.write_text(
-            TEST_TEMPLATE.format(
-                class_name=class_name,
-                module_name=f"{slug}_spider",
-                slug=slug,
-            ),
-            encoding="utf-8",
-        )
-    if force or not realistic_test_path.exists():
-        realistic_test_path.write_text(
-            REALISTIC_TEST_TEMPLATE.format(
-                class_name=class_name,
-                module_name=f"{slug}_spider",
-                slug=slug,
-            ),
-            encoding="utf-8",
-        )
+    test_path.write_text(
+        TEST_TEMPLATE.format(
+            class_name=class_name,
+            module_name=f"{slug}_spider",
+            slug=slug,
+        ),
+        encoding="utf-8",
+    )
+    realistic_test_path.write_text(
+        REALISTIC_TEST_TEMPLATE.format(
+            class_name=class_name,
+            module_name=f"{slug}_spider",
+            slug=slug,
+        ),
+        encoding="utf-8",
+    )
 
     _update_registry(spiders_dir / "__init__.py", class_name, slug)
-    router_path = (
-        base_dir / "src" / "florida_property_scraper" / "routers" / f"{state}.py"
-    )
-    if not router_path.exists():
-        raise SystemExit(1)
     _update_router(
-        router_path,
+        base / "src" / "florida_property_scraper" / "county_router.py",
         slug,
-        url_template,
-        pagination,
-        needs_form_post,
-        needs_js,
+        args.url_template,
+        args.pagination,
+        args.needs_form_post,
+        args.needs_js,
     )
-    return {"planned": planned}
+    return 0
 
 
 if __name__ == "__main__":

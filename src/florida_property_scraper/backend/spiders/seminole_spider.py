@@ -56,15 +56,11 @@ class SeminoleSpider(Spider):
             items = extract_label_items(response, "seminole")
         if items:
             for item in items:
-                item["state"] = "fl"
-                item["jurisdiction"] = item.get("county", "seminole")
                 item["raw_html"] = truncate_html(item.get("raw_html"))
                 yield normalize_item(item)
         elif self.debug_html:
             yield normalize_item(
                 {
-                    "state": "fl",
-                    "jurisdiction": "seminole",
                     "county": "seminole",
                     "raw_html": truncate_html(response.text),
                 }
