@@ -58,6 +58,5 @@ if app:
     def index():
         return FileResponse(WEB_DIR / "map.html")
 
-    if WEB_DIR.exists():
-        if WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+   if WEB_DIR.exists():
+       app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
