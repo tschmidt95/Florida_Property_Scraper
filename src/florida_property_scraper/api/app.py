@@ -59,4 +59,5 @@ if app:
         return FileResponse(WEB_DIR / "map.html")
 
     if WEB_DIR.exists():
-        app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+        if WEB_DIR.exists():
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
