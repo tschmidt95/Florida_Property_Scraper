@@ -1,6 +1,11 @@
 import argparse
-import os
+import csv
+import json
+from pathlib import Path
+
 from .scraper import FloridaPropertyScraper
+from .schema import REQUIRED_FIELDS, normalize_item
+from .storage import SQLiteStorage
 
 
 def main():
@@ -23,14 +28,6 @@ def main():
     parser.add_argument(
         "--address",
         help="Owner address (paired with --name)",
-        required=False,
-    )
-
-    parser.add_argument(
-        "--api-key",
-        help=(
-            "ScrapingBee API key (overrides SCRAPINGBEE_API_KEY env var)"
-        ),
         required=False,
     )
 
@@ -63,10 +60,62 @@ def main():
     )
 
     parser.add_argument(
-        "--backend",
-        choices=["scrapy", "scrapingbee"],
-        default="scrapy",
-        help="Which scraping backend to use (default: scrapy)",
+        "--counties",
+        help="Comma-separated list of counties to search",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=None,
+        help="Maximum number of items to scrape before stopping",
+    )
+
+    parser.add_argument(
+        "--store",
+        default="./leads.sqlite",
+        help="SQLite path for storing scraped results",
+    )
+
+    parser.add_argument(
+        "--no-store",
+        action="store_true",
+        help="Disable storing results to SQLite",
+    )
+
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Write results to a file (path)",
+    )
+
+    parser.add_argument(
+        "--format",
+        choices=["jsonl", "json", "csv"],
+        default="jsonl",
+        help="Output format for --output",
+    )
+
+    parser.add_argument(
+        "--no-output",
+        action="store_true",
+        help="Disable writing results to --output",
+    )
+
+    parser.add_argument(
+        "--append-output",
+        dest="append_output",
+        action="store_true",
+        default=True,
+        help="Append to output file if it exists",
+    )
+
+    parser.add_argument(
+        "--no-append-output",
+        dest="append_output",
+        action="store_false",
+        help="Overwrite output file instead of appending",
     )
 
     args = parser.parse_args()
@@ -93,43 +142,58 @@ def main():
         else:
             query = input("Enter owner name or address to search: ")
 
-    api_key = (
-        args.api_key
-        or (
-            os.environ.get("SCRAPINGBEE_API_KEY")
-            if args.backend == "scrapingbee"
-            else None
-        )
-    )
+    counties = None
+    if args.counties:
+        counties = [c.strip() for c in args.counties.split(",") if c.strip()]
 
     scraper = FloridaPropertyScraper(
-        scrapingbee_api_key=api_key,
         timeout=args.timeout,
         stop_after_first=args.stop_after_first,
         log_level=args.log_level,
         demo=args.demo,
-        backend=args.backend,
+        counties=counties,
+        max_items=args.max_items,
     )
 
-    results = scraper.search_all_counties(query)
+    results = scraper.search_all_counties(query, max_items=args.max_items)
+    results = [normalize_item(item) for item in results]
+    if args.max_items:
+        results = results[: args.max_items]
+
+    if not args.no_store:
+        storage = SQLiteStorage(args.store)
+        storage.save_items(results)
+        storage.close()
+
+    if args.output and not args.no_output:
+        output_path = Path(args.output)
+        if args.format == "jsonl":
+            mode = "a" if args.append_output else "w"
+            with output_path.open(mode, encoding="utf-8") as handle:
+                for item in results:
+                    handle.write(json.dumps(item) + "\n")
+        elif args.format == "json":
+            existing = []
+            if args.append_output and output_path.exists():
+                existing = json.loads(output_path.read_text(encoding="utf-8"))
+                if not isinstance(existing, list):
+                    existing = []
+            payload = existing + results if args.append_output else results
+            output_path.write_text(json.dumps(payload), encoding="utf-8")
+        elif args.format == "csv":
+            mode = "a" if args.append_output and output_path.exists() else "w"
+            with output_path.open(mode, newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=REQUIRED_FIELDS)
+                if mode == "w":
+                    writer.writeheader()
+                for item in results:
+                    writer.writerow({k: item.get(k, "") for k in REQUIRED_FIELDS})
     print(f"Found {len(results)} properties:")
     for i, result in enumerate(results):
         print(
             f"{i+1}. {result.get('county', 'Unknown')}: "
-            f"{result.get('owner', 'N/A')} - {result.get('address', 'N/A')} - "
-            f"Value: {result.get('value', 'N/A')}"
+            f"{result.get('owner', 'N/A')} - {result.get('address', 'N/A')}"
         )
-        if "property_id" in result:
-            details = scraper.get_detailed_info(
-                result.get("county", ""),
-                result["property_id"],
-            )
-            if details:
-                print(
-                    f"   Details: Phone: {details.get('phone', 'N/A')}, "
-                    f"Mobile: {details.get('mobile', 'N/A')}, "
-                    f"Email: {details.get('email', 'N/A')}"
-                )
 
 
 if __name__ == "__main__":

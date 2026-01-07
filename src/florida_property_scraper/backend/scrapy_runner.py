@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--spider-name', required=True)
     parser.add_argument('--start-urls', required=True, help='JSON array of start URLs')
+    parser.add_argument('--max-items', type=int, default=None)
     args = parser.parse_args()
 
     start_urls = json.loads(args.start_urls)
@@ -47,10 +48,11 @@ def main():
         from .scrapy_adapter import InMemoryPipeline
         from .spiders import SPIDERS
     except Exception as exc:
-        print(json.dumps({'error': str(exc)}))
+        print(json.dumps({"error": str(exc)}))
         sys.exit(1)
 
     InMemoryPipeline.items_list = []
+    InMemoryPipeline.max_items = args.max_items
     pipeline_key = (
         "florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline"
     )
@@ -60,26 +62,28 @@ def main():
             pipeline_key: 100,
         },
     }
+    if args.max_items:
+        settings["CLOSESPIDER_ITEMCOUNT"] = args.max_items
 
-    SpiderCls = SPIDERS.get(args.spider_name)
+    raw_name = args.spider_name
+    normalized_name = (
+        raw_name[: -len("_spider")] if raw_name.endswith("_spider") else raw_name
+    )
+
+    SpiderCls = SPIDERS.get(raw_name) or SPIDERS.get(normalized_name)
     if not SpiderCls:
-    if not SpiderCls:
+        module_name = (
+            "florida_property_scraper.backend.spiders."
+            f"{normalized_name}_spider"
+        )
+        class_name = (
+            "".join(p.capitalize() for p in normalized_name.split("_")) + "Spider"
+        )
         try:
-            module_name = (
-                "florida_property_scraper.backend.spiders."
-                f"{args.spider_name}_spider"
-            )
-            module = __import__(module_name, fromlist=['*'])
-            class_name = (
-                "".join(p.capitalize() for p in args.spider_name.split("_"))
-                + "Spider"
-            )
+            module = __import__(module_name, fromlist=["*"])
             SpiderCls = getattr(module, class_name)
         except Exception as exc:
-            print(json.dumps({'error': str(exc)}))
-            sys.exit(1)
-        except Exception as exc:
-            print(json.dumps({'error': str(exc)}))
+            print(json.dumps({"error": str(exc)}))
             sys.exit(1)
 
     process = CrawlerProcess(settings=settings)

@@ -21,15 +21,23 @@ class InMemoryPipeline:
     """
 
     items_list = None
+    max_items = None
 
     @classmethod
     def from_crawler(cls, crawler):
         inst = cls()
         inst.items = cls.items_list if cls.items_list is not None else []
+        inst.max_items = cls.max_items
+        inst.crawler = crawler
         return inst
 
     def process_item(self, item, spider):
+        if self.max_items and len(self.items) >= self.max_items:
+            spider.crawler.engine.close_spider(spider, reason="max_items")
+            return item
         self.items.append(dict(item))
+        if self.max_items and len(self.items) >= self.max_items:
+            spider.crawler.engine.close_spider(spider, reason="max_items")
         return item
 
 
@@ -45,16 +53,31 @@ class ScrapyAdapter:
         For non-demo runs we invoke the runner subprocess which emits JSON
         to stdout.
         """
+        from florida_property_scraper.schema import normalize_item
+
         if self.demo:
-            return [
+            items = [
                 {
+                    "county": "demo",
                     "address": "123 Demo St",
                     "owner": "Demo Owner",
                     "notes": "demo fixture",
+                    "land_size": "",
+                    "building_size": "",
+                    "bedrooms": "",
+                    "bathrooms": "",
+                    "zoning": "",
+                    "property_class": "",
+                    "raw_html": "",
                 }
             ]
+            max_items = kwargs.get("max_items")
+            if max_items:
+                items = items[: int(max_items)]
+            return [normalize_item(item) for item in items]
         start_urls = kwargs.get("start_urls")
         spider_name = kwargs.get("spider_name") or ""
+        max_items = kwargs.get("max_items")
         if not start_urls:
             return []
 
@@ -67,6 +90,8 @@ class ScrapyAdapter:
             "--start-urls",
             json.dumps(start_urls),
         ]
+        if max_items:
+            runner_cmd.extend(["--max-items", str(int(max_items))])
 
         MAX_RETRIES = 3
         delay = 0.05
@@ -88,7 +113,10 @@ class ScrapyAdapter:
                 items = None
 
             if isinstance(items, list) and items:
-                return items
+                normalized = [normalize_item(item) for item in items]
+                if max_items:
+                    return normalized[: int(max_items)]
+                return normalized
 
             # If the runner returned an error payload, stop retrying
             try:

@@ -16,6 +16,14 @@ class AlachuaSpider(Spider):
             address = row.css('td:nth-child(2)::text').get()
             if owner or address:
                 yield {
+                    'county': 'alachua',
                     'owner': owner.strip() if owner else '',
-                    'address': address.strip() if address else ''
+                    'address': address.strip() if address else '',
+                    'land_size': '',
+                    'building_size': '',
+                    'bedrooms': '',
+                    'bathrooms': '',
+                    'zoning': '',
+                    'property_class': '',
+                    'raw_html': '',
                 }

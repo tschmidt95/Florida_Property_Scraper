@@ -1,82 +1,26 @@
-import os
-import logging
-import requests
-import json
-import time
 from typing import Dict, List, Optional
-from urllib.parse import quote_plus
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-logger = logging.getLogger(__name__)
+from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
 
 
 class FloridaPropertyScraper:
     def __init__(
         self,
-        scrapingbee_api_key: Optional[str] = None,
         timeout: int = 10,
         stop_after_first: bool = True,
         log_level: Optional[str] = None,
         demo: bool = False,
-        backend: str = "scrapy",
+        counties: Optional[List[str]] = None,
+        max_items: Optional[int] = None,
     ):
-        """Create a scraper.
-
-        scrapingbee_api_key: optional API key (falls back to SCRAPINGBEE_API_KEY env var)
-        timeout: request timeout in seconds
-        stop_after_first: whether to stop after the first county with results
-        log_level: optional logging level (e.g., 'DEBUG', 'INFO'). If provided, configures basic logging.
-        demo: if True, return canned demo responses and do not make network requests
-        """
-        # Configure basic logging if requested
-        if log_level is not None:
-            level = getattr(logging, log_level.upper(), logging.INFO) if isinstance(log_level, str) else log_level
-            logging.basicConfig(level=level)
-            logger.setLevel(level)
-        # Set backend and conditionally require ScrapingBee key
-        self.backend = backend
-        if self.backend == 'scrapingbee':
-            self.scrapingbee_api_key = scrapingbee_api_key or os.environ.get("SCRAPINGBEE_API_KEY")
-            if not self.scrapingbee_api_key and not demo:
-                raise ValueError(
-                    "SCRAPINGBEE_API_KEY is not set; provide scrapingbee_api_key or set the SCRAPINGBEE_API_KEY env var, "
-                    "or run with --demo to use canned demo data"
-                )
-        else:
-            self.scrapingbee_api_key = None
-
-        self.base_url = "https://app.scrapingbee.com/api/v1/"
+        """Create a scraper using the Scrapy backend only."""
         self.timeout = timeout
-
-        # Only require ScrapingBee key when using that backend (and not demo)
-        if self.backend == 'scrapingbee':
-            if not scrapingbee_api_key and not demo:
-                raise ValueError(
-                    "SCRAPINGBEE_API_KEY is not set; provide scrapingbee_api_key or set the SCRAPINGBEE_API_KEY env var, "
-                    "or run with --demo to use canned demo data"
-                )
-            self.scrapingbee_api_key = scrapingbee_api_key
-        else:
-            self.scrapingbee_api_key = None
-
-        # Initialize backend adapter (scrapy by default)
-        if self.backend == 'scrapy':
-            from .backend.scrapy_adapter import ScrapyAdapter
-
-            self.adapter = ScrapyAdapter(demo=demo, timeout=timeout)
-        else:
-            from .backend.scrapingbee_adapter import ScrapingBeeAdapter
-
-            self.adapter = ScrapingBeeAdapter(api_key=self.scrapingbee_api_key, demo=demo, timeout=timeout)
         self.stop_after_first = stop_after_first
+        self.log_level = log_level
         self.demo = demo
-        # Configure a session with retries/backoff (not used in demo mode)
-        self.session = requests.Session()
-        retries = Retry(total=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 503, 504))
-        adapter = HTTPAdapter(max_retries=retries)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+        self.counties_filter = counties
+        self.max_items = max_items
+        self.adapter = ScrapyAdapter(demo=demo, timeout=timeout)
 
         self.counties = [
             {"name": "Alachua", "url": "https://www.alachuaclerk.com/propertysearch/search.aspx?owner="},
@@ -148,107 +92,43 @@ class FloridaPropertyScraper:
             {"name": "Washington", "url": "https://www.washingtoncountyfl.com/property-search/"}
         ]
 
-    def scrape_county(self, county: Dict, query: str) -> List[Dict]:
-        encoded_query = quote_plus(query)
-        search_url = county["url"] + encoded_query
-        params = {
-            "api_key": self.scrapingbee_api_key,
-            "url": search_url,
-            "render_js": "false",
-            "extract_rules": json.dumps({
-                "properties": {
-                    "selector": "table tr",
-                    "type": "list",
-                    "output": {
-                        "owner": "td:nth-child(1)",
-                        "address": "td:nth-child(2)",
-                        "value": "td:nth-child(3)",
-                        "phone": "td:nth-child(4)",
-                        "email": "td:nth-child(5)",
-                        "property_id": "td:nth-child(6) a@href"
-                    }
-                }
-            })
-        }
-        # Demo mode returns canned data without network requests
-        if self.demo:
-            return [
-                {
-                    "owner": "Demo Owner",
-                    "address": "123 Demo St",
-                    "value": "$100,000",
-                    "phone": "555-0000",
-                    "email": "demo@example.com",
-                    "property_id": "demo-123",
-                    "county": county["name"]
-                }
-            ]
-        try:
-            response = self.session.get(self.base_url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            properties = data.get("properties", [])
-            for prop in properties:
-                prop["county"] = county["name"]
-            return properties
-        except Exception as e:
-            logger.info(f"Error scraping {county['name']}: {e}")
-            return []
-
-    def get_ownership_details(self, county: Dict, property_id: str) -> Dict:
-        detail_url = county["url"].replace("search.aspx?owner=", "details.aspx?id=") + property_id
-        params = {
-            "api_key": self.scrapingbee_api_key,
-            "url": detail_url,
-            "render_js": "false",
-            "extract_rules": json.dumps({
-                "details": {
-                    "owner": "#owner",
-                    "phone": "#phone",
-                    "email": "#email",
-                    "address": "#address",
-                    "value": "#value",
-                    "mobile": "#mobile"
-                }
-            })
-        }
-        # Demo mode returns canned details
-        if self.demo:
-            return {
-                "owner": "Demo Owner",
-                "phone": "555-0000",
-                "email": "demo@example.com",
-                "address": "123 Demo St",
-                "value": "$100,000",
-                "mobile": "555-0001"
-            }
-        try:
-            response = self.session.get(self.base_url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("details", {})
-        except Exception as e:
-            logger.info(f"Error getting details for {county['name']}: {e}")
-            return {}
-
-    def search_all_counties(self, query: str, stop_after_first: Optional[bool] = None) -> List[Dict]:
-        """Search across counties. By default stop_after_first uses the instance setting.
-        Set stop_after_first=False to aggregate results from all counties."""
+    def search_all_counties(
+        self,
+        query: str,
+        stop_after_first: Optional[bool] = None,
+        counties: Optional[List[str]] = None,
+        max_items: Optional[int] = None,
+    ) -> List[Dict]:
         if stop_after_first is None:
             stop_after_first = self.stop_after_first
-        all_results = []
+        if counties is None:
+            counties = self.counties_filter
+        if max_items is None:
+            max_items = self.max_items
+        all_results: List[Dict] = []
+        if self.demo:
+            demo_results = self.adapter.search(
+                query,
+                start_urls=["file://demo"],
+                spider_name="broward_spider",
+                max_items=max_items,
+            )
+            return demo_results
+        allowed = None
+        if counties:
+            allowed = {c.strip().lower() for c in counties if c.strip()}
         for county in self.counties:
-            logger.info(f"Searching {county['name']}...")
-            results = self.scrape_county(county, query)
+            if allowed:
+                if county["name"].strip().lower() not in allowed:
+                    continue
+            results = self.adapter.search(
+                query,
+                start_urls=[county["url"]],
+                spider_name=f"{county['name'].strip().lower().replace(' ', '_')}_spider",
+                max_items=max_items,
+            )
             if results:
                 all_results.extend(results)
                 if stop_after_first:
                     break
-            time.sleep(1)
         return all_results
-
-    def get_detailed_info(self, county_name: str, property_id: str) -> Dict:
-        county = next((c for c in self.counties if c["name"] == county_name), None)
-        if not county:
-            return {}
-        return self.get_ownership_details(county, property_id)
