@@ -45,6 +45,26 @@ Optional live smoke tests:
 
 ---
 
+## Adding a new state
+
+Scaffold a state router module:
+
+  python scripts/add_state.py --state xx --name "State Name"
+
+Add counties for that state with the generator:
+
+  python scripts/add_county.py --state xx --slug sample_county --url-template "https://example.gov/search?owner={query}" --columns owner,address
+
+### State scaffolding
+
+Examples:
+
+  python3 scripts/add_state.py --state ga --name "Georgia"
+  python3 scripts/add_county.py --state fl --slug duval --url-template "https://example.gov/search?owner={query}" --columns owner,address,property_class,zoning
+  python3 scripts/add_county.py --dry-run --state fl --slug duval --url-template "https://example.gov/search?owner={query}" --columns owner,address
+
+One source of truth: `src/florida_property_scraper/routers/<state>.py` is canonical; `src/florida_property_scraper/county_router.py` is compatibility only.
+
 ## Post-publish smoke check (automated)
 
 We run a post-publish smoke check after a release is published that pulls the published GHCR image and performs a minimal import test to ensure the package is present and importable.

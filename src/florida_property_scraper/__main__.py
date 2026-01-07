@@ -3,11 +3,11 @@ import csv
 import json
 from pathlib import Path
 
-from .county_router import (
+from .routers.fl import canonicalize_jurisdiction_name as canonicalize_county_name
+from .routers.registry import (
     build_start_urls,
-    canonicalize_county_name,
-    enabled_counties,
-    get_county_entry,
+    enabled_jurisdictions,
+    get_entry,
 )
 from .scraper import FloridaPropertyScraper
 from .schema import REQUIRED_FIELDS, normalize_item
@@ -111,6 +111,11 @@ def main():
         "--counties",
         help="Comma-separated list of counties to search",
         default=None,
+    )
+    parser.add_argument(
+        "--state",
+        default="fl",
+        help="State identifier (default: fl)",
     )
 
     parser.add_argument(
@@ -244,7 +249,7 @@ def main():
     if counties:
         slugs = counties
     else:
-        slugs = enabled_counties()
+        slugs = enabled_jurisdictions(args.state)
 
     query_for_filter = queries[0] if queries else ""
     is_address_query = False
@@ -254,7 +259,7 @@ def main():
         is_address_query = True
     filtered = []
     for slug in slugs:
-        entry = get_county_entry(slug)
+        entry = get_entry(args.state, slug)
         if is_address_query and not entry.get("supports_address_search", True):
             continue
         if not is_address_query and not entry.get("supports_owner_search", True):
@@ -264,8 +269,8 @@ def main():
     if args.dry_run:
         print(f"Counties: {', '.join(slugs)}")
         for slug in slugs:
-            entry = get_county_entry(slug)
-            urls = build_start_urls(slug, queries[0] if queries else "")
+            entry = get_entry(args.state, slug)
+            urls = build_start_urls(args.state, slug, queries[0] if queries else "")
             print(f"{slug}: {entry.get('spider_key')} -> {urls}")
             if args.log_json:
                 print(
@@ -301,6 +306,7 @@ def main():
         debug_html=args.debug_html,
         per_county_limit=args.per_county_limit,
         delay_ms=args.delay_ms,
+        state=args.state,
     )
 
     all_results = []
