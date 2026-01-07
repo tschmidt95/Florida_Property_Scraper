@@ -2,3 +2,4 @@ requests
 scrapy==2.13.3
 fastapi
 uvicorn
+jsonschema>=4.0
