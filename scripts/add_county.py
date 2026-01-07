@@ -123,7 +123,7 @@ def test_{slug}_spider_collects_items():
     items = list(spider.parse(resp))
 
     assert isinstance(items, list)
-    assert len(items) >= 2
+    assert len(items) == 2
     for item in items:
         for field in REQUIRED_FIELDS:
             assert field in item
@@ -153,7 +153,7 @@ def test_{slug}_spider_realistic_fixture():
     spider = {class_name}(start_urls=[file_url])
     items = list(spider.parse(resp))
 
-    assert len(items) >= 2
+    assert len(items) == 2
     for item in items:
         for field in REQUIRED_FIELDS:
             assert field in item
