@@ -25,6 +25,7 @@ def test_add_county_dry_run_no_writes(tmp_path):
         needs_form_post=False,
         needs_js=False,
         state="fl",
+        status="live",
         dry_run=True,
         force=False,
     )

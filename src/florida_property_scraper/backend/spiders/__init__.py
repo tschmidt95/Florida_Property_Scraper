@@ -1,11 +1,13 @@
 """Spider registry for available county spiders."""
 from .alachua_spider import AlachuaSpider
 from .broward_spider import BrowardSpider
+from .duval_spider import DuvalSpider
 from .hillsborough_spider import HillsboroughSpider
 from .miami_dade_spider import MiamiDadeSpider
 from .orange_spider import OrangeSpider
 from .palm_beach_spider import PalmBeachSpider
 from .pinellas_spider import PinellasSpider
+from .polk_spider import PolkSpider
 from .seminole_spider import SeminoleSpider
 from . import broward_spider  # keeps tests that expect spiders_pkg.broward_spider working
 
@@ -14,6 +16,8 @@ SPIDERS = {
     "alachua_spider": AlachuaSpider,
     "broward": BrowardSpider,
     "broward_spider": BrowardSpider,
+    "duval": DuvalSpider,
+    "duval_spider": DuvalSpider,
     "hillsborough": HillsboroughSpider,
     "hillsborough_spider": HillsboroughSpider,
     "miami_dade": MiamiDadeSpider,
@@ -24,6 +28,8 @@ SPIDERS = {
     "palm_beach_spider": PalmBeachSpider,
     "pinellas": PinellasSpider,
     "pinellas_spider": PinellasSpider,
+    "polk": PolkSpider,
+    "polk_spider": PolkSpider,
     "seminole": SeminoleSpider,
     "seminole_spider": SeminoleSpider,
 }

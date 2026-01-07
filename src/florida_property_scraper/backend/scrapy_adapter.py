@@ -198,3 +198,7 @@ class ScrapyAdapter:
             sys.stderr.write(f"Runner STDERR:\n{last_stderr}\n")
 
         return []
+import os as _os
+
+if _os.environ.get("FL_SCRAPER_BACKEND") == "native":
+    from florida_property_scraper.backend.native_adapter import NativeAdapter as ScrapyAdapter
