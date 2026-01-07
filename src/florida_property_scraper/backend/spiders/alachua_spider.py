@@ -3,9 +3,8 @@ from scrapy import FormRequest, Request, Spider
 from florida_property_scraper.schema import REQUIRED_FIELDS, normalize_item
 from florida_property_scraper.spider_utils import (
     extract_label_items,
-    extract_table_items,
+    extract_label_items_from_nodes,
     next_page_request,
-    normalize_text,
     truncate_html,
 )
 
@@ -49,7 +48,10 @@ class AlachuaSpider(Spider):
             yield Request(url, meta={"page": 1})
 
     def parse(self, response):
-        items = extract_table_items(response, self.COLUMNS, "alachua")
+        nodes = response.css(
+            ".alachua-result, .result-row, .search-result, .property-card"
+        )
+        items = extract_label_items_from_nodes(nodes, "alachua")
         if not items:
             items = extract_label_items(response, "alachua")
         if items:
@@ -60,7 +62,7 @@ class AlachuaSpider(Spider):
             yield normalize_item(
                 {
                     "county": "alachua",
-                    "raw_html": response.text[:50000],
+                    "raw_html": truncate_html(response.text),
                 }
             )
         next_req = next_page_request(

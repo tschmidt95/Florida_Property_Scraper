@@ -10,6 +10,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "next_link",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": True,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": False,
         "notes": "Owner search via query parameter.",
@@ -21,6 +25,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -34,6 +42,10 @@ _COUNTY_ENTRIES = {
         "form_fields_template": {"owner": "{query}"},
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": False,
+        "needs_form_post": True,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via form submit.",
@@ -45,6 +57,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "page_param",
         "page_param": "page",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": True,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -56,6 +72,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -67,6 +87,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -78,6 +102,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -89,6 +117,10 @@ _COUNTY_ENTRIES = {
         "query_param_style": "template",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": True,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": True,
         "supports_address_search": True,
         "notes": "Owner search via query parameter.",
@@ -118,6 +150,10 @@ def get_county_entry(slug: str) -> dict:
         "query_param_style": "none",
         "pagination": "none",
         "page_param": "",
+        "supports_query_param": False,
+        "needs_form_post": False,
+        "needs_pagination": False,
+        "needs_js": False,
         "supports_owner_search": False,
         "supports_address_search": False,
         "notes": "No start url configured.",
@@ -125,20 +161,53 @@ def get_county_entry(slug: str) -> dict:
 
 
 def build_start_urls(slug: str, query: str) -> list:
+    return build_request_plan(slug, query)["start_urls"]
+
+
+def build_request_plan(slug: str, query: str) -> dict:
     entry = get_county_entry(slug)
-    style = entry.get("query_param_style")
-    if style == "template":
+    if entry.get("needs_js"):
+        return {
+            "start_urls": [],
+            "spider_key": entry.get("spider_key", ""),
+            "needs_form_post": entry.get("needs_form_post", False),
+            "pagination": entry.get("pagination", "none"),
+            "page_param": entry.get("page_param", ""),
+        }
+    if entry.get("needs_form_post"):
+        form_url = entry.get("form_url", "")
+        return {
+            "start_urls": [form_url] if form_url else [],
+            "spider_key": entry.get("spider_key", ""),
+            "needs_form_post": True,
+            "pagination": entry.get("pagination", "none"),
+            "page_param": entry.get("page_param", ""),
+        }
+    if entry.get("supports_query_param"):
         template = entry.get("url_template", "")
         if not template:
-            return []
+            return {
+                "start_urls": [],
+                "spider_key": entry.get("spider_key", ""),
+                "needs_form_post": False,
+                "pagination": entry.get("pagination", "none"),
+                "page_param": entry.get("page_param", ""),
+            }
         encoded = quote_plus(query or "")
-        return [template.format(query=encoded)]
-    if style == "form":
-        form_url = entry.get("form_url", "")
-        if not form_url:
-            return []
-        return [form_url]
-    return []
+        return {
+            "start_urls": [template.format(query=encoded)],
+            "spider_key": entry.get("spider_key", ""),
+            "needs_form_post": False,
+            "pagination": entry.get("pagination", "none"),
+            "page_param": entry.get("page_param", ""),
+        }
+    return {
+        "start_urls": [],
+        "spider_key": entry.get("spider_key", ""),
+        "needs_form_post": entry.get("needs_form_post", False),
+        "pagination": entry.get("pagination", "none"),
+        "page_param": entry.get("page_param", ""),
+    }
 
 
 def enabled_counties() -> list:
