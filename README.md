@@ -3,6 +3,48 @@ Scan properties and look up owner information in Florida
 
 ---
 
+## Getting started (local)
+
+- Create and activate a virtual environment:
+
+  python -m venv .venv
+  source .venv/bin/activate
+
+- Install the package and test deps:
+
+  python -m pip install --upgrade pip setuptools wheel
+  python -m pip install -e .[test]
+
+- Run smoke tests:
+
+  python -m pytest -q tests/test_smoke.py
+
+- Run the Flask demo app (after installing Flask):
+
+  python web_app.py  # open http://localhost:5000 and enable Demo mode
+
+- Run the Scrapy runner against a local fixture:
+
+  python -m florida_property_scraper.backend.scrapy_runner --spider-name broward_spider --start-urls '["file:///absolute/path/to/tests/fixtures/broward_sample.html"]'
+
+---
+
+## Live mode usage
+
+Run live requests against county sites (network required):
+
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "broward" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "alachua" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "seminole" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "orange" --max-items 3
+  PYTHONPATH=./src python3 -m florida_property_scraper --live --query "Smith" --counties "palm_beach" --max-items 3
+
+Optional live smoke tests:
+
+  RUN_LIVE_TESTS=1 PYTHONPATH=./src python3 -m pytest -q -m live
+
+---
+
 ## Post-publish smoke check (automated)
 
 We run a post-publish smoke check after a release is published that pulls the published GHCR image and performs a minimal import test to ensure the package is present and importable.
@@ -26,7 +68,7 @@ If the scheduled monitor fails repeatedly (default threshold: 3 consecutive fail
 
 We provide a **template** workflow that can send an external notification (Slack, Microsoft Teams, webhook endpoints) when an issue labeled `monitor-failure` is opened.
 
-- File: `.github/workflows/notify_placeholder.yml`
+- File: `.github/workflows/notify_placeholder_v2.yml` (v2 replaces legacy `notify_placeholder.yml`)
 - How to enable: add a repository secret named `ALERT_WEBHOOK_URL` with your webhook URL (Slack, Teams, or custom). If you want to select provider-specific payloads, also add `ALERT_PROVIDER` with one of `slack`, `teams`, or `generic` (defaults to `slack`).
 - Notes: the template is intentionally non-invasive (it exits if `ALERT_WEBHOOK_URL` is not configured). When you add the secret, the workflow will start posting notifications on new `monitor-failure` issues.
 

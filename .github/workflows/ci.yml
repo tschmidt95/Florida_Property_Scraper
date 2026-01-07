@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, feature/migrate-to-scrapy ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.11']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Setup OS deps (for Scrapy native deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev
+          sudo rm -rf /var/lib/apt/lists/*
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python }}-
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install runtime/test deps
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install scrapy==2.13.3 pytest flake8 jsonschema
+
+      - name: Install package (editable)
+        run: python -m pip install -e .
+
+      - name: Smoke tests
+        run: python -m pytest -q tests/test_smoke.py
+
+      - name: Lint (flake8)
+        run: |
+          python -m flake8 || true
+
+      - name: Run tests
+        run: python -m pytest -q

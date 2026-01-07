@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Copy repository
+COPY . /app
+
+# Install system libs required for Scrapy and install package + Flask
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir -e . \
+    && python -m pip install --no-cache-dir flask
+
+EXPOSE 5000
+
+CMD ["python", "web_app.py"]

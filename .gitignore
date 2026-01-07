@@ -4,3 +4,15 @@ __pycache__/
 *.sqlite
 tmp_*.jsonl
 *.log
+# local virtualenvs
+.venv/
+venv/
+# stray ssh eval files
+eval "$(ssh-agent -s)"
+eval "$(ssh-agent -s)".pub
+# common build artifacts
+dist/
+build/
+*.egg-info/
+repo_old/
+.vscode/
