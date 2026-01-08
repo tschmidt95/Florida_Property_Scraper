@@ -53,7 +53,13 @@ def run_bench(counties, max_items, iterations=1):
         total_items += run_items
     total_time = sum(durations)
     rate = total_items / total_time if total_time else 0.0
-    print(f"Counties: {len(counties)} Items: {total_items} Time: {total_time:.4f}s Items/sec: {rate:.2f}")
+    settings = {
+        "MAX_BLOCKS_PER_RESPONSE": os.environ.get("MAX_BLOCKS_PER_RESPONSE", "50"),
+        "GLOBAL_CONCURRENCY": os.environ.get("GLOBAL_CONCURRENCY", "10"),
+        "PER_HOST_CONCURRENCY": os.environ.get("PER_HOST_CONCURRENCY", "2"),
+    }
+    settings_str = " ".join(f"{k}={v}" for k, v in settings.items())
+    print(f"Counties: {len(counties)} Items: {total_items} Time: {total_time:.4f}s Items/sec: {rate:.2f} {settings_str}")
     if iterations > 1:
         sorted_times = sorted(durations)
         p50 = sorted_times[int(0.50 * (len(sorted_times) - 1))]

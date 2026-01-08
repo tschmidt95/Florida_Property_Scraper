@@ -34,8 +34,8 @@ class NativeEngine:
         perf_valid = 0
         first_html = None
         first_blocks = []
-        global_sem = asyncio.Semaphore(int(os.environ.get("NATIVE_CONCURRENCY", "10")))
-        host_limit = int(os.environ.get("NATIVE_HOST_CONCURRENCY", "2"))
+        global_sem = asyncio.Semaphore(int(os.environ.get("GLOBAL_CONCURRENCY", "10")))
+        host_limit = int(os.environ.get("PER_HOST_CONCURRENCY", "2"))
         host_sems = {}
 
         async def _fetch(req):
@@ -145,6 +145,85 @@ class NativeEngine:
             }
             print(json.dumps(summary))
         return items
+
+    def iter_records(self, start_requests, parser, county_slug, allowed_hosts=None, log_fn=None, dry_run=False, fixture_map=None, debug_context=None):
+        items = []
+        visited = set()
+        queue = list(start_requests or [])
+        pages_seen = 0
+        debug_context = debug_context or {}
+        perf_enabled = os.environ.get("PERF") == "1"
+        perf_start = time.perf_counter() if perf_enabled else None
+        perf_requests = 0
+        perf_parsed = 0
+        perf_valid = 0
+        perf_dropped = 0
+        while queue:
+            if pages_seen >= self.max_pages:
+                break
+            remaining = None
+            if self.max_items:
+                remaining = self.max_items - len(items)
+            if self.per_county_limit:
+                limit_remaining = self.per_county_limit - len(items)
+                remaining = limit_remaining if remaining is None else min(remaining, limit_remaining)
+            if remaining is not None and remaining <= 0:
+                break
+            candidate_limit = None
+            if remaining is not None:
+                candidate_limit = max(remaining + 2, 0)
+            req = queue.pop(0)
+            req_url = req["url"] if isinstance(req, dict) else req
+            if req_url in visited:
+                continue
+            visited.add(req_url)
+            response = self.http.request(req, allowed_hosts=allowed_hosts, dry_run=dry_run, fixture_map=fixture_map)
+            pages_seen += 1
+            perf_requests += 1
+            set_max_blocks_limit(candidate_limit)
+            try:
+                parsed = parser(response["text"], response["final_url"], county_slug)
+            finally:
+                set_max_blocks_limit(None)
+            perf_parsed += len(parsed)
+            if candidate_limit and len(parsed) > candidate_limit:
+                parsed = parsed[:candidate_limit]
+            normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
+            dropped = 0
+            for item in normalized:
+                try:
+                    record = normalize_record(item)
+                except ValueError:
+                    dropped += 1
+                    continue
+                perf_valid += 1
+                items.append(record.to_dict())
+                yield record.to_dict()
+                if self.per_county_limit and len(items) >= self.per_county_limit:
+                    break
+                if self.max_items and len(items) >= self.max_items:
+                    break
+            perf_dropped += dropped
+            if log_fn:
+                log_fn(
+                    {
+                        "county": county_slug,
+                        "url": response["final_url"],
+                        "items_found": len(items),
+                        "dropped": dropped,
+                        "status": "success",
+                    }
+                )
+        elapsed = time.perf_counter() - perf_start if perf_start else 0.0
+        summary = {
+            "county": county_slug,
+            "requests": perf_requests,
+            "parsed": perf_parsed,
+            "validated": perf_valid,
+            "dropped": perf_dropped,
+            "seconds": round(elapsed, 6),
+        }
+        yield {"__summary__": summary}
 
     def run(self, start_requests, parser, county_slug, allowed_hosts=None, log_fn=None, dry_run=False, fixture_map=None, debug_context=None):
         if os.environ.get("NATIVE_ASYNC") == "1" and not dry_run:

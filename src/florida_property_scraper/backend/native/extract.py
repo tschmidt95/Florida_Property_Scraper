@@ -1,4 +1,5 @@
 import html
+import os
 import re
 
 try:
@@ -200,6 +201,7 @@ LABELS = (
 )
 LABEL_COLON_PATTERNS = {}
 LABEL_TAG_PATTERNS = {}
+DEFAULT_MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS_PER_RESPONSE", "50"))
 for label in LABELS:
     label_pattern = r"\s+".join(re.escape(part) for part in label.split())
     LABEL_COLON_PATTERNS[label] = re.compile(
@@ -221,7 +223,9 @@ def set_max_blocks_limit(limit):
 def _effective_block_limit(max_blocks):
     if max_blocks is not None:
         return max_blocks
-    return _MAX_BLOCKS_LIMIT
+    if _MAX_BLOCKS_LIMIT is not None:
+        return _MAX_BLOCKS_LIMIT
+    return DEFAULT_MAX_BLOCKS
 
 
 def split_result_blocks(html_text, max_blocks=None):

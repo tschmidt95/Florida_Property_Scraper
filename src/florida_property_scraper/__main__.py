@@ -168,6 +168,24 @@ def main():
         help="Maximum number of items per county",
     )
     parser.add_argument(
+        "--max-blocks-per-response",
+        type=int,
+        default=None,
+        help="Max result blocks parsed per response (native backend)",
+    )
+    parser.add_argument(
+        "--global-concurrency",
+        type=int,
+        default=None,
+        help="Global async concurrency (native backend)",
+    )
+    parser.add_argument(
+        "--per-host-concurrency",
+        type=int,
+        default=None,
+        help="Per-host async concurrency (native backend)",
+    )
+    parser.add_argument(
         "--log-json",
         action="store_true",
         help="Emit one JSON log line per county",
@@ -268,6 +286,12 @@ def main():
     parser.add_argument("--backend", choices=["scrapy", "native"], default="scrapy")
     args = parser.parse_args()
     os.environ["FL_SCRAPER_BACKEND"] = args.backend
+    if args.max_blocks_per_response is not None:
+        os.environ["MAX_BLOCKS_PER_RESPONSE"] = str(args.max_blocks_per_response)
+    if args.global_concurrency is not None:
+        os.environ["GLOBAL_CONCURRENCY"] = str(args.global_concurrency)
+    if args.per_host_concurrency is not None:
+        os.environ["PER_HOST_CONCURRENCY"] = str(args.per_host_concurrency)
     if args.backend == "native":
         from florida_property_scraper.backend.native_adapter import NativeAdapter
         import florida_property_scraper.backend.scrapy_adapter as scrapy_adapter

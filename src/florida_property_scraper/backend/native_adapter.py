@@ -72,3 +72,36 @@ class NativeAdapter:
         if max_items:
             normalized = normalized[:max_items]
         return normalized
+
+    def iter_records(
+        self,
+        query,
+        start_urls=None,
+        spider_name=None,
+        max_items=None,
+        per_county_limit=None,
+        live=False,
+        county_slug=None,
+        state="fl",
+        dry_run=False,
+    ):
+        county = county_slug or (spider_name or "").replace("_spider", "")
+        if live and not dry_run:
+            start_requests = self._build_start_requests(state, county, query)
+        else:
+            start_requests = []
+            if start_urls:
+                start_requests = [{"url": url, "method": "GET"} for url in start_urls]
+        parser = get_parser(county)
+        self.engine.max_items = max_items
+        self.engine.per_county_limit = per_county_limit
+        allowed_hosts = self._allowed_hosts(state, county) if live else None
+        run_dry = dry_run or not live
+        return self.engine.iter_records(
+            start_requests,
+            parser,
+            county,
+            allowed_hosts=allowed_hosts,
+            dry_run=run_dry,
+            debug_context={"query": query, "county": county},
+        )
