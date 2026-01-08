@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 
-from florida_property_scraper.county_router import enabled_counties
+from florida_property_scraper.routers.fl import enabled_counties
 
 
 def test_full_dry_run_all_counties():

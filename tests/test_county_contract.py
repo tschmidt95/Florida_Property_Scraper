@@ -7,7 +7,7 @@ from scrapy.http.request.form import FormRequest
 
 from florida_property_scraper.backend.scrapy_runner import resolve_spider_class
 from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
-from florida_property_scraper.county_router import get_county_entry
+from florida_property_scraper.routers.fl import get_entry as get_county_entry
 from florida_property_scraper.schema import REQUIRED_FIELDS
 
 
