@@ -1,9 +1,6 @@
 name: Notify on monitor-failure (template)
 
-on:
-  issues:
-    types: [opened, labeled]
-  workflow_dispatch:
+on: []
 
 permissions:
   issues: read
