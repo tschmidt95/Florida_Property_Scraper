@@ -37,6 +37,7 @@ jobs:
             --disable-warnings \
             --junitxml=junit.xml \
             --cov=src/florida_property_scraper \
+            --cov-config=.coveragerc \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-fail-under=80
