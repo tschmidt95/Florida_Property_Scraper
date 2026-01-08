@@ -12,7 +12,7 @@ class DummySpider(scrapy.Spider):
         super().__init__(**kwargs)
         self.query = query
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request("data:text/plain,ok", callback=self.parse)
 
     def parse(self, response):
