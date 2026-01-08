@@ -1,4 +1,4 @@
-from florida_property_scraper.county_router import build_start_urls
+from florida_property_scraper.routers.fl import build_start_urls
 
 
 def test_query_encoding_safe():

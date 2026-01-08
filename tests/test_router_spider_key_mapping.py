@@ -1,5 +1,6 @@
 from florida_property_scraper.backend.spiders import SPIDERS
-from florida_property_scraper.county_router import build_start_urls, get_county_entry
+from florida_property_scraper.routers.fl import build_start_urls
+from florida_property_scraper.routers.fl import get_entry as get_county_entry
 from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
 
 

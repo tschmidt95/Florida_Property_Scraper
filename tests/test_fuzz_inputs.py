@@ -4,7 +4,7 @@ import string
 import subprocess
 import sys
 
-from florida_property_scraper.county_router import canonicalize_county_name
+from florida_property_scraper.routers.fl import canonicalize_jurisdiction_name
 from florida_property_scraper.security import sanitize_path
 from pathlib import Path
 
@@ -18,7 +18,7 @@ def test_fuzz_inputs_no_crash(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
     for _ in range(120):
         s = _rand_str()
-        canonicalize_county_name(s)
+        canonicalize_jurisdiction_name(s)
         try:
             sanitize_path(str(tmp_path / s), project_root)
         except Exception:
