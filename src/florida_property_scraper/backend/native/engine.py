@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 
 from .http_client import HttpClient
 from .extract import ensure_fields, split_result_blocks, truncate_raw_html
@@ -20,6 +21,11 @@ class NativeEngine:
         queue = list(start_requests or [])
         pages_seen = 0
         debug_dir = os.environ.get("NATIVE_DEBUG_DIR")
+        perf_enabled = os.environ.get("PERF") == "1"
+        perf_start = time.perf_counter() if perf_enabled else None
+        perf_requests = 0
+        perf_parsed = 0
+        perf_valid = 0
         first_html = None
         first_blocks = []
         debug_context = debug_context or {}
@@ -33,10 +39,12 @@ class NativeEngine:
             visited.add(req_url)
             response = self.http.request(req, allowed_hosts=allowed_hosts, dry_run=dry_run, fixture_map=fixture_map)
             pages_seen += 1
+            perf_requests += 1
             if first_html is None:
                 first_html = response["text"]
                 first_blocks = split_result_blocks(first_html)
             parsed = parser(response["text"], response["final_url"], county_slug)
+            perf_parsed += len(parsed)
             normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
             validated = []
             dropped = 0
@@ -47,6 +55,7 @@ class NativeEngine:
                     dropped += 1
                     continue
                 validated.append(record.to_dict())
+            perf_valid += len(validated)
             items.extend(validated)
             if log_fn:
                 log_fn(
@@ -88,4 +97,14 @@ class NativeEngine:
             parsed_path = os.path.join(debug_dir, f"{prefix}_parsed.json")
             with open(parsed_path, "w", encoding="utf-8") as handle:
                 json.dump(items[:5], handle)
+        if perf_enabled:
+            elapsed = time.perf_counter() - perf_start if perf_start else 0.0
+            summary = {
+                "county": county_slug,
+                "requests": perf_requests,
+                "parsed": perf_parsed,
+                "validated": perf_valid,
+                "seconds": round(elapsed, 6),
+            }
+            print(json.dumps(summary))
         return items

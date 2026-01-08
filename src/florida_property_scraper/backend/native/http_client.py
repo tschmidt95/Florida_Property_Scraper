@@ -57,7 +57,11 @@ class HttpClient:
         self.retry_config = retry_config or RetryConfig()
         self._buckets = {}
         self._cookies = cookiejar.CookieJar()
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._cookies))
+        proxy_handler = urllib.request.ProxyHandler({})
+        self._opener = urllib.request.build_opener(
+            proxy_handler,
+            urllib.request.HTTPCookieProcessor(self._cookies),
+        )
 
     def _get_bucket(self, host):
         bucket = self._buckets.get(host)

@@ -182,23 +182,44 @@ def parse_label_items(html_text, county_slug):
     return []
 
 
-def split_result_blocks(html_text):
-    start_pattern = re.compile(
-        r"<(?:section|article|div)[^>]*class=[\"'][^\"']*(search-result|result-card|property-card)[^\"']*[\"'][^>]*>",
-        flags=re.IGNORECASE,
+START_PATTERN = re.compile(
+    r"<(?:section|article|div)[^>]*class=[\"'][^\"']*(search-result|result-card|property-card)[^\"']*[\"'][^>]*>",
+    flags=re.IGNORECASE,
+)
+LABEL_SPLIT_PATTERN = re.compile(
+    r"(Owner(?: Name)?|Owner\s*\(s\)|Situs Address|Site Address|Property Address)\s*:",
+    flags=re.IGNORECASE,
+)
+LABELS = (
+    "Owner",
+    "Owner Name",
+    "Owner(s)",
+    "Site Address",
+    "Situs Address",
+    "Property Address",
+)
+LABEL_COLON_PATTERNS = {}
+LABEL_TAG_PATTERNS = {}
+for label in LABELS:
+    label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+    LABEL_COLON_PATTERNS[label] = re.compile(
+        rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE
     )
-    starts = [match.start() for match in start_pattern.finditer(html_text)]
+    LABEL_TAG_PATTERNS[label] = re.compile(
+        rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
+def split_result_blocks(html_text):
+    starts = [match.start() for match in START_PATTERN.finditer(html_text)]
     if starts:
         blocks = []
         for idx, start in enumerate(starts):
             end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
             blocks.append(html_text[start:end])
         return blocks
-    label_pattern = re.compile(
-        r"(Owner(?: Name)?|Owner\s*\(s\)|Situs Address|Site Address|Property Address)\s*:",
-        flags=re.IGNORECASE,
-    )
-    label_starts = [match.start() for match in label_pattern.finditer(html_text)]
+    label_starts = [match.start() for match in LABEL_SPLIT_PATTERN.finditer(html_text)]
     if len(label_starts) > 1:
         blocks = []
         for idx, start in enumerate(label_starts):
@@ -209,13 +230,23 @@ def split_result_blocks(html_text):
 
 
 def grab_label_value(block, label):
-    label_pattern = r"\s+".join(re.escape(part) for part in label.split())
-    pattern_colon = rf"{label_pattern}\s*:\s*([^<]+)"
-    match = re.search(pattern_colon, block, flags=re.IGNORECASE)
+    pattern_colon = LABEL_COLON_PATTERNS.get(label)
+    if pattern_colon is None:
+        label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+        pattern_colon = re.compile(rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE)
+        LABEL_COLON_PATTERNS[label] = pattern_colon
+    match = pattern_colon.search(block)
     if match:
         return safe_text(match.group(1))
-    pattern_tag = rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)"
-    match = re.search(pattern_tag, block, flags=re.IGNORECASE | re.DOTALL)
+    pattern_tag = LABEL_TAG_PATTERNS.get(label)
+    if pattern_tag is None:
+        label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+        pattern_tag = re.compile(
+            rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        LABEL_TAG_PATTERNS[label] = pattern_tag
+    match = pattern_tag.search(block)
     if match:
         return safe_text(match.group(1))
     return ""
