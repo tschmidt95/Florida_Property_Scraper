@@ -188,13 +188,24 @@ def split_result_blocks(html_text):
         flags=re.IGNORECASE,
     )
     starts = [match.start() for match in start_pattern.finditer(html_text)]
-    if not starts:
-        return []
-    blocks = []
-    for idx, start in enumerate(starts):
-        end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
-        blocks.append(html_text[start:end])
-    return blocks
+    if starts:
+        blocks = []
+        for idx, start in enumerate(starts):
+            end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
+            blocks.append(html_text[start:end])
+        return blocks
+    label_pattern = re.compile(
+        r"(Owner(?: Name)?|Owner\s*\(s\)|Situs Address|Site Address|Property Address)\s*:",
+        flags=re.IGNORECASE,
+    )
+    label_starts = [match.start() for match in label_pattern.finditer(html_text)]
+    if len(label_starts) > 1:
+        blocks = []
+        for idx, start in enumerate(label_starts):
+            end = label_starts[idx + 1] if idx + 1 < len(label_starts) else len(html_text)
+            blocks.append(html_text[start:end])
+        return blocks
+    return [html_text]
 
 
 def grab_label_value(block, label):
@@ -207,4 +218,22 @@ def grab_label_value(block, label):
     match = re.search(pattern_tag, block, flags=re.IGNORECASE | re.DOTALL)
     if match:
         return safe_text(match.group(1))
+    return ""
+
+
+def extract_owner(block):
+    labels = ["Owner", "Owner Name", "Owner(s)"]
+    for label in labels:
+        value = grab_label_value(block, label)
+        if value:
+            return value
+    return ""
+
+
+def extract_address(block):
+    labels = ["Site Address", "Situs Address", "Property Address"]
+    for label in labels:
+        value = grab_label_value(block, label)
+        if value:
+            return value
     return ""

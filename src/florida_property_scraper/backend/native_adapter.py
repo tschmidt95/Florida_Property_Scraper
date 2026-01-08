@@ -60,7 +60,14 @@ class NativeAdapter:
         self.engine.per_county_limit = per_county_limit
         allowed_hosts = self._allowed_hosts(state, county) if live else None
         run_dry = dry_run or not live
-        items = self.engine.run(start_requests, parser, county, allowed_hosts=allowed_hosts, dry_run=run_dry)
+        items = self.engine.run(
+            start_requests,
+            parser,
+            county,
+            allowed_hosts=allowed_hosts,
+            dry_run=run_dry,
+            debug_context={"query": query, "county": county},
+        )
         normalized = [normalize_item(item) for item in items]
         if max_items:
             normalized = normalized[:max_items]
