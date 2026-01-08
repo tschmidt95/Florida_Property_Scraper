@@ -180,3 +180,31 @@ def parse_label_items(html_text, county_slug):
     if owner or address:
         return [ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)]
     return []
+
+
+def split_result_blocks(html_text):
+    start_pattern = re.compile(
+        r"<(?:section|article|div)[^>]*class=[\"'][^\"']*(search-result|result-card|property-card)[^\"']*[\"'][^>]*>",
+        flags=re.IGNORECASE,
+    )
+    starts = [match.start() for match in start_pattern.finditer(html_text)]
+    if not starts:
+        return []
+    blocks = []
+    for idx, start in enumerate(starts):
+        end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
+        blocks.append(html_text[start:end])
+    return blocks
+
+
+def grab_label_value(block, label):
+    label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+    pattern_colon = rf"{label_pattern}\s*:\s*([^<]+)"
+    match = re.search(pattern_colon, block, flags=re.IGNORECASE)
+    if match:
+        return safe_text(match.group(1))
+    pattern_tag = rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)"
+    match = re.search(pattern_tag, block, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return safe_text(match.group(1))
+    return ""
