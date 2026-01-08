@@ -1,0 +1,68 @@
+[
+  {
+    "county": "broward",
+    "parcel_id": "SUBJECT-001",
+    "zip": "33301",
+    "land_use_code": "OFF",
+    "property_class": "COMM",
+    "year_built": 1998,
+    "building_sf": 10000,
+    "land_sf": 20000,
+    "assessed_value": 1500000,
+    "last_sale_date": "2024-06-01",
+    "last_sale_price": 2500000,
+    "latitude": 26.122439,
+    "longitude": -80.137317
+  },
+  {
+    "county": "broward",
+    "parcel_id": "COMP-002",
+    "zip": "33301",
+    "land_use_code": "OFF",
+    "property_class": "COMM",
+    "year_built": 2001,
+    "building_sf": 9500,
+    "land_sf": 21000,
+    "assessed_value": 1400000,
+    "last_sale_date": "2023-05-10",
+    "last_sale_price": 2450000,
+    "latitude": 26.123,
+    "longitude": -80.137
+  },
+  {
+    "county": "broward",
+    "parcel_id": "COMP-003",
+    "zip": "33301",
+    "land_use_code": "OFF",
+    "property_class": "COMM",
+    "year_built": 1995,
+    "building_sf": 12000,
+    "land_sf": 22000,
+    "assessed_value": 1600000,
+    "last_sale_date": "2022-01-02",
+    "last_sale_price": 3300000,
+    "latitude": 26.12,
+    "longitude": -80.145
+  },
+  {
+    "county": "broward",
+    "parcel_id": "COMP-004",
+    "zip": "33301",
+    "land_use_code": "IND",
+    "property_class": "COMM",
+    "year_built": 1988,
+    "building_sf": 20000,
+    "land_sf": 40000,
+    "assessed_value": 1800000,
+    "last_sale_date": "2021-02-03",
+    "last_sale_price": 4100000,
+    "latitude": 26.15,
+    "longitude": -80.2
+  },
+  {
+    "county": "broward",
+    "parcel_id": "MISSING-FIELDS-005",
+    "zip": "33301",
+    "land_use_code": "OFF"
+  }
+]

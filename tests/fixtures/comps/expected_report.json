@@ -1,0 +1,106 @@
+{
+  "comparables": [
+    {
+      "components": {
+        "cap_rate": 0.966667,
+        "distance": 0.985049,
+        "price_per_sqft": 0.969388,
+        "property_type": 1.0,
+        "size": 0.95,
+        "year_built": 0.9625
+      },
+      "listing": {
+        "address": "120 E SAMPLE ST, FORT LAUDERDALE, FL 33301",
+        "asking_price": 2450000,
+        "building_sqft": 9500,
+        "cap_rate": 0.065,
+        "latitude": 26.123,
+        "listing_id": "L-0001",
+        "longitude": -80.137,
+        "price_per_sqft": 257.894737,
+        "property_type": "office",
+        "source": "mock",
+        "status": "active",
+        "url": "https://example.com/listing/L-0001",
+        "year_built": 2001
+      },
+      "score": 0.976462
+    },
+    {
+      "components": {
+        "cap_rate": 0.986667,
+        "distance": 0.839283,
+        "price_per_sqft": 0.909091,
+        "property_type": 1.0,
+        "size": 0.833333,
+        "year_built": 0.9625
+      },
+      "listing": {
+        "address": "500 W SAMPLE AVE, FORT LAUDERDALE, FL 33301",
+        "asking_price": 3300000,
+        "building_sqft": 12000,
+        "cap_rate": 0.072,
+        "latitude": 26.12,
+        "listing_id": "L-0002",
+        "longitude": -80.145,
+        "price_per_sqft": 275.0,
+        "property_type": "office",
+        "source": "mock",
+        "status": "active",
+        "url": "https://example.com/listing/L-0002",
+        "year_built": 1995
+      },
+      "score": 0.909643
+    },
+    {
+      "components": {
+        "cap_rate": 0.933333,
+        "distance": 0.736191,
+        "price_per_sqft": 0.921053,
+        "property_type": 1.0,
+        "size": 0.952381,
+        "year_built": 0.9125
+      },
+      "listing": {
+        "address": "900 N SAMPLE RD, FORT LAUDERDALE, FL 33301",
+        "asking_price": 2850000,
+        "building_sqft": 10500,
+        "cap_rate": 0.06,
+        "latitude": 26.135,
+        "listing_id": "L-0003",
+        "longitude": -80.14,
+        "price_per_sqft": 271.428571,
+        "property_type": "office",
+        "source": "mock",
+        "status": "active",
+        "url": "https://example.com/listing/L-0003",
+        "year_built": 2005
+      },
+      "score": 0.90164
+    }
+  ],
+  "county": "broward",
+  "parcel_id": "123-456-789",
+  "provider": "mock",
+  "sale_date": "2026-01-02",
+  "sale_price": 2500000.0,
+  "subject": {
+    "address": "100 E SAMPLE ST, FORT LAUDERDALE, FL 33301",
+    "building_sqft": 10000,
+    "county": "broward",
+    "land_sqft": 20000,
+    "latitude": 26.122439,
+    "longitude": -80.137317,
+    "parcel_id": "123-456-789",
+    "property_type": "office",
+    "year_built": 1998
+  },
+  "weights": {
+    "cap_rate": 0.1,
+    "distance": 0.25,
+    "price_per_sqft": 0.15,
+    "property_type": 0.25,
+    "size": 0.2,
+    "year_built": 0.05
+  }
+}

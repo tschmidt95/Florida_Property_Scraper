@@ -1,0 +1,56 @@
+{
+  "broward": [
+    {
+      "id": "L-0001",
+      "source": "mock",
+      "address": "120 E SAMPLE ST, FORT LAUDERDALE, FL 33301",
+      "property_type": "office",
+      "latitude": 26.123,
+      "longitude": -80.137,
+      "building_sf": 9500,
+      "year_built": 2001,
+      "asking_price": 2450000,
+      "cap_rate": 0.065,
+      "url": "https://example.com/listing/L-0001"
+    },
+    {
+      "id": "L-0002",
+      "source": "mock",
+      "address": "500 W SAMPLE AVE, FORT LAUDERDALE, FL 33301",
+      "property_type": "office",
+      "latitude": 26.12,
+      "longitude": -80.145,
+      "building_sf": 12000,
+      "year_built": 1995,
+      "asking_price": 3300000,
+      "cap_rate": 0.072,
+      "url": "https://example.com/listing/L-0002"
+    },
+    {
+      "id": "L-0003",
+      "source": "mock",
+      "address": "900 N SAMPLE RD, FORT LAUDERDALE, FL 33301",
+      "property_type": "office",
+      "latitude": 26.135,
+      "longitude": -80.14,
+      "building_sf": 10500,
+      "year_built": 2005,
+      "asking_price": 2850000,
+      "cap_rate": 0.06,
+      "url": "https://example.com/listing/L-0003"
+    },
+    {
+      "id": "L-0004",
+      "source": "mock",
+      "address": "1 INDUSTRIAL WAY, FORT LAUDERDALE, FL 33301",
+      "property_type": "industrial",
+      "latitude": 26.15,
+      "longitude": -80.2,
+      "building_sf": 20000,
+      "year_built": 1988,
+      "asking_price": 4100000,
+      "cap_rate": 0.08,
+      "url": "https://example.com/listing/L-0004"
+    }
+  ]
+}
