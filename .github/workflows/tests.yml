@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install project (and test deps)
+        run: |
+          python -m pip install --upgrade pip
+          # Install your project (editable)
+          python -m pip install -e .
+          # Ensure test tooling is present (safe even if already included)
+          python -m pip install pytest pytest-cov
+
+      - name: Run tests (fail on warnings + coverage gate)
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m pytest \
+            -W error \
+            -p pytest_cov \
+            --maxfail=1 \
+            --disable-warnings \
+            --junitxml=junit.xml \
+            --cov=src/florida_property_scraper \
+            --cov-config=.coveragerc \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80
+
+      - name: Upload junit.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit
+          path: junit.xml
+
+      - name: Upload coverage.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
