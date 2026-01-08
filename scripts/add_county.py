@@ -232,13 +232,71 @@ def _update_registry(registry_path: Path, class_name: str, slug: str) -> None:
     registry_path.write_text(content, encoding="utf-8")
 
 
+def _display_name_from_slug(slug: str) -> str:
+    special = {
+        "miami_dade": "Miami-Dade",
+        "st_johns": "St. Johns",
+        "st_lucie": "St. Lucie",
+        "desoto": "DeSoto",
+    }
+    if slug in special:
+        return special[slug]
+    return " ".join(part.capitalize() for part in slug.split("_"))
+
+
 def _update_router(
+    coverage_path: Path,
+    slug: str,
+    url_template: str,
+    pagination: str,
+    needs_form_post: bool,
+    needs_js: bool,
+    status: str,
+) -> None:
+    content = coverage_path.read_text(encoding="utf-8")
+    if f"\"slug\": \"{slug}\"" in content:
+        return
+    supports_query_param = not needs_form_post
+    needs_pagination = pagination != "none"
+    query_style = "form" if needs_form_post else "template"
+    form_url = url_template if needs_form_post else ""
+    form_fields = {"owner": "{query}"} if needs_form_post else {}
+    entry = (
+        "    {\n"
+        f"        \"slug\": \"{slug}\",\n"
+        f"        \"display_name\": \"{_display_name_from_slug(slug)}\",\n"
+        f"        \"status\": \"{status}\",\n"
+        "        \"capabilities\": {\n"
+        f"            \"supports_query_param\": {str(supports_query_param)},\n"
+        f"            \"needs_form_post\": {str(needs_form_post)},\n"
+        f"            \"needs_pagination\": {str(needs_pagination)},\n"
+        f"            \"needs_js\": {str(needs_js)},\n"
+        "            \"supports_owner_search\": True,\n"
+        "            \"supports_address_search\": True,\n"
+        "        },\n"
+        f"        \"spider_key\": \"{slug}_spider\",\n"
+        f"        \"url_template\": \"{url_template}\",\n"
+        f"        \"query_param_style\": \"{query_style}\",\n"
+        f"        \"form_url\": \"{form_url}\",\n"
+        f"        \"form_fields_template\": {form_fields},\n"
+        f"        \"pagination\": \"{pagination}\",\n"
+        f"        \"page_param\": \"page\" if \"{pagination}\" == \"page_param\" else \"\",\n"
+        "    },\n"
+    )
+    marker = "FL_COUNTIES = ["
+    if marker in content:
+        content = content.replace(marker, marker + "\n" + entry, 1)
+        coverage_path.write_text(content, encoding="utf-8")
+
+
+def _update_router_dict(
     router_path: Path,
     slug: str,
     url_template: str,
     pagination: str,
     needs_form_post: bool,
     needs_js: bool,
+    status: str,
 ) -> None:
     content = router_path.read_text(encoding="utf-8")
     if f"\"{slug}\":" in content:
@@ -251,6 +309,16 @@ def _update_router(
     entry = (
         f"    \"{slug}\": {{\n"
         f"        \"slug\": \"{slug}\",\n"
+        f"        \"display_name\": \"{_display_name_from_slug(slug)}\",\n"
+        f"        \"status\": \"{status}\",\n"
+        "        \"capabilities\": {\n"
+        f"            \"supports_query_param\": {str(supports_query_param)},\n"
+        f"            \"needs_form_post\": {str(needs_form_post)},\n"
+        f"            \"needs_pagination\": {str(needs_pagination)},\n"
+        f"            \"needs_js\": {str(needs_js)},\n"
+        "            \"supports_owner_search\": True,\n"
+        "            \"supports_address_search\": True,\n"
+        "        },\n"
         f"        \"spider_key\": \"{slug}_spider\",\n"
         f"        \"url_template\": \"{url_template}\",\n"
         f"        \"query_param_style\": \"{query_style}\",\n"
@@ -258,14 +326,7 @@ def _update_router(
         f"        \"form_fields_template\": {form_fields},\n"
         f"        \"pagination\": \"{pagination}\",\n"
         f"        \"page_param\": \"page\" if \"{pagination}\" == \"page_param\" else \"\",\n"
-        f"        \"supports_query_param\": {str(supports_query_param)},\n"
-        f"        \"needs_form_post\": {str(needs_form_post)},\n"
-        f"        \"needs_pagination\": {str(needs_pagination)},\n"
-        f"        \"needs_js\": {str(needs_js)},\n"
-        f"        \"supports_owner_search\": True,\n"
-        f"        \"supports_address_search\": True,\n"
-        f"        \"notes\": \"Generated entry.\",\n"
-        f"    }},\n"
+        "    },\n"
     )
     marker = "_ENTRIES = {"
     if marker in content:
@@ -276,8 +337,8 @@ def _update_router(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--slug", required=True)
-    parser.add_argument("--url-template", required=True)
-    parser.add_argument("--columns", required=True)
+    parser.add_argument("--url-template", default="")
+    parser.add_argument("--columns", default="owner,address")
     parser.add_argument("--state", default="fl")
     parser.add_argument(
         "--pagination", default="none", choices=["none", "page_param", "next_link"]
@@ -286,6 +347,7 @@ def main() -> int:
     parser.add_argument("--needs-js", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--status", choices=["stub", "live"], default="stub")
     args = parser.parse_args()
 
     slug = args.slug.strip().lower()
@@ -303,6 +365,7 @@ def main() -> int:
         needs_form_post=args.needs_form_post,
         needs_js=args.needs_js,
         state=args.state,
+        status=args.status,
         dry_run=args.dry_run,
         force=args.force,
     )
@@ -321,6 +384,7 @@ def scaffold_county(
     needs_form_post: bool,
     needs_js: bool,
     state: str,
+    status: str,
     dry_run: bool = False,
     force: bool = False,
 ) -> dict:
@@ -346,16 +410,18 @@ def scaffold_county(
         else:
             planned.append(f"create:{path}")
 
-    _plan_write(spider_path, force)
-    _plan_write(fixture_path, force)
-    _plan_write(realistic_fixture_path, force)
-    _plan_write(test_path, force)
-    _plan_write(realistic_test_path, force)
+    if status == "live":
+        _plan_write(spider_path, force)
+        _plan_write(fixture_path, force)
+        _plan_write(realistic_fixture_path, force)
+        _plan_write(test_path, force)
+        _plan_write(realistic_test_path, force)
+    planned.append(f"update:{state}_coverage")
 
     if dry_run:
         return {"planned": planned}
 
-    if force or not spider_path.exists():
+    if status == "live" and (force or not spider_path.exists()):
         spider_path.write_text(
             SPIDER_TEMPLATE.format(
                 class_name=class_name,
@@ -367,14 +433,14 @@ def scaffold_county(
     slug_title = slug.replace("_", " ").title()
     row_one = _render_row(columns, slug_title, 1)
     row_two = _render_row(columns, slug_title, 2)
-    if force or not fixture_path.exists():
+    if status == "live" and (force or not fixture_path.exists()):
         fixture_path.write_text(
             FIXTURE_TEMPLATE.format(slug=slug, row_one=row_one, row_two=row_two),
             encoding="utf-8",
         )
     realistic_row_one = _render_realistic_row(columns, slug_title, 1)
     realistic_row_two = _render_realistic_row(columns, slug_title, 2)
-    if force or not realistic_fixture_path.exists():
+    if status == "live" and (force or not realistic_fixture_path.exists()):
         realistic_fixture_path.write_text(
             REALISTIC_TEMPLATE.format(
                 row_one=realistic_row_one, row_two=realistic_row_two
@@ -382,7 +448,7 @@ def scaffold_county(
             encoding="utf-8",
         )
 
-    if force or not test_path.exists():
+    if status == "live" and (force or not test_path.exists()):
         test_path.write_text(
             TEST_TEMPLATE.format(
                 class_name=class_name,
@@ -391,7 +457,7 @@ def scaffold_county(
             ),
             encoding="utf-8",
         )
-    if force or not realistic_test_path.exists():
+    if status == "live" and (force or not realistic_test_path.exists()):
         realistic_test_path.write_text(
             REALISTIC_TEST_TEMPLATE.format(
                 class_name=class_name,
@@ -401,20 +467,42 @@ def scaffold_county(
             encoding="utf-8",
         )
 
-    _update_registry(spiders_dir / "__init__.py", class_name, slug)
-    router_path = (
-        base_dir / "src" / "florida_property_scraper" / "routers" / f"{state}.py"
-    )
-    if not router_path.exists():
-        raise SystemExit(1)
-    _update_router(
-        router_path,
-        slug,
-        url_template,
-        pagination,
-        needs_form_post,
-        needs_js,
-    )
+    if status == "live":
+        _update_registry(spiders_dir / "__init__.py", class_name, slug)
+    if state == "fl":
+        coverage_path = (
+            base_dir
+            / "src"
+            / "florida_property_scraper"
+            / "routers"
+            / "fl_coverage.py"
+        )
+        if not coverage_path.exists():
+            raise SystemExit(1)
+        _update_router(
+            coverage_path,
+            slug,
+            url_template,
+            pagination,
+            needs_form_post,
+            needs_js,
+            status,
+        )
+    else:
+        router_path = (
+            base_dir / "src" / "florida_property_scraper" / "routers" / f"{state}.py"
+        )
+        if not router_path.exists():
+            raise SystemExit(1)
+        _update_router_dict(
+            router_path,
+            slug,
+            url_template,
+            pagination,
+            needs_form_post,
+            needs_js,
+            status,
+        )
     return {"planned": planned}
 
 

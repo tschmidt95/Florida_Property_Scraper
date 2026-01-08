@@ -1,4 +1,5 @@
 import argparse
+import os
 import csv
 import json
 from pathlib import Path
@@ -194,7 +195,14 @@ def main():
         help="Send leads to Zoho CRM (requires ZOHO_ACCESS_TOKEN)",
     )
 
+    parser.add_argument("--backend", choices=["scrapy", "native"], default="scrapy")
     args = parser.parse_args()
+    os.environ["FL_SCRAPER_BACKEND"] = args.backend
+    if args.backend == "native":
+        from florida_property_scraper.backend.native_adapter import NativeAdapter
+        import florida_property_scraper.backend.scrapy_adapter as scrapy_adapter
+
+        scrapy_adapter.ScrapyAdapter = NativeAdapter
 
     queries = []
     if args.input_csv:
@@ -307,6 +315,7 @@ def main():
         per_county_limit=args.per_county_limit,
         delay_ms=args.delay_ms,
         state=args.state,
+        backend=args.backend,
     )
 
     all_results = []

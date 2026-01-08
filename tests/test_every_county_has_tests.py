@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from florida_property_scraper.county_router import enabled_counties
+from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
 
 
 def test_every_county_has_tests():
     root = Path(__file__).resolve().parents[1]
-    for slug in enabled_counties():
+    live_slugs = [c["slug"] for c in FL_COUNTIES if c.get("status") == "live"]
+    for slug in live_slugs:
         fixture = root / "tests" / "fixtures" / f"{slug}_sample.html"
         test_path = root / "tests" / f"test_{slug}_spider_integration.py"
         spider_path = (

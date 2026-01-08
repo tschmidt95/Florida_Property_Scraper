@@ -6,13 +6,15 @@ from scrapy.http.request import Request
 from scrapy.http.request.form import FormRequest
 
 from florida_property_scraper.backend.scrapy_runner import resolve_spider_class
-from florida_property_scraper.county_router import enabled_counties, get_county_entry
+from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
+from florida_property_scraper.county_router import get_county_entry
 from florida_property_scraper.schema import REQUIRED_FIELDS
 
 
 def test_county_contract():
     root = Path(__file__).resolve().parents[1]
-    for slug in enabled_counties():
+    live_slugs = [c["slug"] for c in FL_COUNTIES if c.get("status") == "live"]
+    for slug in live_slugs:
         entry = get_county_entry(slug)
         spider_key = entry["spider_key"]
         spider_cls = resolve_spider_class(spider_key)

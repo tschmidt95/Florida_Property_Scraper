@@ -1,131 +1,26 @@
 import re
 from urllib.parse import quote_plus
 
+from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
 
-_ENTRIES = {
-    "broward": {
-        "slug": "broward",
-        "spider_key": "broward_spider",
-        "url_template": "https://www.broward.org/propertysearch/Pages/OwnerSearch.aspx?owner={query}",
-        "query_param_style": "template",
-        "pagination": "next_link",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": True,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": False,
-        "notes": "Owner search via query parameter.",
-    },
-    "alachua": {
-        "slug": "alachua",
-        "spider_key": "alachua_spider",
-        "url_template": "https://www.alachuaclerk.com/propertysearch/search.aspx?owner={query}",
-        "query_param_style": "template",
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-    "seminole": {
-        "slug": "seminole",
-        "spider_key": "seminole_spider",
-        "url_template": "",
-        "query_param_style": "form",
-        "form_url": "https://www.seminolecountyfl.gov/property-search",
-        "form_fields_template": {"owner": "{query}"},
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": False,
-        "needs_form_post": True,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via form submit.",
-    },
-    "orange": {
-        "slug": "orange",
-        "spider_key": "orange_spider",
-        "url_template": "https://www.orangecountyfl.net/property-search?owner={query}",
-        "query_param_style": "template",
-        "pagination": "page_param",
-        "page_param": "page",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": True,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-    "palm_beach": {
-        "slug": "palm_beach",
-        "spider_key": "palm_beach_spider",
-        "url_template": "https://www.pbcgov.org/papa/searchproperty.aspx?owner={query}",
-        "query_param_style": "template",
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-    "miami_dade": {
-        "slug": "miami_dade",
-        "spider_key": "miami_dade_spider",
-        "url_template": "https://www.miami-dadeclerk.com/ocs/Search.aspx?search={query}",
-        "query_param_style": "template",
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-    "hillsborough": {
-        "slug": "hillsborough",
-        "spider_key": "hillsborough_spider",
-        "url_template": "https://www.hillsboroughcounty.org/property-search?owner={query}",
-        "query_param_style": "template",
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-    "pinellas": {
-        "slug": "pinellas",
-        "spider_key": "pinellas_spider",
-        "url_template": "https://www.pinellascounty.org/property-search?owner={query}",
-        "query_param_style": "template",
-        "pagination": "none",
-        "page_param": "",
-        "supports_query_param": True,
-        "needs_form_post": False,
-        "needs_pagination": False,
-        "needs_js": False,
-        "supports_owner_search": True,
-        "supports_address_search": True,
-        "notes": "Owner search via query parameter.",
-    },
-}
+
+def _flatten_entry(entry: dict) -> dict:
+    flattened = dict(entry)
+    capabilities = entry.get("capabilities", {})
+    for key, value in capabilities.items():
+        flattened.setdefault(key, value)
+    if "parcel_layer" not in flattened:
+        flattened["parcel_layer"] = {
+            "type": "none",
+            "endpoint": "",
+            "id_field": "",
+            "supports_geometry": False,
+        }
+    flattened.setdefault("notes", "")
+    return flattened
+
+
+_ENTRIES = {entry["slug"]: _flatten_entry(entry) for entry in FL_COUNTIES}
 
 
 def canonicalize_jurisdiction_name(name: str) -> str:

@@ -1,14 +1,12 @@
 from florida_property_scraper.backend.spiders import SPIDERS
-from florida_property_scraper.county_router import (
-    build_start_urls,
-    enabled_counties,
-    get_county_entry,
-)
+from florida_property_scraper.county_router import build_start_urls, get_county_entry
+from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
 
 
 def test_router_start_urls_and_spider_keys():
     query = "Smith"
-    for slug in enabled_counties():
+    live_slugs = [c["slug"] for c in FL_COUNTIES if c.get("status") == "live"]
+    for slug in live_slugs:
         urls = build_start_urls(slug, query)
         assert urls
         entry = get_county_entry(slug)

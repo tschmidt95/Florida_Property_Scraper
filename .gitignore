@@ -16,3 +16,7 @@ build/
 *.egg-info/
 repo_old/
 .vscode/
+
+# Node
+node_modules/
+

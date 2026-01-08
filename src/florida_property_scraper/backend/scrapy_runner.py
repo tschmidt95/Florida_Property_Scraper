@@ -119,3 +119,23 @@ def main():
 
 if __name__ == '__main__':
     main()
+def resolve_spider_name(raw_name: str) -> str:
+    name = (raw_name or "").lower()
+    if name.endswith("_spider"):
+        name = name[: -len("_spider")]
+    return name
+
+
+def resolve_spider_cls(spider_name: str):
+    normalized = resolve_spider_name(spider_name)
+    return SPIDERS.get(normalized)
+def resolve_spider_name(raw_name: str) -> str:
+    name = (raw_name or "").lower()
+    if name.endswith("_spider"):
+        name = name[: -len("_spider")]
+    return name
+
+
+def resolve_spider_cls(spider_name: str):
+    normalized = resolve_spider_name(spider_name)
+    return SPIDERS.get(normalized)

@@ -7,6 +7,8 @@ from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 
 from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
+from florida_property_scraper.backend.native_adapter import NativeAdapter
+from florida_property_scraper.backend.native_adapter import NativeAdapter
 from florida_property_scraper.routers.fl import canonicalize_jurisdiction_name
 from florida_property_scraper.routers.registry import (
     build_start_urls,
@@ -33,6 +35,7 @@ from florida_property_scraper.storage import SQLiteStore
 class FloridaPropertyScraper:
     def __init__(
         self,
+        backend="scrapy",
         timeout: int = 10,
         stop_after_first: bool = True,
         log_level: Optional[str] = None,
@@ -48,6 +51,8 @@ class FloridaPropertyScraper:
         concurrent_requests: int = CONCURRENT_REQUESTS,
         download_timeout: int = DOWNLOAD_TIMEOUT,
     ):
+        self.backend = backend
+        self.adapter = ScrapyAdapter() if backend == "scrapy" else NativeAdapter()
         self.timeout = timeout
         self.stop_after_first = stop_after_first
         self.log_level = log_level

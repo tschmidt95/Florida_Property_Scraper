@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Florida Property Map</title>
+    <link
+      href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        font-family: "SF Mono", "Menlo", monospace;
+      }
+      #app {
+        display: flex;
+        height: 100%;
+        width: 100%;
+      }
+      #map {
+        flex: 1;
+      }
+      #panel {
+        width: 320px;
+        border-left: 1px solid #ddd;
+        padding: 12px;
+        overflow: auto;
+      }
+      #toolbar {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        background: white;
+        padding: 8px;
+        border-radius: 6px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        z-index: 10;
+      }
+      #tooltip {
+        position: absolute;
+        pointer-events: none;
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        padding: 4px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+        display: none;
+        z-index: 20;
+      }
+      select {
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <label>
+        State:
+        <select id="stateSelect">
+          <option value="fl">FL</option>
+        </select>
+      </label>
+      <label>
+        County:
+        <select id="countySelect"></select>
+      </label>
+    </div>
+    <div id="tooltip"></div>
+    <div id="app">
+      <div id="map"></div>
+      <div id="panel">
+        <h3>Parcel Details</h3>
+        <pre id="details">Click a parcel</pre>
+      </div>
+    </div>
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <script src="/static/map.js"></script>
+  </body>
+</html>

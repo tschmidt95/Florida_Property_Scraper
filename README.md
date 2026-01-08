@@ -45,6 +45,22 @@ Optional live smoke tests:
 
 ---
 
+## Map Mode (planned)
+
+## Native backend
+
+- `python3 -m florida_property_scraper --query "John Smith" --counties "broward,orange"`
+- `python3 -m florida_property_scraper --backend native --query "John Smith" --counties "broward,orange"`
+
+Run the API:
+
+  uvicorn florida_property_scraper.api.app:app --reload
+
+Environment variables:
+
+- `POSTGIS_ENABLED=1` to use PostGIS for map layers
+- `POSTGIS_DSN=...` connection string
+
 ## Adding a new state
 
 Scaffold a state router module:
