@@ -1,4 +1,5 @@
-from florida_property_scraper.county_router import build_request_plan, enabled_counties, get_county_entry
+from florida_property_scraper.routers.fl import build_request_plan, enabled_counties
+from florida_property_scraper.routers.fl import get_entry as get_county_entry
 
 
 def test_county_entries_have_capability_flags():
