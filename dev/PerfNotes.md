@@ -16,3 +16,8 @@ PERF=1 python3 dev/bench_native.py
 ```
 
 This writes `dev/bench_native.prof` and prints top cumulative functions.
+
+## Async/native controls
+
+- `NATIVE_ASYNC=1` enables async fetch path (requires `httpx` installed).
+- `NO_PROXY_LOOKUP=1` bypasses system proxy discovery.
