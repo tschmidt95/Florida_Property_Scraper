@@ -1,0 +1,51 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3100, 28.5400],
+            [-81.3080, 28.5400],
+            [-81.3080, 28.5420],
+            [-81.3100, 28.5420],
+            [-81.3100, 28.5400]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "ORA-0001",
+        "situs": "100 ORANGE AVE",
+        "owner": "ORANGE OWNER",
+        "sale_price": 123456,
+        "sale_date": "2024-01-15",
+        "mortgage_amount": 0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3040, 28.5360],
+            [-81.3020, 28.5360],
+            [-81.3020, 28.5380],
+            [-81.3040, 28.5380],
+            [-81.3040, 28.5360]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "ORA-0002",
+        "situs": "200 ORANGE AVE",
+        "owner": "ORANGE OWNER 2",
+        "sale_price": 999999,
+        "sale_date": "2023-12-01",
+        "mortgage_amount": 0
+      }
+    }
+  ]
+}
