@@ -23,3 +23,17 @@ if _SRC_PKG.exists():
         # Fallback for non-list path objects
         if src_str not in list(__path__):
             __path__ = [src_str, *list(__path__)]
+
+__all__ = ["FloridaPropertyScraper", "RunResult"]
+
+
+def __getattr__(name: str):
+    if name == "FloridaPropertyScraper":
+        from .scraper import FloridaPropertyScraper
+
+        return FloridaPropertyScraper
+    if name == "RunResult":
+        from .run_result import RunResult
+
+        return RunResult
+    raise AttributeError(name)

@@ -11,7 +11,6 @@ from .routers.registry import (
     enabled_jurisdictions,
     get_entry,
 )
-from .scraper import FloridaPropertyScraper
 from .schema import REQUIRED_FIELDS, normalize_item
 from .security import neutralize_csv_field, sanitize_path
 from .storage import SQLiteStorage
@@ -396,6 +395,8 @@ def main():
         }
         print(json.dumps(summary))
         return
+
+    from .scraper import FloridaPropertyScraper
 
     scraper = FloridaPropertyScraper(
         timeout=args.timeout,
