@@ -46,6 +46,10 @@ class DuvalSpider(Spider):
         for url in self.start_urls:
             yield Request(url, meta={"page": 1})
 
+    async def start(self):
+        for request in self.start_requests():
+            yield request
+
     def parse(self, response):
         nodes = response.css(".duval-result, .result-card, .search-result, .property-card")
         items = extract_label_items_from_nodes(nodes, "duval")
