@@ -10,6 +10,7 @@ def test_cache_hit_and_miss():
     cache_clear()
     previous = os.environ.get("CACHE")
     os.environ["CACHE"] = "1"
+    os.environ["CACHE_STREAM"] = "1"
     fixture = Path("tests/fixtures/broward_realistic.html")
     list(
         stream_search(
@@ -39,6 +40,7 @@ def test_cache_hit_and_miss():
         os.environ.pop("CACHE", None)
     else:
         os.environ["CACHE"] = previous
+    os.environ.pop("CACHE_STREAM", None)
 
 
 def test_cache_bypass():

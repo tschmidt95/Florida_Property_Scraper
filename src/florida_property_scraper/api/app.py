@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - optional dependency
     FASTAPI_AVAILABLE = False
 
 import json
+import os
 import time
 
 from florida_property_scraper.api.geojson import to_featurecollection
@@ -47,13 +48,16 @@ def _find_fixture(county):
 
 
 def stream_search(state="fl", county="broward", query="", backend="native", mode="fixture", max_items=None, per_county_limit=None, fixture_path=None):
-    cache_key = (backend, state, county, query, mode)
-    cached = cache_get(cache_key)
-    if cached:
-        for record in cached["records"]:
-            yield json.dumps({"record": record}) + "\n"
-        yield json.dumps({"summary": cached["summary"]}) + "\n"
-        return
+    cache_key = (backend, state, county, query, max_items, per_county_limit, mode)
+    use_cache = os.environ.get("CACHE", "1") != "0"
+    use_cache_stream = os.environ.get("CACHE_STREAM", "0") == "1"
+    if use_cache and use_cache_stream:
+        cached = cache_get(cache_key)
+        if cached:
+            for record in cached["records"]:
+                yield json.dumps({"record": record}) + "\n"
+            yield json.dumps({"summary": cached["summary"]}) + "\n"
+            return
     records = []
     summary = {"records": 0, "seconds": 0.0}
     start = time.perf_counter()
@@ -84,9 +88,12 @@ def stream_search(state="fl", county="broward", query="", backend="native", mode
                 continue
             records.append(item)
             yield json.dumps({"record": item}) + "\n"
+            if max_items and len(records) >= max_items:
+                break
     summary["records"] = len(records)
     summary["seconds"] = round(time.perf_counter() - start, 6)
-    cache_set(cache_key, {"records": records, "summary": summary})
+    if use_cache and use_cache_stream:
+        cache_set(cache_key, {"records": records, "summary": summary})
     yield json.dumps({"summary": summary}) + "\n"
 
 

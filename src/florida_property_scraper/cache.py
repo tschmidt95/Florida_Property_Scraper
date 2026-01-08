@@ -2,7 +2,7 @@ import os
 import time
 
 _CACHE = {}
-_STATS = {"hits": 0, "misses": 0}
+_STATS = {"hits": 0, "misses": 0, "evictions": 0}
 
 
 def _cache_enabled():
@@ -25,9 +25,13 @@ def cache_get(key):
     return value
 
 
-def cache_set(key, value, ttl=120):
+def cache_set(key, value, ttl=120, max_entries=512):
     if not _cache_enabled():
         return
+    if len(_CACHE) >= max_entries:
+        oldest_key = min(_CACHE.items(), key=lambda item: item[1][0])[0]
+        _CACHE.pop(oldest_key, None)
+        _STATS["evictions"] += 1
     _CACHE[key] = (time.time() + ttl, value)
 
 
@@ -35,6 +39,7 @@ def cache_clear():
     _CACHE.clear()
     _STATS["hits"] = 0
     _STATS["misses"] = 0
+    _STATS["evictions"] = 0
 
 
 def cache_stats():

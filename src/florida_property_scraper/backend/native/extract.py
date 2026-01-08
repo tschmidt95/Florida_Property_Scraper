@@ -201,7 +201,8 @@ LABELS = (
 )
 LABEL_COLON_PATTERNS = {}
 LABEL_TAG_PATTERNS = {}
-DEFAULT_MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS_PER_RESPONSE", "50"))
+DEFAULT_MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS_PER_RESPONSE", "200"))
+MAX_RESPONSE_BYTES = int(os.environ.get("MAX_RESPONSE_BYTES", "2000000"))
 for label in LABELS:
     label_pattern = r"\s+".join(re.escape(part) for part in label.split())
     LABEL_COLON_PATTERNS[label] = re.compile(
@@ -229,6 +230,8 @@ def _effective_block_limit(max_blocks):
 
 
 def split_result_blocks(html_text, max_blocks=None):
+    if html_text and len(html_text) > MAX_RESPONSE_BYTES:
+        html_text = html_text[:MAX_RESPONSE_BYTES]
     limit = _effective_block_limit(max_blocks)
     starts = [match.start() for match in START_PATTERN.finditer(html_text)]
     if starts:
