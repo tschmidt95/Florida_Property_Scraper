@@ -23,6 +23,20 @@ REQUIRED_FIELDS = [
 ]
 
 
+_RESULT_BLOCK_CSS = (
+    "section.search-result, article.search-result, div.search-result, "
+    "section.result-card, article.result-card, div.result-card, "
+    "div.property-card, section.property-card, article.property-card"
+)
+
+_RESULT_BLOCK_PATTERNS = [
+    r'(<section[^>]+class="[^"]*search-result[^"]*"[^>]*>.*?</section>)',
+    r'(<article[^>]+class="[^"]*search-result[^"]*"[^>]*>.*?</article>)',
+    r'(<(section|div|article)[^>]+class="[^"]*result-card[^"]*"[^>]*>.*?</\\2>)',
+    r'(<(section|div|article)[^>]+class="[^"]*property-card[^"]*"[^>]*>.*?</\\2>)',
+]
+
+
 def norm_ws(value):
     if value is None:
         return ""
@@ -31,6 +45,12 @@ def norm_ws(value):
 
 def safe_text(value):
     return norm_ws(html.unescape(value or ""))
+
+
+def strip_tags(value: str) -> str:
+    if not value:
+        return ""
+    return re.sub(r"<[^>]+>", " ", value)
 
 
 def truncate_raw_html(text, limit=2000):
@@ -64,7 +84,9 @@ def find_label_value_pairs(selector):
     pairs = []
     if selector is None:
         return pairs
-    for label in selector.css("label, .label, .field-label, .field-name"):
+    for label in selector.css(
+        "label, .label, .field-label, .field-name, h1, h2, h3, h4, h5, h6, th, dt"
+    ):
         label_text = safe_text("".join(label.css("::text").getall()))
         if not label_text:
             continue
@@ -87,11 +109,19 @@ def _extract_owner_address_from_pairs(pairs):
 
 
 def _extract_owner_address_from_text(text):
-    combined = safe_text(text)
-    match_owner = re.search(r"owner\s*[:\-]\s*([^\|]+)", combined, re.I)
-    match_addr = re.search(r"(mailing|site|situs|property)?\s*address\s*[:\-]\s*([^\|]+)", combined, re.I)
+    combined = safe_text(strip_tags(text))
+    match_owner = re.search(
+        r"\bowner\b\s*[:\-]\s*(.+?)(?=(?:\b(?:mailing|site|situs|property)\b\s*address\b|\baddress\b\s*[:\-]|$))",
+        combined,
+        re.I,
+    )
+    match_addr = re.search(
+        r"\b(?:mailing|site|situs|property)?\s*address\b\s*[:\-]\s*(.+?)(?=(?:\bowner\b\s*[:\-]|$))",
+        combined,
+        re.I,
+    )
     owner = safe_text(match_owner.group(1)) if match_owner else ""
-    address = safe_text(match_addr.group(2)) if match_addr else ""
+    address = safe_text(match_addr.group(1)) if match_addr else ""
     return owner, address
 
 
@@ -180,19 +210,25 @@ def parse_label_items(html_text, county_slug):
     if owner or address:
         return [ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)]
     return []
-import re
 
-_RESULT_BLOCK_PATTERNS = [
-    r'(<section[^>]+class="search-result"[^>]*>.*?</section>)',
-    r'(<div[^>]+class="result-card"[^>]*>.*?</div>\s*</div>|<div[^>]+class="result-card"[^>]*>.*?</div>)',
-    r'(<article[^>]+class="result-card"[^>]*>.*?</article>)',
-]
 
-def split_result_blocks(html: str) -> list[str]:
-    if not html:
+def split_result_blocks(html_text: str) -> list[str]:
+    if not html_text:
         return []
-    for pat in _RESULT_BLOCK_PATTERNS:
-        blocks = re.findall(pat, html, flags=re.IGNORECASE | re.DOTALL)
+
+    selector = _selector_from_html(html_text)
+    if selector is not None:
+        blocks = [node.get() for node in selector.css(_RESULT_BLOCK_CSS)]
+        blocks = [b for b in blocks if norm_ws(b)]
         if blocks:
             return blocks
+
+    for pat in _RESULT_BLOCK_PATTERNS:
+        blocks = re.findall(pat, html_text, flags=re.IGNORECASE | re.DOTALL)
+        if not blocks:
+            continue
+        # Some patterns use capturing groups for tag name; normalize to the full match.
+        if isinstance(blocks[0], tuple):
+            blocks = [b[0] for b in blocks]
+        return [b for b in blocks if norm_ws(b)]
     return []
