@@ -1,37 +1,30 @@
-"""Compatibility shim for src-layout imports.
-
-This repository uses a src/ layout (real package lives in src/florida_property_scraper).
-Some tests execute the CLI via `python -m florida_property_scraper` from the repo root.
-In that scenario, Python would otherwise discover the top-level
-`florida_property_scraper/` directory first and treat it as an incomplete namespace,
-breaking `-m` execution.
-
-This shim extends the package search path to include the real implementation.
-It intentionally avoids importing the full implementation eagerly (which can be slow)
-and instead exposes the canonical symbols lazily.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
-import sys
+from pkgutil import extend_path
 
-_SRC_DIR = Path(__file__).resolve().parent.parent / "src"
-_IMPL_PKG_DIR = _SRC_DIR / "florida_property_scraper"
+# Repo-local import shim for `src/` layout.
+#
+# Tests spawn subprocesses that run `python -m florida_property_scraper[...]`.
+# When the project isn't installed into the active environment, those subprocesses
+# won't see `src/` on `sys.path`. This namespace-package shim makes the package
+# importable from a repo checkout without affecting the installed distribution.
 
-if _IMPL_PKG_DIR.is_dir():
-    # Ensure `import florida_property_scraper.*` can resolve to src/ implementation.
-    src_str = str(_SRC_DIR)
-    if src_str not in sys.path:
-        sys.path.insert(0, src_str)
+__path__ = extend_path(__path__, __name__)  # type: ignore[name-defined]
 
-    impl_str = str(_IMPL_PKG_DIR)
-    if impl_str not in list(__path__):  # type: ignore[name-defined]
-        __path__.append(impl_str)  # type: ignore[name-defined]
+_SRC_PKG = Path(__file__).resolve().parents[1] / "src" / "florida_property_scraper"
+if _SRC_PKG.exists():
+    src_str = str(_SRC_PKG)
+    # Prefer the real implementation under src/ over this shim directory.
+    try:
+        if src_str not in __path__:
+            __path__.insert(0, src_str)  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover
+        # Fallback for non-list path objects
+        if src_str not in list(__path__):
+            __path__ = [src_str, *list(__path__)]
 
-    __all__ = ["FloridaPropertyScraper", "RunResult"]
-else:
-    __all__ = []
+__all__ = ["FloridaPropertyScraper", "RunResult"]
 
 
 def __getattr__(name: str):

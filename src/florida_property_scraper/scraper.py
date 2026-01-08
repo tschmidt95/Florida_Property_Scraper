@@ -7,6 +7,7 @@ from scrapy import signals
 from scrapy.crawler import CrawlerProcess
 
 from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
+from florida_property_scraper.backend.native_adapter import NativeAdapter
 from florida_property_scraper.routers.fl import canonicalize_jurisdiction_name
 from florida_property_scraper.routers.registry import (
     build_start_urls,
@@ -33,6 +34,7 @@ from florida_property_scraper.storage import SQLiteStore
 class FloridaPropertyScraper:
     def __init__(
         self,
+        backend="scrapy",
         timeout: int = 10,
         stop_after_first: bool = True,
         log_level: Optional[str] = None,
@@ -48,6 +50,11 @@ class FloridaPropertyScraper:
         concurrent_requests: int = CONCURRENT_REQUESTS,
         download_timeout: int = DOWNLOAD_TIMEOUT,
     ):
+        self.backend = backend or "scrapy"
+        if self.backend == "native":
+            self.adapter = NativeAdapter()
+        else:
+            self.adapter = ScrapyAdapter(demo=demo, timeout=timeout, live=live)
         self.timeout = timeout
         self.stop_after_first = stop_after_first
         self.log_level = log_level
@@ -61,7 +68,6 @@ class FloridaPropertyScraper:
         self.state = state or "fl"
         self.failures: List[Dict] = []
         self.last_log_entries: List[Dict] = []
-        self.adapter = ScrapyAdapter(demo=demo, timeout=timeout, live=live)
         self.obey_robots = obey_robots
         self.concurrent_requests = concurrent_requests
         self.download_timeout = download_timeout
@@ -140,13 +146,25 @@ class FloridaPropertyScraper:
             while attempts < 3:
                 attempts += 1
                 try:
-                    results = self.adapter.search(
-                        query,
-                        start_urls=start_urls,
-                        spider_name=entry.get("spider_key", f"{slug}_spider"),
-                        max_items=county_limit,
-                        debug_html=self.debug_html,
-                    )
+                    if self.backend == "native":
+                        results = self.adapter.search(
+                            query=query,
+                            start_urls=start_urls,
+                            spider_name=entry.get("spider_key", f"{slug}_spider"),
+                            county_slug=slug,
+                            state=self.state,
+                            live=self.live,
+                            max_items=county_limit,
+                            per_county_limit=county_limit,
+                        )
+                    else:
+                        results = self.adapter.search(
+                            query,
+                            start_urls=start_urls,
+                            spider_name=entry.get("spider_key", f"{slug}_spider"),
+                            max_items=county_limit,
+                            debug_html=self.debug_html,
+                        )
                     break
                 except Exception as exc:
                     last_error = str(exc)

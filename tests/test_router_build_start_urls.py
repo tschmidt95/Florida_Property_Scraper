@@ -2,6 +2,7 @@ from florida_property_scraper.county_router import (
     build_start_urls,
     canonicalize_county_name,
 )
+from florida_property_scraper.routers.fl_coverage import FL_COUNTIES
 
 
 def test_canonicalize_county_name_variants():
@@ -12,8 +13,8 @@ def test_canonicalize_county_name_variants():
 
 def test_build_start_urls_for_enabled_counties():
     query = "John Smith"
-    counties = ["broward", "alachua", "seminole", "orange", "palm_beach"]
-    for county in counties:
+    live_slugs = [c["slug"] for c in FL_COUNTIES if c.get("status") == "live"]
+    for county in live_slugs:
         urls = build_start_urls(county, query)
         assert urls
         if "John+Smith" not in urls[0]:

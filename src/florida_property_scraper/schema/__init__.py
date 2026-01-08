@@ -13,6 +13,8 @@ REQUIRED_FIELDS = [
     "raw_html",
 ]
 
+from .records import PropertyRecord, normalize_record, clean_text, strip_html, is_html_like  # noqa: E402
+
 
 def normalize_item(item):
     if item is None:
