@@ -1,5 +1,6 @@
 import gzip
 import io
+import os
 import random
 import time
 import urllib.parse
@@ -57,11 +58,17 @@ class HttpClient:
         self.retry_config = retry_config or RetryConfig()
         self._buckets = {}
         self._cookies = cookiejar.CookieJar()
-        proxy_handler = urllib.request.ProxyHandler({})
-        self._opener = urllib.request.build_opener(
-            proxy_handler,
-            urllib.request.HTTPCookieProcessor(self._cookies),
-        )
+        use_no_proxy = os.environ.get("NO_PROXY_LOOKUP") == "1" or os.environ.get("CI") == "1" or os.environ.get("CODESPACES") == "true"
+        if use_no_proxy:
+            proxy_handler = urllib.request.ProxyHandler({})
+            self._opener = urllib.request.build_opener(
+                proxy_handler,
+                urllib.request.HTTPCookieProcessor(self._cookies),
+            )
+        else:
+            self._opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(self._cookies),
+            )
 
     def _get_bucket(self, host):
         bucket = self._buckets.get(host)

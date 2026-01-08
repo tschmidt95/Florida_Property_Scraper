@@ -210,14 +210,30 @@ for label in LABELS:
         flags=re.IGNORECASE | re.DOTALL,
     )
 
+_MAX_BLOCKS_LIMIT = None
 
-def split_result_blocks(html_text):
+
+def set_max_blocks_limit(limit):
+    global _MAX_BLOCKS_LIMIT
+    _MAX_BLOCKS_LIMIT = limit
+
+
+def _effective_block_limit(max_blocks):
+    if max_blocks is not None:
+        return max_blocks
+    return _MAX_BLOCKS_LIMIT
+
+
+def split_result_blocks(html_text, max_blocks=None):
+    limit = _effective_block_limit(max_blocks)
     starts = [match.start() for match in START_PATTERN.finditer(html_text)]
     if starts:
         blocks = []
         for idx, start in enumerate(starts):
             end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
             blocks.append(html_text[start:end])
+            if limit and len(blocks) >= limit:
+                return blocks
         return blocks
     label_starts = [match.start() for match in LABEL_SPLIT_PATTERN.finditer(html_text)]
     if len(label_starts) > 1:
@@ -225,6 +241,8 @@ def split_result_blocks(html_text):
         for idx, start in enumerate(label_starts):
             end = label_starts[idx + 1] if idx + 1 < len(label_starts) else len(html_text)
             blocks.append(html_text[start:end])
+            if limit and len(blocks) >= limit:
+                return blocks
         return blocks
     return [html_text]
 

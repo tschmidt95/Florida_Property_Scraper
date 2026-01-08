@@ -5,6 +5,7 @@
 - Baseline tests: `python3 -m pytest -q`
 - Slowest tests: `python3 -m pytest -q --durations=10`
 - Native fixture bench: `python3 dev/bench_native.py`
+- Iteration stats: `python3 dev/bench_native.py --iterations 50`
 
 ## PERF mode
 

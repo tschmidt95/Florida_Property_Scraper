@@ -4,7 +4,7 @@ import re
 import time
 
 from .http_client import HttpClient
-from .extract import ensure_fields, split_result_blocks, truncate_raw_html
+from .extract import ensure_fields, set_max_blocks_limit, split_result_blocks, truncate_raw_html
 from florida_property_scraper.schema.records import normalize_record
 
 
@@ -32,6 +32,17 @@ class NativeEngine:
         while queue:
             if pages_seen >= self.max_pages:
                 break
+            remaining = None
+            if self.max_items:
+                remaining = self.max_items - len(items)
+            if self.per_county_limit:
+                limit_remaining = self.per_county_limit - len(items)
+                remaining = limit_remaining if remaining is None else min(remaining, limit_remaining)
+            if remaining is not None and remaining <= 0:
+                break
+            candidate_limit = None
+            if remaining is not None:
+                candidate_limit = max(remaining + 2, 0)
             req = queue.pop(0)
             req_url = req["url"] if isinstance(req, dict) else req
             if req_url in visited:
@@ -43,8 +54,14 @@ class NativeEngine:
             if first_html is None:
                 first_html = response["text"]
                 first_blocks = split_result_blocks(first_html)
-            parsed = parser(response["text"], response["final_url"], county_slug)
+            set_max_blocks_limit(candidate_limit)
+            try:
+                parsed = parser(response["text"], response["final_url"], county_slug)
+            finally:
+                set_max_blocks_limit(None)
             perf_parsed += len(parsed)
+            if candidate_limit and len(parsed) > candidate_limit:
+                parsed = parsed[:candidate_limit]
             normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
             validated = []
             dropped = 0
