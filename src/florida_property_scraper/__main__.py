@@ -2,6 +2,7 @@ import argparse
 import os
 import csv
 import json
+import sys
 from pathlib import Path
 
 from .routers.fl import canonicalize_jurisdiction_name as canonicalize_county_name
@@ -14,9 +15,78 @@ from .scraper import FloridaPropertyScraper
 from .schema import REQUIRED_FIELDS, normalize_item
 from .security import neutralize_csv_field, sanitize_path
 from .storage import SQLiteStorage
+from .backend.native.extract import split_result_blocks
+
+
+def _find_fixture(county):
+    fixtures = [
+        Path("tests/fixtures") / f"{county}_sample.html",
+        Path("tests/fixtures") / f"{county}_realistic.html",
+    ]
+    for path in fixtures:
+        if path.exists():
+            return path
+    return None
+
+
+def run_human_command(argv):
+    parser = argparse.ArgumentParser(description="Run a single county scrape")
+    parser.add_argument("--backend", choices=["scrapy", "native"], default="native")
+    parser.add_argument("--county", required=True)
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
+    parser.add_argument("--max-items", type=int, default=5)
+    args = parser.parse_args(argv)
+
+    if args.backend == "native":
+        from florida_property_scraper.backend.native_adapter import NativeAdapter
+
+        adapter = NativeAdapter()
+    else:
+        from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
+
+        adapter = ScrapyAdapter(live=(args.mode == "live"))
+
+    blocks = []
+    parsed_count = 0
+    if args.mode == "fixture":
+        fixture = _find_fixture(args.county)
+        if not fixture:
+            raise FileNotFoundError(f"No fixture found for {args.county}")
+        html = fixture.read_text(encoding="utf-8")
+        blocks = split_result_blocks(html)
+        parsed_count = len(blocks)
+        start_urls = [f"file://{fixture.resolve()}"]
+        items = adapter.search(
+            query=args.query,
+            start_urls=start_urls,
+            spider_name=f"{args.county}_spider",
+            max_items=args.max_items,
+            live=False,
+            county_slug=args.county,
+        )
+    else:
+        items = adapter.search(
+            query=args.query,
+            spider_name=f"{args.county}_spider",
+            max_items=args.max_items,
+            live=True,
+            county_slug=args.county,
+        )
+        parsed_count = len(items)
+
+    print("Owner | Address")
+    for item in items[:5]:
+        print(f"{item.get('owner','')} | {item.get('address','')}")
+    print(f"Blocks found: {len(blocks)}")
+    print(f"Records parsed: {parsed_count}")
+    print(f"Records validated: {len(items)}")
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "run":
+        run_human_command(sys.argv[2:])
+        return
     parser = argparse.ArgumentParser(
         description="Florida property scraper CLI",
     )
@@ -96,6 +166,24 @@ def main():
         type=int,
         default=None,
         help="Maximum number of items per county",
+    )
+    parser.add_argument(
+        "--max-blocks-per-response",
+        type=int,
+        default=None,
+        help="Max result blocks parsed per response (native backend)",
+    )
+    parser.add_argument(
+        "--global-concurrency",
+        type=int,
+        default=None,
+        help="Global async concurrency (native backend)",
+    )
+    parser.add_argument(
+        "--per-host-concurrency",
+        type=int,
+        default=None,
+        help="Per-host async concurrency (native backend)",
     )
     parser.add_argument(
         "--log-json",
@@ -198,6 +286,12 @@ def main():
     parser.add_argument("--backend", choices=["scrapy", "native"], default="scrapy")
     args = parser.parse_args()
     os.environ["FL_SCRAPER_BACKEND"] = args.backend
+    if args.max_blocks_per_response is not None:
+        os.environ["MAX_BLOCKS_PER_RESPONSE"] = str(args.max_blocks_per_response)
+    if args.global_concurrency is not None:
+        os.environ["GLOBAL_CONCURRENCY"] = str(args.global_concurrency)
+    if args.per_host_concurrency is not None:
+        os.environ["PER_HOST_CONCURRENCY"] = str(args.per_host_concurrency)
     if args.backend == "native":
         from florida_property_scraper.backend.native_adapter import NativeAdapter
         import florida_property_scraper.backend.scrapy_adapter as scrapy_adapter

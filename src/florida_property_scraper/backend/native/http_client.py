@@ -1,11 +1,19 @@
 import gzip
 import io
+import os
 import random
 import time
 import urllib.parse
 import urllib.request
 import zlib
 from http import cookiejar
+
+try:  # optional async client
+    import httpx
+    ASYNC_AVAILABLE = True
+except Exception:  # pragma: no cover
+    httpx = None
+    ASYNC_AVAILABLE = False
 
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
@@ -57,7 +65,17 @@ class HttpClient:
         self.retry_config = retry_config or RetryConfig()
         self._buckets = {}
         self._cookies = cookiejar.CookieJar()
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._cookies))
+        use_no_proxy = os.environ.get("NO_PROXY_LOOKUP") == "1" or os.environ.get("CI") == "1" or os.environ.get("CODESPACES") == "true"
+        if use_no_proxy:
+            proxy_handler = urllib.request.ProxyHandler({})
+            self._opener = urllib.request.build_opener(
+                proxy_handler,
+                urllib.request.HTTPCookieProcessor(self._cookies),
+            )
+        else:
+            self._opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(self._cookies),
+            )
 
     def _get_bucket(self, host):
         bucket = self._buckets.get(host)
@@ -149,5 +167,98 @@ class HttpClient:
                 last_error = exc
                 if attempt < len(delays):
                     sleep_fn(delays[attempt])
+                continue
+        raise last_error
+
+
+class AsyncHttpClient:
+    def __init__(self, timeout=10, max_bytes=200_000, retry_config=None):
+        if httpx is None:
+            raise RuntimeError("httpx is required for async native HTTP")
+        self.timeout = timeout
+        self.max_bytes = max_bytes
+        self.retry_config = retry_config or RetryConfig()
+        self._buckets = {}
+        self._client = None
+
+    def _get_bucket(self, host):
+        bucket = self._buckets.get(host)
+        if bucket is None:
+            bucket = TokenBucket()
+            self._buckets[host] = bucket
+        return bucket
+
+    async def _ensure_client(self):
+        if self._client is not None:
+            return self._client
+        use_no_proxy = os.environ.get("NO_PROXY_LOOKUP") == "1" or os.environ.get("CI") == "1" or os.environ.get("CODESPACES") == "true"
+        self._client = httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, trust_env=not use_no_proxy)
+        return self._client
+
+    async def request(self, request_spec, allowed_hosts=None, sleep_fn=None):
+        if isinstance(request_spec, str):
+            request_spec = {"url": request_spec, "method": "GET", "data": None, "headers": {}}
+        url = request_spec.get("url")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme in ("file", ""):
+            with open(parsed.path, "rb") as handle:
+                data = handle.read(self.max_bytes)
+            return {"text": data.decode("utf-8", errors="replace"), "final_url": url, "truncated": False, "status": 200}
+        if allowed_hosts is not None and parsed.hostname not in allowed_hosts:
+            raise ValueError("Host not in allowlist")
+        bucket = self._get_bucket(parsed.hostname or "")
+        wait_time = bucket.take()
+        if wait_time:
+            if sleep_fn is None:
+                import asyncio
+
+                await asyncio.sleep(wait_time)
+            else:
+                await sleep_fn(wait_time)
+        headers = {
+            "User-Agent": "florida-property-scraper-native",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Encoding": "gzip, deflate",
+        }
+        headers.update(request_spec.get("headers") or {})
+        delays = compute_backoff_delays(
+            self.retry_config.retries,
+            self.retry_config.base_delay,
+            self.retry_config.factor,
+            self.retry_config.jitter,
+        )
+        attempts = len(delays) + 1
+        last_error = None
+        client = await self._ensure_client()
+        for attempt in range(attempts):
+            try:
+                response = await client.request(
+                    request_spec.get("method", "GET"),
+                    url,
+                    content=request_spec.get("data"),
+                    headers=headers,
+                )
+                status = response.status_code
+                content = response.content
+                truncated = len(content) > self.max_bytes
+                if truncated:
+                    content = content[: self.max_bytes]
+                if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                    content = gzip.decompress(content)
+                if response.headers.get("Content-Encoding", "").lower() == "deflate":
+                    content = zlib.decompress(content)
+                text = content.decode(response.encoding or "utf-8", errors="replace")
+                if status in RETRY_STATUS and attempt < len(delays):
+                    import asyncio
+
+                    await asyncio.sleep(delays[attempt])
+                    continue
+                return {"text": text, "final_url": str(response.url), "truncated": truncated, "status": status}
+            except Exception as exc:  # pragma: no cover - error path
+                last_error = exc
+                if attempt < len(delays):
+                    import asyncio
+
+                    await asyncio.sleep(delays[attempt])
                 continue
         raise last_error

@@ -1,4 +1,5 @@
 import html
+import os
 import re
 
 try:
@@ -23,20 +24,6 @@ REQUIRED_FIELDS = [
 ]
 
 
-_RESULT_BLOCK_CSS = (
-    "section.search-result, article.search-result, div.search-result, "
-    "section.result-card, article.result-card, div.result-card, "
-    "div.property-card, section.property-card, article.property-card"
-)
-
-_RESULT_BLOCK_PATTERNS = [
-    r'(<section[^>]+class="[^"]*search-result[^"]*"[^>]*>.*?</section>)',
-    r'(<article[^>]+class="[^"]*search-result[^"]*"[^>]*>.*?</article>)',
-    r'(<(section|div|article)[^>]+class="[^"]*result-card[^"]*"[^>]*>.*?</\\2>)',
-    r'(<(section|div|article)[^>]+class="[^"]*property-card[^"]*"[^>]*>.*?</\\2>)',
-]
-
-
 def norm_ws(value):
     if value is None:
         return ""
@@ -45,12 +32,6 @@ def norm_ws(value):
 
 def safe_text(value):
     return norm_ws(html.unescape(value or ""))
-
-
-def strip_tags(value: str) -> str:
-    if not value:
-        return ""
-    return re.sub(r"<[^>]+>", " ", value)
 
 
 def truncate_raw_html(text, limit=2000):
@@ -84,9 +65,7 @@ def find_label_value_pairs(selector):
     pairs = []
     if selector is None:
         return pairs
-    for label in selector.css(
-        "label, .label, .field-label, .field-name, h1, h2, h3, h4, h5, h6, th, dt"
-    ):
+    for label in selector.css("label, .label, .field-label, .field-name"):
         label_text = safe_text("".join(label.css("::text").getall()))
         if not label_text:
             continue
@@ -109,19 +88,11 @@ def _extract_owner_address_from_pairs(pairs):
 
 
 def _extract_owner_address_from_text(text):
-    combined = safe_text(strip_tags(text))
-    match_owner = re.search(
-        r"\bowner\b\s*[:\-]\s*(.+?)(?=(?:\b(?:mailing|site|situs|property)\b\s*address\b|\baddress\b\s*[:\-]|$))",
-        combined,
-        re.I,
-    )
-    match_addr = re.search(
-        r"\b(?:mailing|site|situs|property)?\s*address\b\s*[:\-]\s*(.+?)(?=(?:\bowner\b\s*[:\-]|$))",
-        combined,
-        re.I,
-    )
+    combined = safe_text(text)
+    match_owner = re.search(r"owner\s*[:\-]\s*([^\|]+)", combined, re.I)
+    match_addr = re.search(r"(mailing|site|situs|property)?\s*address\s*[:\-]\s*([^\|]+)", combined, re.I)
     owner = safe_text(match_owner.group(1)) if match_owner else ""
-    address = safe_text(match_addr.group(1)) if match_addr else ""
+    address = safe_text(match_addr.group(2)) if match_addr else ""
     return owner, address
 
 
@@ -212,23 +183,113 @@ def parse_label_items(html_text, county_slug):
     return []
 
 
-def split_result_blocks(html_text: str) -> list[str]:
-    if not html_text:
-        return []
+START_PATTERN = re.compile(
+    r"<(?:section|article|div)[^>]*class=[\"'][^\"']*(search-result|result-card|property-card)[^\"']*[\"'][^>]*>",
+    flags=re.IGNORECASE,
+)
+LABEL_SPLIT_PATTERN = re.compile(
+    r"(Owner(?: Name)?|Owner\s*\(s\)|Situs Address|Site Address|Property Address)\s*:",
+    flags=re.IGNORECASE,
+)
+LABELS = (
+    "Owner",
+    "Owner Name",
+    "Owner(s)",
+    "Site Address",
+    "Situs Address",
+    "Property Address",
+)
+LABEL_COLON_PATTERNS = {}
+LABEL_TAG_PATTERNS = {}
+DEFAULT_MAX_BLOCKS = int(os.environ.get("MAX_BLOCKS_PER_RESPONSE", "200"))
+MAX_RESPONSE_BYTES = int(os.environ.get("MAX_RESPONSE_BYTES", "2000000"))
+for label in LABELS:
+    label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+    LABEL_COLON_PATTERNS[label] = re.compile(
+        rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE
+    )
+    LABEL_TAG_PATTERNS[label] = re.compile(
+        rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
 
-    selector = _selector_from_html(html_text)
-    if selector is not None:
-        blocks = [node.get() for node in selector.css(_RESULT_BLOCK_CSS)]
-        blocks = [b for b in blocks if norm_ws(b)]
-        if blocks:
-            return blocks
+_MAX_BLOCKS_LIMIT = None
 
-    for pat in _RESULT_BLOCK_PATTERNS:
-        blocks = re.findall(pat, html_text, flags=re.IGNORECASE | re.DOTALL)
-        if not blocks:
-            continue
-        # Some patterns use capturing groups for tag name; normalize to the full match.
-        if isinstance(blocks[0], tuple):
-            blocks = [b[0] for b in blocks]
-        return [b for b in blocks if norm_ws(b)]
-    return []
+
+def set_max_blocks_limit(limit):
+    global _MAX_BLOCKS_LIMIT
+    _MAX_BLOCKS_LIMIT = limit
+
+
+def _effective_block_limit(max_blocks):
+    if max_blocks is not None:
+        return max_blocks
+    if _MAX_BLOCKS_LIMIT is not None:
+        return _MAX_BLOCKS_LIMIT
+    return DEFAULT_MAX_BLOCKS
+
+
+def split_result_blocks(html_text, max_blocks=None):
+    if html_text and len(html_text) > MAX_RESPONSE_BYTES:
+        html_text = html_text[:MAX_RESPONSE_BYTES]
+    limit = _effective_block_limit(max_blocks)
+    starts = [match.start() for match in START_PATTERN.finditer(html_text)]
+    if starts:
+        blocks = []
+        for idx, start in enumerate(starts):
+            end = starts[idx + 1] if idx + 1 < len(starts) else len(html_text)
+            blocks.append(html_text[start:end])
+            if limit and len(blocks) >= limit:
+                return blocks
+        return blocks
+    label_starts = [match.start() for match in LABEL_SPLIT_PATTERN.finditer(html_text)]
+    if len(label_starts) > 1:
+        blocks = []
+        for idx, start in enumerate(label_starts):
+            end = label_starts[idx + 1] if idx + 1 < len(label_starts) else len(html_text)
+            blocks.append(html_text[start:end])
+            if limit and len(blocks) >= limit:
+                return blocks
+        return blocks
+    return [html_text]
+
+
+def grab_label_value(block, label):
+    pattern_colon = LABEL_COLON_PATTERNS.get(label)
+    if pattern_colon is None:
+        label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+        pattern_colon = re.compile(rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE)
+        LABEL_COLON_PATTERNS[label] = pattern_colon
+    match = pattern_colon.search(block)
+    if match:
+        return safe_text(match.group(1))
+    pattern_tag = LABEL_TAG_PATTERNS.get(label)
+    if pattern_tag is None:
+        label_pattern = r"\s+".join(re.escape(part) for part in label.split())
+        pattern_tag = re.compile(
+            rf"{label_pattern}\s*</[^>]+>\s*<[^>]*>\s*([^<]+)",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        LABEL_TAG_PATTERNS[label] = pattern_tag
+    match = pattern_tag.search(block)
+    if match:
+        return safe_text(match.group(1))
+    return ""
+
+
+def extract_owner(block):
+    labels = ["Owner", "Owner Name", "Owner(s)"]
+    for label in labels:
+        value = grab_label_value(block, label)
+        if value:
+            return value
+    return ""
+
+
+def extract_address(block):
+    labels = ["Site Address", "Situs Address", "Property Address"]
+    for label in labels:
+        value = grab_label_value(block, label)
+        if value:
+            return value
+    return ""
