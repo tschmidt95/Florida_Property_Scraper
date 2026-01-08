@@ -1,5 +1,5 @@
 requests
-scrapy==2.13.3
+scrapy==2.14.0
 fastapi
 uvicorn
 jsonschema>=4.0

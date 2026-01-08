@@ -18,7 +18,7 @@ def _ensure_list(value: Any) -> List[Any]:
 
 
 class NormalizePipeline:
-    def process_item(self, item: Dict[str, Any], spider):
+    def process_item(self, item: Dict[str, Any], spider=None):
         item.setdefault("contact_phones", [])
         item.setdefault("contact_emails", [])
         item.setdefault("contact_addresses", [])
@@ -49,7 +49,7 @@ class AppendJsonlPipeline:
     def open_spider(self, spider):
         self._handle = open(self.path, "a", encoding="utf-8")
 
-    def process_item(self, item: Dict[str, Any], spider):
+    def process_item(self, item: Dict[str, Any], spider=None):
         if not self._handle:
             return item
         payload = json.dumps(dict(item), ensure_ascii=True)
@@ -76,7 +76,7 @@ class StoragePipeline:
         run_id = crawler.settings.get("RUN_ID") or ""
         return cls(SQLiteStore(path), run_id)
 
-    def process_item(self, item: Dict[str, Any], spider):
+    def process_item(self, item: Dict[str, Any], spider=None):
         record = normalize_record(dict(item))
         self.store.upsert_lead(record)
         property_uid, parcel_id, warnings = compute_property_uid(item)
@@ -146,7 +146,7 @@ class ExporterPipeline:
             raise NotConfigured("No exporters configured")
         return cls(exporters)
 
-    def process_item(self, item: Dict[str, Any], spider):
+    def process_item(self, item: Dict[str, Any], spider=None):
         record = normalize_record(dict(item))
         for exporter in self.exporters:
             exporter.export(record)

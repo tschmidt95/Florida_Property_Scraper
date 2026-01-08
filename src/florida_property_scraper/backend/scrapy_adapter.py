@@ -31,13 +31,13 @@ class InMemoryPipeline:
         inst.crawler = crawler
         return inst
 
-    def process_item(self, item, spider):
-        if self.max_items and len(self.items) >= self.max_items:
-            spider.crawler.engine.close_spider(spider, reason="max_items")
+    def process_item(self, item, spider=None):
+        # Keep collecting deterministic output even if the spider yields
+        # more than `CLOSESPIDER_ITEMCOUNT` (e.g., multiple items from a
+        # single response). Avoid calling deprecated Scrapy engine APIs.
+        if self.max_items is not None and len(self.items) >= self.max_items:
             return item
         self.items.append(dict(item))
-        if self.max_items and len(self.items) >= self.max_items:
-            spider.crawler.engine.close_spider(spider, reason="max_items")
         return item
 
 
