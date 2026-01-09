@@ -3,9 +3,33 @@
 This isolates Twisted reactor usage to the subprocess so the main test process can run
 multiple spiders sequentially without reactor conflicts.
 """
+
 import argparse
 import json
 import sys
+
+
+def resolve_spider_name(raw_name: str) -> str:
+    name = (raw_name or "").lower().strip()
+    if name.endswith("_spider"):
+        name = name[: -len("_spider")]
+    return name
+
+
+def resolve_spider_cls(spider_name: str):
+    """Return the spider class for a given name.
+
+    Accepts either "orange" or "orange_spider".
+    """
+
+    from .spiders import SPIDERS
+
+    normalized = resolve_spider_name(spider_name)
+    return (
+        SPIDERS.get(spider_name)
+        or SPIDERS.get(normalized)
+        or SPIDERS.get(f"{normalized}_spider")
+    )
 
 
 def resolve_spider_class(spider_name, spiders_registry=None):
@@ -15,9 +39,7 @@ def resolve_spider_class(spider_name, spiders_registry=None):
         spiders_registry = SPIDERS
 
     raw_name = spider_name
-    normalized_name = (
-        raw_name[: -len("_spider")] if raw_name.endswith("_spider") else raw_name
-    )
+    normalized_name = resolve_spider_name(raw_name)
 
     SpiderCls = spiders_registry.get(raw_name) or spiders_registry.get(normalized_name)
     if not SpiderCls:
@@ -27,15 +49,15 @@ def resolve_spider_class(spider_name, spiders_registry=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--spider-name', required=True)
-    parser.add_argument('--start-urls', required=True, help='JSON array of start URLs')
-    parser.add_argument('--max-items', type=int, default=None)
-    parser.add_argument('--debug-html', action='store_true')
-    parser.add_argument('--query', default='')
-    parser.add_argument('--pagination', default='none')
-    parser.add_argument('--page-param', default='')
-    parser.add_argument('--form-url', default='')
-    parser.add_argument('--form-fields', default='')
+    parser.add_argument("--spider-name", required=True)
+    parser.add_argument("--start-urls", required=True, help="JSON array of start URLs")
+    parser.add_argument("--max-items", type=int, default=None)
+    parser.add_argument("--debug-html", action="store_true")
+    parser.add_argument("--query", default="")
+    parser.add_argument("--pagination", default="none")
+    parser.add_argument("--page-param", default="")
+    parser.add_argument("--form-url", default="")
+    parser.add_argument("--form-fields", default="")
     args = parser.parse_args()
 
     start_urls = json.loads(args.start_urls)
@@ -44,26 +66,28 @@ def main():
     from urllib.request import pathname2url
     from urllib.parse import urlparse
     from pathlib import Path
+
     resolved = []
     for u in start_urls:
-        if isinstance(u, str) and u.startswith('file://'):
+        if isinstance(u, str) and u.startswith("file://"):
             path = urlparse(u).path
             if not Path(path).exists():
                 # try relative to cwd
-                candidate = Path.cwd() / path.lstrip('/')
+                candidate = Path.cwd() / path.lstrip("/")
                 if candidate.exists():
-                    resolved.append('file://' + pathname2url(str(candidate)))
+                    resolved.append("file://" + pathname2url(str(candidate)))
                     continue
                 # fallback: search for matching filename
-                matches = list(Path.cwd().glob('**/' + Path(path).name))
+                matches = list(Path.cwd().glob("**/" + Path(path).name))
                 if matches:
-                    resolved.append('file://' + pathname2url(str(matches[0])))
+                    resolved.append("file://" + pathname2url(str(matches[0])))
                     continue
         resolved.append(u)
     start_urls = resolved
 
     # Debug: surface resolved start_urls on stderr to help diagnose intermittent test failures
     import sys as _sys
+
     print(f"RUNNER start_urls={start_urls}", file=_sys.stderr, flush=True)
 
     try:
@@ -75,9 +99,7 @@ def main():
 
     InMemoryPipeline.items_list = []
     InMemoryPipeline.max_items = args.max_items
-    pipeline_key = (
-        "florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline"
-    )
+    pipeline_key = "florida_property_scraper.backend.scrapy_adapter.InMemoryPipeline"
 
     settings = {
         "ITEM_PIPELINES": {
@@ -117,25 +139,5 @@ def main():
     print(json.dumps(InMemoryPipeline.items_list), flush=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-def resolve_spider_name(raw_name: str) -> str:
-    name = (raw_name or "").lower()
-    if name.endswith("_spider"):
-        name = name[: -len("_spider")]
-    return name
-
-
-def resolve_spider_cls(spider_name: str):
-    normalized = resolve_spider_name(spider_name)
-    return SPIDERS.get(normalized)
-def resolve_spider_name(raw_name: str) -> str:
-    name = (raw_name or "").lower()
-    if name.endswith("_spider"):
-        name = name[: -len("_spider")]
-    return name
-
-
-def resolve_spider_cls(spider_name: str):
-    normalized = resolve_spider_name(spider_name)
-    return SPIDERS.get(normalized)

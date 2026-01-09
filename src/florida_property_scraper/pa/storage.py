@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -46,15 +45,31 @@ class PASQLite:
             )
             """
         )
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_county ON pa_properties(county)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_parcel ON pa_properties(parcel_id)")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_county ON pa_properties(county)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_parcel ON pa_properties(parcel_id)"
+        )
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_zip ON pa_properties(zip)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_land_use ON pa_properties(land_use_code)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_year_built ON pa_properties(year_built)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_building_sf ON pa_properties(building_sf)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_last_sale_date ON pa_properties(last_sale_date)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_last_sale_price ON pa_properties(last_sale_price)")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_pa_assessed ON pa_properties(assessed_value)")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_land_use ON pa_properties(land_use_code)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_year_built ON pa_properties(year_built)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_building_sf ON pa_properties(building_sf)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_last_sale_date ON pa_properties(last_sale_date)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_last_sale_price ON pa_properties(last_sale_price)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_assessed ON pa_properties(assessed_value)"
+        )
         self.conn.commit()
 
     def upsert(self, record: PAProperty) -> None:

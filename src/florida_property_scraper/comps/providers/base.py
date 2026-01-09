@@ -13,5 +13,4 @@ class ListingProvider(Protocol):
 
     name: str
 
-    def search(self, subject: SubjectProperty) -> List[ComparableListing]:
-        ...
+    def search(self, subject: SubjectProperty) -> List[ComparableListing]: ...

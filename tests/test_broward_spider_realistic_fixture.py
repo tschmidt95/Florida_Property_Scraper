@@ -9,8 +9,8 @@ BrowardSpider = spiders_pkg.broward_spider.BrowardSpider
 
 
 def test_broward_spider_realistic_fixture():
-    sample = Path('tests/fixtures/broward_realistic.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/broward_realistic.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

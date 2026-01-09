@@ -2,25 +2,43 @@ from typing import Dict, List, Optional
 
 
 RAW_COUNTY_URLS: List[Dict[str, str]] = [
-    {"name": "Alachua", "url": "https://www.alachuaclerk.com/propertysearch/search.aspx?owner="},
+    {
+        "name": "Alachua",
+        "url": "https://www.alachuaclerk.com/propertysearch/search.aspx?owner=",
+    },
     {"name": "Baker", "url": "https://www.bakercountyfl.org/239/Property-Search"},
     {"name": "Bay", "url": "https://www.baycountyfl.gov/property-search/"},
-    {"name": "Bradford", "url": "https://www.bradfordcountyfl.gov/departments/clerk_of_court/property_records/index.php"},
+    {
+        "name": "Bradford",
+        "url": "https://www.bradfordcountyfl.gov/departments/clerk_of_court/property_records/index.php",
+    },
     {"name": "Brevard", "url": "https://www.brevardcounty.us/propertysearch"},
     {"name": "Broward", "url": "https://bcpa.net/RecMenu.asp"},
-    {"name": "Calhoun", "url": "https://www.calhouncountyfl.com/departments/property_appraiser"},
-    {"name": "Charlotte", "url": "https://www.charlottecountyfl.gov/agencies-departments/property-appraiser/property-search"},
+    {
+        "name": "Calhoun",
+        "url": "https://www.calhouncountyfl.com/departments/property_appraiser",
+    },
+    {
+        "name": "Charlotte",
+        "url": "https://www.charlottecountyfl.gov/agencies-departments/property-appraiser/property-search",
+    },
     {"name": "Citrus", "url": "https://www.citruscounty-fl.gov/property-search/"},
     {"name": "Clay", "url": "https://www.claycountyfl.gov/property-search"},
     {"name": "Collier", "url": "https://www.colliercountyfl.gov/property-search"},
     {"name": "Columbia", "url": "https://www.columbiacountyfl.org/property-search/"},
-    {"name": "Dade (Miami-Dade)", "url": "https://www.miamidadepa.gov/pa/real-estate/property-search.page"},
+    {
+        "name": "Dade (Miami-Dade)",
+        "url": "https://www.miamidadepa.gov/pa/real-estate/property-search.page",
+    },
     {"name": "DeSoto", "url": "https://www.desotocountyfl.gov/property-search/"},
     {"name": "Dixie", "url": "https://www.dixiecountyfl.com/property-search"},
     {"name": "Duval", "url": "https://www.duvalclerk.com/property-search"},
     {"name": "Escambia", "url": "https://www.escambiacounty.org/property-search/"},
     {"name": "Flagler", "url": "https://www.flaglercounty.org/property-search"},
-    {"name": "Franklin", "url": "https://www.franklincountyflorida.com/property-search/"},
+    {
+        "name": "Franklin",
+        "url": "https://www.franklincountyflorida.com/property-search/",
+    },
     {"name": "Gadsden", "url": "https://www.gadsdencountyfl.gov/property-search"},
     {"name": "Gilchrist", "url": "https://www.gilchristcountyfl.com/property-search/"},
     {"name": "Glades", "url": "https://www.gladescountyfl.com/property-search"},
@@ -49,7 +67,10 @@ RAW_COUNTY_URLS: List[Dict[str, str]] = [
     {"name": "Nassau", "url": "https://www.nassaucountyfl.com/property-search"},
     {"name": "Okaloosa", "url": "https://www.okaloosaclerk.com/property-search/"},
     {"name": "Okeechobee", "url": "https://www.okeechobeecountyfl.com/property-search"},
-    {"name": "Orange", "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx"},
+    {
+        "name": "Orange",
+        "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx",
+    },
     {"name": "Osceola", "url": "https://www.osceola.org/property-search/"},
     {"name": "Palm Beach", "url": "https://pbcpao.gov/index.htm"},
     {"name": "Pasco", "url": "https://search.pascopa.com"},
@@ -68,7 +89,10 @@ RAW_COUNTY_URLS: List[Dict[str, str]] = [
     {"name": "Volusia", "url": "https://www.volusia.org/property-search"},
     {"name": "Wakulla", "url": "https://www.wakullacounty.gov/property-search/"},
     {"name": "Walton", "url": "https://www.waltoncountyfl.org/property-search"},
-    {"name": "Washington", "url": "https://www.washingtoncountyfl.com/property-search/"},
+    {
+        "name": "Washington",
+        "url": "https://www.washingtoncountyfl.com/property-search/",
+    },
 ]
 
 ARCGIS_CONFIGS: Dict[str, Dict[str, object]] = {
@@ -170,7 +194,14 @@ ARCGIS_CONFIGS: Dict[str, Dict[str, object]] = {
         "situs_fields": ["dsiteaddr", "dsitezip"],
         "parcel_field": "a1renum",
         "owner_fields": ["a2owname"],
-        "mailing_fields": ["a3mailaddr", "a4mailaddr", "a5mailaddr", "a6mailcity", "a7mailst", "a8mailzip"],
+        "mailing_fields": [
+            "a3mailaddr",
+            "a4mailaddr",
+            "a5mailaddr",
+            "a6mailcity",
+            "a7mailst",
+            "a8mailzip",
+        ],
         "zoning_current_field": "zoning",
         "out_fields": [
             "a1renum",

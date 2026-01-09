@@ -1,0 +1,45 @@
+{
+  "county": "orange",
+  "fixture": "tests/fixtures/orange_realistic.html",
+  "records": [
+    {
+      "address": "111 Lake Eola Dr",
+      "bathrooms": "",
+      "bedrooms": "",
+      "building_size": "",
+      "county": "orange",
+      "jurisdiction": "orange",
+      "land_size": "",
+      "mailing_address": "",
+      "owner": "Orange Live Owner 1",
+      "parcel_id": "",
+      "property_class": "",
+      "raw_html_len": 197,
+      "sale_date": "",
+      "sale_price": "",
+      "situs_address": "",
+      "state": "fl",
+      "zoning": ""
+    },
+    {
+      "address": "222 Colonial Dr",
+      "bathrooms": "",
+      "bedrooms": "",
+      "building_size": "",
+      "county": "orange",
+      "jurisdiction": "orange",
+      "land_size": "",
+      "mailing_address": "",
+      "owner": "Orange Live Owner 2",
+      "parcel_id": "",
+      "property_class": "",
+      "raw_html_len": 193,
+      "sale_date": "",
+      "sale_price": "",
+      "situs_address": "",
+      "state": "fl",
+      "zoning": ""
+    }
+  ],
+  "source": "native_adapter.iter_records"
+}

@@ -7,10 +7,10 @@ from florida_property_scraper.backend.spiders.broward_spider import BrowardSpide
 
 
 def test_broward_pagination_fixture():
-    page1 = Path('tests/fixtures/broward_paged_1.html').absolute()
-    page2 = Path('tests/fixtures/broward_paged_2.html').absolute()
-    file_url_1 = 'file://' + pathname2url(str(page1))
-    file_url_2 = 'file://' + pathname2url(str(page2))
+    page1 = Path("tests/fixtures/broward_paged_1.html").absolute()
+    page2 = Path("tests/fixtures/broward_paged_2.html").absolute()
+    file_url_1 = "file://" + pathname2url(str(page1))
+    file_url_2 = "file://" + pathname2url(str(page2))
 
     html1 = page1.read_bytes()
     resp1 = TextResponse(url=file_url_1, body=html1)

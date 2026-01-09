@@ -32,3 +32,8 @@ tests/fixtures/comps/
 .coverage
 coverage.xml
 junit.xml
+
+# Build artifacts
+*.egg-info/
+*.bak
+

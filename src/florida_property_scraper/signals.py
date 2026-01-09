@@ -12,7 +12,9 @@ def _sale_fields(observation: Dict[str, object]) -> Dict[str, str]:
     }
 
 
-def generate_events(old_obs: Optional[Dict[str, object]], new_obs: Dict[str, object]) -> List[Dict[str, object]]:
+def generate_events(
+    old_obs: Optional[Dict[str, object]], new_obs: Dict[str, object]
+) -> List[Dict[str, object]]:
     if not old_obs:
         return []
     events: List[Dict[str, object]] = []
@@ -43,12 +45,17 @@ def generate_events(old_obs: Optional[Dict[str, object]], new_obs: Dict[str, obj
                 "event_type": "MAILING_ADDRESS_CHANGED",
                 "old_value": old_obs.get("mailing_address"),
                 "new_value": new_obs.get("mailing_address"),
-                "details_json": json.dumps({"field": "mailing_address"}, ensure_ascii=True),
+                "details_json": json.dumps(
+                    {"field": "mailing_address"}, ensure_ascii=True
+                ),
             }
         )
     old_sale = _sale_fields(old_obs)
     new_sale = _sale_fields(new_obs)
-    if old_sale["last_sale_date"] != new_sale["last_sale_date"] or old_sale["last_sale_price"] != new_sale["last_sale_price"]:
+    if (
+        old_sale["last_sale_date"] != new_sale["last_sale_date"]
+        or old_sale["last_sale_price"] != new_sale["last_sale_price"]
+    ):
         events.append(
             {
                 **event_base,

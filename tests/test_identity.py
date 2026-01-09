@@ -10,7 +10,11 @@ def test_property_uid_with_parcel():
 
 
 def test_property_uid_fallback():
-    item = {"county": "Orange", "owner_name": "Jane Doe", "situs_address": "123 Main St"}
+    item = {
+        "county": "Orange",
+        "owner_name": "Jane Doe",
+        "situs_address": "123 Main St",
+    }
     uid, parcel_id, warnings = compute_property_uid(item)
     assert uid.startswith("Orange:")
     assert parcel_id is None

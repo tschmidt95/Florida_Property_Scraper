@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Protocol, Tuple
 
 
 BBox = Tuple[float, float, float, float]
@@ -40,11 +40,9 @@ class ParcelGeometryProvider(Protocol):
 
     county: str
 
-    def load(self) -> None:
-        ...
+    def load(self) -> None: ...
 
-    def query(self, bbox: BBox) -> List[Feature]:
-        ...
+    def query(self, bbox: BBox) -> List[Feature]: ...
 
 
 def parse_bbox(raw: str) -> BBox:

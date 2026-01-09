@@ -51,7 +51,9 @@ class PolkSpider(Spider):
             yield request
 
     def parse(self, response):
-        nodes = response.css(".polk-result, .result-card, .search-result, .property-card")
+        nodes = response.css(
+            ".polk-result, .result-card, .search-result, .property-card"
+        )
         items = extract_label_items_from_nodes(nodes, "polk")
         if not items:
             items = extract_label_items(response, "polk")

@@ -92,7 +92,9 @@ def _score_distance_miles(
     return _clamp01(score), miles
 
 
-def score(subject: SubjectProperty, comp: ComparableListing) -> Tuple[float, Dict[str, Any]]:
+def score(
+    subject: SubjectProperty, comp: ComparableListing
+) -> Tuple[float, Dict[str, Any]]:
     """Compute a similarity score in [0,1] plus a transparent explanation dict."""
 
     explanation: Dict[str, Any] = {"weights": dict(WEIGHTS)}
@@ -163,7 +165,9 @@ def rank_comps(
     return ranked[: max(0, int(top_n))]
 
 
-def distance_miles(subject: SubjectProperty, comp: ComparableListing) -> Optional[float]:
+def distance_miles(
+    subject: SubjectProperty, comp: ComparableListing
+) -> Optional[float]:
     scored = _score_distance_miles(subject, comp)
     if scored is None:
         return None

@@ -1,7 +1,7 @@
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 def _list(value: Any) -> List[Any]:
@@ -36,7 +36,9 @@ def normalize_record(item: Dict[str, Any]) -> Dict[str, Any]:
     record.setdefault("search_query", "")
     record["lead_score"] = compute_lead_score(record)
     record["dedupe_key"] = compute_dedupe_key(record)
-    record["captured_at"] = record.get("captured_at") or datetime.utcnow().isoformat() + "Z"
+    record["captured_at"] = (
+        record.get("captured_at") or datetime.utcnow().isoformat() + "Z"
+    )
     return record
 
 

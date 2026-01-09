@@ -5,21 +5,45 @@ import re
 import time
 
 from .http_client import ASYNC_AVAILABLE, AsyncHttpClient, HttpClient
-from .extract import ensure_fields, set_max_blocks_limit, split_result_blocks, truncate_raw_html
+from .extract import (
+    ensure_fields,
+    set_max_blocks_limit,
+    split_result_blocks,
+    truncate_raw_html,
+)
+from florida_property_scraper.feature_flags import get_flags
 from florida_property_scraper.schema.records import normalize_record
 
 
 class NativeEngine:
-    def __init__(self, max_items=None, per_county_limit=None, retry_config=None, max_pages=50):
+    def __init__(
+        self, max_items=None, per_county_limit=None, retry_config=None, max_pages=50
+    ):
         self.max_items = max_items
         self.per_county_limit = per_county_limit
         self.http = HttpClient(retry_config=retry_config)
         self.async_http = None
         self.max_pages = max_pages
 
-    async def run_async(self, start_requests, parser, county_slug, allowed_hosts=None, log_fn=None, debug_context=None):
+    async def run_async(
+        self,
+        start_requests,
+        parser,
+        county_slug,
+        allowed_hosts=None,
+        log_fn=None,
+        debug_context=None,
+    ):
         if not ASYNC_AVAILABLE:  # pragma: no cover
-            return self.run(start_requests, parser, county_slug, allowed_hosts=allowed_hosts, log_fn=log_fn, dry_run=True, debug_context=debug_context)
+            return self.run(
+                start_requests,
+                parser,
+                county_slug,
+                allowed_hosts=allowed_hosts,
+                log_fn=log_fn,
+                dry_run=True,
+                debug_context=debug_context,
+            )
         if self.async_http is None:
             self.async_http = AsyncHttpClient()
         items = []
@@ -52,7 +76,11 @@ class NativeEngine:
                 remaining = self.max_items - len(items)
             if self.per_county_limit:
                 limit_remaining = self.per_county_limit - len(items)
-                remaining = limit_remaining if remaining is None else min(remaining, limit_remaining)
+                remaining = (
+                    limit_remaining
+                    if remaining is None
+                    else min(remaining, limit_remaining)
+                )
             if remaining is not None and remaining <= 0:
                 break
             candidate_limit = None
@@ -76,19 +104,26 @@ class NativeEngine:
                     first_blocks = split_result_blocks(first_html)
                 set_max_blocks_limit(candidate_limit)
                 try:
-                    parsed = parser(response["text"], response["final_url"], county_slug)
+                    parsed = parser(
+                        response["text"], response["final_url"], county_slug
+                    )
                 finally:
                     set_max_blocks_limit(None)
                 perf_parsed += len(parsed)
                 if candidate_limit and len(parsed) > candidate_limit:
                     parsed = parsed[:candidate_limit]
-                normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
+                normalized = [
+                    ensure_fields(item, county_slug, item.get("raw_html", ""))
+                    for item in parsed
+                ]
                 validated = []
                 dropped = 0
                 for item in normalized:
                     try:
                         record = normalize_record(item)
                     except ValueError:
+                        if get_flags().strict_schema_validation:
+                            raise
                         dropped += 1
                         continue
                     validated.append(record.to_dict())
@@ -126,7 +161,9 @@ class NativeEngine:
                     handle.write(first_html[:200000])
             blocks_payload = {
                 "count": len(first_blocks),
-                "blocks": [truncate_raw_html(block, 2000) for block in first_blocks[:2]],
+                "blocks": [
+                    truncate_raw_html(block, 2000) for block in first_blocks[:2]
+                ],
             }
             blocks_path = os.path.join(debug_dir, f"{prefix}_blocks.json")
             with open(blocks_path, "w", encoding="utf-8") as handle:
@@ -146,7 +183,17 @@ class NativeEngine:
             print(json.dumps(summary))
         return items
 
-    def iter_records(self, start_requests, parser, county_slug, allowed_hosts=None, log_fn=None, dry_run=False, fixture_map=None, debug_context=None):
+    def iter_records(
+        self,
+        start_requests,
+        parser,
+        county_slug,
+        allowed_hosts=None,
+        log_fn=None,
+        dry_run=False,
+        fixture_map=None,
+        debug_context=None,
+    ):
         items = []
         visited = set()
         queue = list(start_requests or [])
@@ -166,7 +213,11 @@ class NativeEngine:
                 remaining = self.max_items - len(items)
             if self.per_county_limit:
                 limit_remaining = self.per_county_limit - len(items)
-                remaining = limit_remaining if remaining is None else min(remaining, limit_remaining)
+                remaining = (
+                    limit_remaining
+                    if remaining is None
+                    else min(remaining, limit_remaining)
+                )
             if remaining is not None and remaining <= 0:
                 break
             candidate_limit = None
@@ -177,7 +228,12 @@ class NativeEngine:
             if req_url in visited:
                 continue
             visited.add(req_url)
-            response = self.http.request(req, allowed_hosts=allowed_hosts, dry_run=dry_run, fixture_map=fixture_map)
+            response = self.http.request(
+                req,
+                allowed_hosts=allowed_hosts,
+                dry_run=dry_run,
+                fixture_map=fixture_map,
+            )
             pages_seen += 1
             perf_requests += 1
             set_max_blocks_limit(candidate_limit)
@@ -188,12 +244,17 @@ class NativeEngine:
             perf_parsed += len(parsed)
             if candidate_limit and len(parsed) > candidate_limit:
                 parsed = parsed[:candidate_limit]
-            normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
+            normalized = [
+                ensure_fields(item, county_slug, item.get("raw_html", ""))
+                for item in parsed
+            ]
             dropped = 0
             for item in normalized:
                 try:
                     record = normalize_record(item)
                 except ValueError:
+                    if get_flags().strict_schema_validation:
+                        raise
                     dropped += 1
                     continue
                 perf_valid += 1
@@ -225,7 +286,17 @@ class NativeEngine:
         }
         yield {"__summary__": summary}
 
-    def run(self, start_requests, parser, county_slug, allowed_hosts=None, log_fn=None, dry_run=False, fixture_map=None, debug_context=None):
+    def run(
+        self,
+        start_requests,
+        parser,
+        county_slug,
+        allowed_hosts=None,
+        log_fn=None,
+        dry_run=False,
+        fixture_map=None,
+        debug_context=None,
+    ):
         if os.environ.get("NATIVE_ASYNC") == "1" and not dry_run:
             return asyncio.run(
                 self.run_async(
@@ -258,7 +329,11 @@ class NativeEngine:
                 remaining = self.max_items - len(items)
             if self.per_county_limit:
                 limit_remaining = self.per_county_limit - len(items)
-                remaining = limit_remaining if remaining is None else min(remaining, limit_remaining)
+                remaining = (
+                    limit_remaining
+                    if remaining is None
+                    else min(remaining, limit_remaining)
+                )
             if remaining is not None and remaining <= 0:
                 break
             candidate_limit = None
@@ -269,7 +344,12 @@ class NativeEngine:
             if req_url in visited:
                 continue
             visited.add(req_url)
-            response = self.http.request(req, allowed_hosts=allowed_hosts, dry_run=dry_run, fixture_map=fixture_map)
+            response = self.http.request(
+                req,
+                allowed_hosts=allowed_hosts,
+                dry_run=dry_run,
+                fixture_map=fixture_map,
+            )
             pages_seen += 1
             perf_requests += 1
             if first_html is None:
@@ -283,7 +363,10 @@ class NativeEngine:
             perf_parsed += len(parsed)
             if candidate_limit and len(parsed) > candidate_limit:
                 parsed = parsed[:candidate_limit]
-            normalized = [ensure_fields(item, county_slug, item.get("raw_html", "")) for item in parsed]
+            normalized = [
+                ensure_fields(item, county_slug, item.get("raw_html", ""))
+                for item in parsed
+            ]
             validated = []
             dropped = 0
             for item in normalized:
@@ -327,7 +410,9 @@ class NativeEngine:
                     handle.write(first_html[:200000])
             blocks_payload = {
                 "count": len(first_blocks),
-                "blocks": [truncate_raw_html(block, 2000) for block in first_blocks[:2]],
+                "blocks": [
+                    truncate_raw_html(block, 2000) for block in first_blocks[:2]
+                ],
             }
             blocks_path = os.path.join(debug_dir, f"{prefix}_blocks.json")
             with open(blocks_path, "w", encoding="utf-8") as handle:

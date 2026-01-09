@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Tuple
 
 from .models import ComparableReport
 from .scoring import distance_miles
@@ -33,7 +33,9 @@ def write_report_json(report: ComparableReport, path: Path) -> None:
 
     payload = _round(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def write_summary_csv(report: ComparableReport, path: Path) -> None:
@@ -67,11 +69,21 @@ def write_summary_csv(report: ComparableReport, path: Path) -> None:
                     "address": listing.address or "",
                     "property_type": listing.property_type or "",
                     "distance_miles": "" if miles is None else f"{miles:.3f}",
-                    "building_sqft": "" if listing.building_sqft is None else f"{listing.building_sqft:.0f}",
-                    "asking_price": "" if listing.asking_price is None else f"{listing.asking_price:.0f}",
-                    "price_per_sqft": "" if listing.price_per_sqft() is None else f"{listing.price_per_sqft():.2f}",
-                    "cap_rate": "" if listing.cap_rate is None else f"{listing.cap_rate:.4f}",
-                    "year_built": "" if listing.year_built is None else str(listing.year_built),
+                    "building_sqft": ""
+                    if listing.building_sqft is None
+                    else f"{listing.building_sqft:.0f}",
+                    "asking_price": ""
+                    if listing.asking_price is None
+                    else f"{listing.asking_price:.0f}",
+                    "price_per_sqft": ""
+                    if listing.price_per_sqft() is None
+                    else f"{listing.price_per_sqft():.2f}",
+                    "cap_rate": ""
+                    if listing.cap_rate is None
+                    else f"{listing.cap_rate:.4f}",
+                    "year_built": ""
+                    if listing.year_built is None
+                    else str(listing.year_built),
                     "score": f"{comp.score:.6f}",
                     "url": listing.url or "",
                 }

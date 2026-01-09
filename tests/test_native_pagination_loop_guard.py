@@ -17,8 +17,12 @@ def _get_next_urls(html, base_url):
 def test_native_pagination_loop_guard():
     engine = NativeEngine(max_pages=5)
     fixture_map = {
-        "http://example.local/page1": Path("tests/fixtures/broward_paged_1.html").read_text(encoding="utf-8"),
-        "http://example.local/page2": Path("tests/fixtures/broward_paged_2.html").read_text(encoding="utf-8"),
+        "http://example.local/page1": Path(
+            "tests/fixtures/broward_paged_1.html"
+        ).read_text(encoding="utf-8"),
+        "http://example.local/page2": Path(
+            "tests/fixtures/broward_paged_2.html"
+        ).read_text(encoding="utf-8"),
     }
     _parser.get_next_urls = _get_next_urls
     items = engine.run(

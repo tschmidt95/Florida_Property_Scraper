@@ -8,13 +8,11 @@ class Provider(Protocol):
         zoom: int,
         state: str,
         county: str,
-    ) -> List[dict]:
-        ...
+    ) -> List[dict]: ...
 
     def fetch_feature(
         self,
         parcel_id: str,
         state: str,
         county: str,
-    ) -> Optional[dict]:
-        ...
+    ) -> Optional[dict]: ...

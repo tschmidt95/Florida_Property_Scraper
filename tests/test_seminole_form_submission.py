@@ -20,8 +20,8 @@ def test_seminole_form_submission():
     assert isinstance(requests[0], FormRequest)
     assert b"Smith" in requests[0].body
 
-    sample = Path('tests/fixtures/seminole_form_response.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/seminole_form_response.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)
     items = list(spider.parse(resp))

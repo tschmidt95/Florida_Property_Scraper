@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from scripts import add_county
 
 

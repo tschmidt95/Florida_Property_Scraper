@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Optional
 
-from .models import ComparableReport, ScoredComparable, SimilarityWeights, SubjectProperty
+from .models import (
+    ComparableReport,
+    ScoredComparable,
+    SimilarityWeights,
+    SubjectProperty,
+)
 from .providers.base import ListingProvider
 from .providers.mock import FixtureSubjectResolver, MockProvider
 from .scoring import similarity_score
@@ -51,7 +56,9 @@ def find_post_sale_comparables(
             sale_price=sale_price,
             weights=weights,
         )
-        scored.append(ScoredComparable(listing=listing, score=score, components=components))
+        scored.append(
+            ScoredComparable(listing=listing, score=score, components=components)
+        )
 
     scored.sort(key=lambda c: (-c.score, c.listing.listing_id))
 

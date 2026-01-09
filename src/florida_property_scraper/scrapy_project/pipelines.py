@@ -9,6 +9,7 @@ from florida_property_scraper.signals import generate_events
 from florida_property_scraper.storage import SQLiteStore
 from scrapy.exceptions import NotConfigured
 
+
 def _ensure_list(value: Any) -> List[Any]:
     if value is None:
         return []
@@ -117,9 +118,15 @@ def _extract_last_sale(purchase_history: Any) -> Dict[str, Any]:
     for entry in purchase_history:
         if not isinstance(entry, dict):
             continue
-        sale_date = entry.get("sale_date") or entry.get("SALE_DATE") or entry.get("Sale Date")
-        sale_price = entry.get("sale_price") or entry.get("PRICE") or entry.get("Sale Price")
-        deed_type = entry.get("deed_type") or entry.get("DEED_TYPE") or entry.get("Deed Type")
+        sale_date = (
+            entry.get("sale_date") or entry.get("SALE_DATE") or entry.get("Sale Date")
+        )
+        sale_price = (
+            entry.get("sale_price") or entry.get("PRICE") or entry.get("Sale Price")
+        )
+        deed_type = (
+            entry.get("deed_type") or entry.get("DEED_TYPE") or entry.get("Deed Type")
+        )
         if sale_date or sale_price or deed_type:
             best = {
                 "last_sale_date": sale_date,

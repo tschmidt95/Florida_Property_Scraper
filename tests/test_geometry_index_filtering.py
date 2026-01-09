@@ -1,6 +1,5 @@
 import os
 
-import pytest
 
 from florida_property_scraper.parcels.geometry_registry import get_provider
 

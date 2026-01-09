@@ -3,7 +3,9 @@ from typing import List, Optional
 
 
 class DevProvider:
-    def fetch_features(self, bbox: str, zoom: int, state: str, county: str) -> List[dict]:
+    def fetch_features(
+        self, bbox: str, zoom: int, state: str, county: str
+    ) -> List[dict]:
         min_lon, min_lat, max_lon, max_lat = [float(v) for v in bbox.split(",")]
         seed = f"{state}:{county}:{bbox}"
         digest = hashlib.md5(seed.encode("utf-8")).hexdigest()

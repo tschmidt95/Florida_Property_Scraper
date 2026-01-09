@@ -51,7 +51,9 @@ class DuvalSpider(Spider):
             yield request
 
     def parse(self, response):
-        nodes = response.css(".duval-result, .result-card, .search-result, .property-card")
+        nodes = response.css(
+            ".duval-result, .result-card, .search-result, .property-card"
+        )
         items = extract_label_items_from_nodes(nodes, "duval")
         if not items:
             items = extract_label_items(response, "duval")

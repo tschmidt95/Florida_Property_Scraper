@@ -18,7 +18,7 @@ jobs:
         if: ${{ always() }}
         run: |
           if [ -f "$GITHUB_EVENT_PATH" ]; then
-            echo "Event payload:" 
+            echo "Event payload:"
             head -n 200 "$GITHUB_EVENT_PATH" || true
           else
             echo "No event payload available"

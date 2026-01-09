@@ -9,8 +9,8 @@ DuvalSpider = spiders_pkg.duval_spider.DuvalSpider
 
 
 def test_duval_spider_collects_items():
-    sample = Path('tests/fixtures/duval_sample.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/duval_sample.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

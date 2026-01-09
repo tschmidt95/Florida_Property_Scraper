@@ -1,0 +1,29 @@
+{
+  "bbox": "-81.38,28.64,-81.36,28.66",
+  "county": "seminole",
+  "features": [
+    {
+      "bbox": [
+        -81.37,
+        28.65,
+        -81.368,
+        28.652
+      ],
+      "feature_id": "seminole:SEM-0001",
+      "geometry_type": "Polygon",
+      "parcel_id": "SEM-0001"
+    },
+    {
+      "bbox": [
+        -81.365,
+        28.648,
+        -81.363,
+        28.65
+      ],
+      "feature_id": "seminole:SEM-0002",
+      "geometry_type": "Polygon",
+      "parcel_id": "SEM-0002"
+    }
+  ],
+  "source": "parcels.geometry_registry"
+}

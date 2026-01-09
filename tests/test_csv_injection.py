@@ -5,7 +5,7 @@ def test_csv_injection_neutralized():
     values = [
         '=CMD("calc")',
         '=HYPERLINK("http://evil")',
-        '+SUM(1,2)',
+        "+SUM(1,2)",
         '@IMPORT("evil")',
     ]
     for value in values:

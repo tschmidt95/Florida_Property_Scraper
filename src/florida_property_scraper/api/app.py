@@ -6,6 +6,7 @@ try:
     from fastapi import HTTPException
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
+
     FASTAPI_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
     FastAPI = None
@@ -23,9 +24,12 @@ import time
 
 from florida_property_scraper.api.geojson import to_featurecollection
 from florida_property_scraper.cache import cache_get, cache_set
+from florida_property_scraper.feature_flags import get_flags
 from florida_property_scraper.map_layer.registry import get_provider
 from florida_property_scraper.parcels.geometry_provider import parse_bbox
-from florida_property_scraper.parcels.geometry_registry import get_provider as get_geometry_provider
+from florida_property_scraper.parcels.geometry_registry import (
+    get_provider as get_geometry_provider,
+)
 from florida_property_scraper.routers.registry import get_router
 from florida_property_scraper.user_meta.storage import UserMetaSQLite, empty_user_meta
 
@@ -54,7 +58,16 @@ def _find_fixture(county):
     return None
 
 
-def stream_search(state="fl", county="broward", query="", backend="native", mode="fixture", max_items=None, per_county_limit=None, fixture_path=None):
+def stream_search(
+    state="fl",
+    county="broward",
+    query="",
+    backend="native",
+    mode="fixture",
+    max_items=None,
+    per_county_limit=None,
+    fixture_path=None,
+):
     cache_key = (backend, state, county, query, max_items, per_county_limit, mode)
     use_cache = os.environ.get("CACHE", "1") != "0"
     use_cache_stream = os.environ.get("CACHE_STREAM", "0") == "1"
@@ -108,6 +121,7 @@ app = FastAPI() if FASTAPI_AVAILABLE else None
 
 
 if app:
+
     @app.get("/health")
     def health_route():
         return health()
@@ -117,20 +131,33 @@ if app:
         return counties()
 
     @app.get("/search/stream")
-    def search_stream(state: str = "fl", county: str = "broward", query: str = "", backend: str = "native"):
-        generator = stream_search(state=state, county=county, query=query, backend=backend)
+    def search_stream(
+        state: str = "fl",
+        county: str = "broward",
+        query: str = "",
+        backend: str = "native",
+    ):
+        generator = stream_search(
+            state=state, county=county, query=query, backend=backend
+        )
         return StreamingResponse(generator, media_type="application/x-ndjson")
 
     @app.get("/parcels")
-    def parcels(state: str = "fl", county: str = "broward", bbox: str = "", zoom: int = 12):
+    def parcels(
+        state: str = "fl", county: str = "broward", bbox: str = "", zoom: int = 12
+    ):
         provider = get_provider(state, county)
-        features = provider.fetch_features(bbox=bbox, zoom=zoom, state=state, county=county)
+        features = provider.fetch_features(
+            bbox=bbox, zoom=zoom, state=state, county=county
+        )
         return JSONResponse(to_featurecollection(features, county))
 
     @app.get("/parcels/{parcel_id}")
     def parcel(parcel_id: str, state: str = "fl", county: str = "broward"):
         provider = get_provider(state, county)
-        feature = provider.fetch_feature(parcel_id=parcel_id, state=state, county=county)
+        feature = provider.fetch_feature(
+            parcel_id=parcel_id, state=state, county=county
+        )
         return JSONResponse(feature)
 
     @app.get("/api/parcels")
@@ -235,6 +262,10 @@ if app:
         Missing fields are treated as unknown and do not match triggers.
         """
 
+        flags = get_flags()
+        if not flags.geometry_search:
+            raise HTTPException(status_code=404, detail="geometry search is disabled")
+
         from florida_property_scraper.api.rules import (
             apply_filters,
             compile_filters,
@@ -258,7 +289,9 @@ if app:
         geometry = payload.get("geometry")
         radius = payload.get("radius")
         if geometry and radius:
-            raise HTTPException(status_code=400, detail="Provide either geometry or radius, not both")
+            raise HTTPException(
+                status_code=400, detail="Provide either geometry or radius, not both"
+            )
 
         if radius is not None:
             if not isinstance(radius, dict):
@@ -276,10 +309,16 @@ if app:
                     status_code=400,
                     detail="radius must be {center:[lng,lat], miles:number}",
                 )
-            geometry = circle_polygon(center_lon=float(center[0]), center_lat=float(center[1]), miles=float(miles))
+            geometry = circle_polygon(
+                center_lon=float(center[0]),
+                center_lat=float(center[1]),
+                miles=float(miles),
+            )
 
         if not isinstance(geometry, dict):
-            raise HTTPException(status_code=400, detail="geometry must be a GeoJSON geometry object")
+            raise HTTPException(
+                status_code=400, detail="geometry must be a GeoJSON geometry object"
+            )
         bbox_t = geometry_bbox(geometry)
         if bbox_t is None:
             raise HTTPException(status_code=400, detail="geometry has no coordinates")
@@ -296,12 +335,26 @@ if app:
         try:
             parcel_ids = [f.parcel_id for f in intersecting]
             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
-            hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
+            hover_by_id = store.get_hover_fields_many(
+                county=county_key, parcel_ids=parcel_ids
+            )
         finally:
             store.close()
 
         filters = compile_filters(payload.get("filters"))
-        triggers = compile_triggers(payload.get("triggers"))
+
+        raw_triggers = payload.get("triggers") if flags.triggers else None
+        triggers = compile_triggers(raw_triggers)
+
+        sale_fields = {
+            # PA hover fields
+            "last_sale_date",
+            "last_sale_price",
+            # Scraper-derived fields (future)
+            "sale_date",
+            "sale_price",
+            "deed_type",
+        }
 
         results = []
         for feat in intersecting:
@@ -322,6 +375,11 @@ if app:
             fields.update(computed)
             fields.update(hover)
 
+            # Optional safety valve: prevent sale-based filtering/triggering.
+            if not flags.sale_filtering:
+                for k in sale_fields:
+                    fields.pop(k, None)
+
             if not apply_filters(fields, filters):
                 continue
 
@@ -341,7 +399,9 @@ if app:
             if len(results) >= limit:
                 break
 
-        return JSONResponse({"county": county_key, "count": len(results), "results": results})
+        return JSONResponse(
+            {"county": county_key, "count": len(results), "results": results}
+        )
 
     @app.get("/api/parcels/{parcel_id}")
     def api_parcel_detail(parcel_id: str, county: str = ""):
@@ -380,7 +440,9 @@ if app:
             "parcel_id": parcel_key,
             "pa": pa,
             "computed": computed,
-            "user_meta": meta.to_dict() if meta is not None else empty_user_meta(county=county_key, parcel_id=parcel_key),
+            "user_meta": meta.to_dict()
+            if meta is not None
+            else empty_user_meta(county=county_key, parcel_id=parcel_key),
         }
         return JSONResponse(payload)
 
@@ -396,7 +458,11 @@ if app:
             meta = meta_store.get(county=county_key, parcel_id=parcel_key)
         finally:
             meta_store.close()
-        return JSONResponse(meta.to_dict() if meta is not None else empty_user_meta(county=county_key, parcel_id=parcel_key))
+        return JSONResponse(
+            meta.to_dict()
+            if meta is not None
+            else empty_user_meta(county=county_key, parcel_id=parcel_key)
+        )
 
     @app.put("/api/parcels/{parcel_id}/meta")
     def api_parcel_meta_put(parcel_id: str, payload: dict, county: str = ""):

@@ -27,8 +27,28 @@ LABEL_PATTERNS = {
     "zoning_future": ["future zoning", "future land use"],
 }
 
-PURCHASE_HEADERS = {"sale", "price", "buyer", "seller", "deed", "book", "page", "instrument", "date"}
-MORTGAGE_HEADERS = {"mortgage", "lender", "loan", "principal", "amount", "instrument", "book", "page", "date"}
+PURCHASE_HEADERS = {
+    "sale",
+    "price",
+    "buyer",
+    "seller",
+    "deed",
+    "book",
+    "page",
+    "instrument",
+    "date",
+}
+MORTGAGE_HEADERS = {
+    "mortgage",
+    "lender",
+    "loan",
+    "principal",
+    "amount",
+    "instrument",
+    "book",
+    "page",
+    "date",
+}
 
 
 class CountySpider(scrapy.Spider):
@@ -50,7 +70,9 @@ class CountySpider(scrapy.Spider):
         self.items_seen = 0
         self.counties = self._filter_counties(counties)
 
-    def _filter_counties(self, counties: Optional[List[str]]) -> List[Dict[str, Optional[str]]]:
+    def _filter_counties(
+        self, counties: Optional[List[str]]
+    ) -> List[Dict[str, Optional[str]]]:
         if not counties:
             return list(COUNTY_SOURCES)
         requested = {c.strip().lower() for c in counties if c and c.strip()}
@@ -86,13 +108,23 @@ class CountySpider(scrapy.Spider):
                     continue
             lake_config = county.get("lake")
             if lake_config:
-                lake_mode = "address" if any(ch.isdigit() for ch in self.query) else "property"
-                disclaimer_url = lake_config.get("disclaimer_address") if lake_mode == "address" else lake_config.get("disclaimer_property")
+                lake_mode = (
+                    "address" if any(ch.isdigit() for ch in self.query) else "property"
+                )
+                disclaimer_url = (
+                    lake_config.get("disclaimer_address")
+                    if lake_mode == "address"
+                    else lake_config.get("disclaimer_property")
+                )
                 if disclaimer_url:
                     yield scrapy.Request(
                         disclaimer_url,
                         callback=self.parse_lake_disclaimer,
-                        meta={"county": county, "lake": lake_config, "lake_mode": lake_mode},
+                        meta={
+                            "county": county,
+                            "lake": lake_config,
+                            "lake_mode": lake_mode,
+                        },
                     )
                     continue
             bcpa_config = county.get("bcpa")
@@ -149,17 +181,27 @@ class CountySpider(scrapy.Spider):
                 continue
             if county.get("search_url_template"):
                 url = county["search_url_template"].format(query=query)
-                yield scrapy.Request(url, callback=self.parse_search_results, meta={"county": county})
+                yield scrapy.Request(
+                    url, callback=self.parse_search_results, meta={"county": county}
+                )
             elif county.get("landing_url"):
-                yield scrapy.Request(county["landing_url"], callback=self.parse_landing, meta={"county": county})
+                yield scrapy.Request(
+                    county["landing_url"],
+                    callback=self.parse_landing,
+                    meta={"county": county},
+                )
 
     def parse_landing(self, response: scrapy.http.Response):
         if not self.allow_forms:
-            self.logger.info("Skipping form discovery for %s", response.meta["county"]["name"])
+            self.logger.info(
+                "Skipping form discovery for %s", response.meta["county"]["name"]
+            )
             return
         form_choice = self._choose_form(response)
         if not form_choice:
-            self.logger.info("No suitable form found for %s", response.meta["county"]["name"])
+            self.logger.info(
+                "No suitable form found for %s", response.meta["county"]["name"]
+            )
             return
         form_index, formdata = form_choice
         yield FormRequest.from_response(
@@ -180,11 +222,19 @@ class CountySpider(scrapy.Spider):
         if not query:
             return
         if any(ch.isdigit() for ch in query):
-            input_name = self._find_input_name(response, "CompositAddressSearch1$ctl00$Address")
-            submit_name = self._find_input_name(response, "CompositAddressSearch1$ctl00$ActionButton1")
+            input_name = self._find_input_name(
+                response, "CompositAddressSearch1$ctl00$Address"
+            )
+            submit_name = self._find_input_name(
+                response, "CompositAddressSearch1$ctl00$ActionButton1"
+            )
         else:
-            input_name = self._find_input_name(response, "OwnerNameSearch1$ctl00$OwnerName")
-            submit_name = self._find_input_name(response, "OwnerNameSearch1$ctl00$ActionButton1")
+            input_name = self._find_input_name(
+                response, "OwnerNameSearch1$ctl00$OwnerName"
+            )
+            submit_name = self._find_input_name(
+                response, "OwnerNameSearch1$ctl00$ActionButton1"
+            )
         if not input_name or not submit_name:
             self.logger.info("OCPA form fields not found for %s", county.get("name"))
             return
@@ -232,7 +282,9 @@ class CountySpider(scrapy.Spider):
             if situs_address:
                 item["situs_address"] = situs_address
             item["property_url"] = response.urljoin(folio_link)
-            yield response.follow(folio_link, callback=self.parse_detail, meta={"item": item})
+            yield response.follow(
+                folio_link, callback=self.parse_detail, meta={"item": item}
+            )
             if self.max_items and self.items_seen >= self.max_items:
                 return
 
@@ -252,7 +304,9 @@ class CountySpider(scrapy.Spider):
                 property_url = None
             if property_url:
                 item["property_url"] = property_url
-                yield response.follow(property_url, callback=self.parse_detail, meta={"item": item})
+                yield response.follow(
+                    property_url, callback=self.parse_detail, meta={"item": item}
+                )
             else:
                 yield self._finalize_item(item)
             if self.max_items and self.items_seen >= self.max_items:
@@ -292,7 +346,9 @@ class CountySpider(scrapy.Spider):
         self.items_seen += 1
         return item
 
-    def _choose_form(self, response: scrapy.http.Response) -> Optional[Tuple[int, Dict[str, str]]]:
+    def _choose_form(
+        self, response: scrapy.http.Response
+    ) -> Optional[Tuple[int, Dict[str, str]]]:
         best_score = 0
         best_index = None
         best_formdata = None
@@ -414,7 +470,9 @@ class CountySpider(scrapy.Spider):
         next_index = index + 1
         if next_index < len(zoning_layers):
             geometry = response.meta.get("geometry")
-            yield from self._chain_zoning_layers(item, geometry, zoning_layers, next_index)
+            yield from self._chain_zoning_layers(
+                item, geometry, zoning_layers, next_index
+            )
         else:
             yield self._finalize_item(item)
 
@@ -457,7 +515,9 @@ class CountySpider(scrapy.Spider):
         county = response.meta.get("county", {})
         sarasota = response.meta.get("sarasota", {})
         if not self.allow_forms:
-            self.logger.info("Skipping Sarasota form submission for %s", county.get("name"))
+            self.logger.info(
+                "Skipping Sarasota form submission for %s", county.get("name")
+            )
             return
         form = response.css("form[action*='/propertysearch/result']")
         if not form:
@@ -492,7 +552,9 @@ class CountySpider(scrapy.Spider):
 
     def parse_sarasota_results(self, response: scrapy.http.Response):
         county = response.meta.get("county", {})
-        links = response.css("a[href*='/propertysearch/parcel/details/']::attr(href)").getall()
+        links = response.css(
+            "a[href*='/propertysearch/parcel/details/']::attr(href)"
+        ).getall()
         if not links:
             self.logger.info("No Sarasota results found for %s", county.get("name"))
             return
@@ -524,7 +586,9 @@ class CountySpider(scrapy.Spider):
         owner_field = "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$OwnerNameTextBox"
         address_field = "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$AddressTextBox"
         search_source = "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$SearchSouceGroup"
-        submit_target = "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$SubmitPropertySearch"
+        submit_target = (
+            "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$SubmitPropertySearch"
+        )
         submit_field = "ctl00$BodyContentPlaceHolder$WebTab1$tmpl0$SubmitPropertySearch"
         if any(ch.isdigit() for ch in query):
             formdata[owner_field] = ""
@@ -580,7 +644,9 @@ class CountySpider(scrapy.Spider):
         site_address = data.get("siteAddress")
         if site_address:
             item["situs_address"] = site_address
-        mailing_address = self._format_hcpafl_mailing_address(data.get("mailingAddress") or {})
+        mailing_address = self._format_hcpafl_mailing_address(
+            data.get("mailingAddress") or {}
+        )
         if mailing_address:
             item["mailing_address"] = mailing_address
             item.setdefault("contact_addresses", []).append(mailing_address)
@@ -590,7 +656,9 @@ class CountySpider(scrapy.Spider):
             item["zoning_current"] = zoning
         sales_history = data.get("salesHistory") or []
         if sales_history:
-            item.setdefault("purchase_history", []).extend(self._map_hcpafl_sales(sales_history))
+            item.setdefault("purchase_history", []).extend(
+                self._map_hcpafl_sales(sales_history)
+            )
         yield self._finalize_item(item)
 
     def parse_bcpa_search(self, response: scrapy.http.Response):
@@ -725,7 +793,9 @@ class CountySpider(scrapy.Spider):
         lake_mode = response.meta.get("lake_mode", "property")
         hidden_fields = self._extract_hidden_fields(response)
         if not hidden_fields:
-            self.logger.info("Lake disclaimer fields missing for %s", county.get("name"))
+            self.logger.info(
+                "Lake disclaimer fields missing for %s", county.get("name")
+            )
             return
         formdata = dict(hidden_fields)
         formdata["ctl00$cphMain$imgBtnSubmit.x"] = "10"
@@ -780,7 +850,11 @@ class CountySpider(scrapy.Spider):
                 continue
             owner = self._clean_text(cells[1].css("::text").getall())
             parcel_id = self._clean_text(cells[2].css("::text").getall())
-            city = self._clean_text(cells[4].css("::text").getall()) if len(cells) > 4 else ""
+            city = (
+                self._clean_text(cells[4].css("::text").getall())
+                if len(cells) > 4
+                else ""
+            )
             item = PropertyItem()
             item["county"] = county.get("name")
             item["search_query"] = self.query
@@ -790,7 +864,9 @@ class CountySpider(scrapy.Spider):
             if city:
                 item["situs_address"] = city
             item["property_url"] = response.urljoin(detail_href)
-            yield response.follow(detail_href, callback=self.parse_detail, meta={"item": item})
+            yield response.follow(
+                detail_href, callback=self.parse_detail, meta={"item": item}
+            )
             if self.max_items and self.items_seen >= self.max_items:
                 return
 
@@ -802,7 +878,9 @@ class CountySpider(scrapy.Spider):
         index: int,
     ):
         layer = zoning_layers[index]
-        url = build_geometry_query_url(layer["url"], geometry, out_fields=layer.get("fields"))
+        url = build_geometry_query_url(
+            layer["url"], geometry, out_fields=layer.get("fields")
+        )
         yield scrapy.Request(
             url,
             callback=self.parse_arcgis_zoning,
@@ -850,7 +928,9 @@ class CountySpider(scrapy.Spider):
             return None
         return f"{base}/default.aspx?{urlencode(params)}"
 
-    def _build_hcpafl_parcel_url(self, hcpafl: Dict[str, Any], pin: str) -> Optional[str]:
+    def _build_hcpafl_parcel_url(
+        self, hcpafl: Dict[str, Any], pin: str
+    ) -> Optional[str]:
         base = hcpafl.get("base_url")
         if not base or not pin:
             return None
@@ -998,7 +1078,9 @@ class CountySpider(scrapy.Spider):
             f"{base}/search/real-property",
             method="POST",
             body=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
             callback=self.parse_vcpa_search,
             meta={"county": county, "vcpa": vcpa},
         )
@@ -1099,7 +1181,17 @@ class CountySpider(scrapy.Spider):
         return urlencode(payload)
 
     def _best_query_field(self, fields: Dict[str, str]) -> Optional[str]:
-        priorities = ["owner", "name", "address", "search", "query", "nam", "nams", "add", "addr"]
+        priorities = [
+            "owner",
+            "name",
+            "address",
+            "search",
+            "query",
+            "nam",
+            "nams",
+            "add",
+            "addr",
+        ]
         for key in fields:
             if key.lower() == "q":
                 return key
@@ -1122,14 +1214,18 @@ class CountySpider(scrapy.Spider):
             fields[name] = input_tag.attrib.get("value", "")
         return fields
 
-    def _find_input_name(self, response: scrapy.http.Response, contains: str) -> Optional[str]:
+    def _find_input_name(
+        self, response: scrapy.http.Response, contains: str
+    ) -> Optional[str]:
         for input_tag in response.css("input"):
             name = input_tag.attrib.get("name")
             if name and contains in name:
                 return name
         return None
 
-    def _extract_table_rows(self, response: scrapy.http.Response) -> List[Dict[str, Any]]:
+    def _extract_table_rows(
+        self, response: scrapy.http.Response
+    ) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         for table in response.css("table"):
             headers = [self._clean_text(h) for h in table.css("th ::text").getall()]
@@ -1138,10 +1234,16 @@ class CountySpider(scrapy.Spider):
             if not headers:
                 for idx, row in enumerate(table.css("tr")):
                     header_cells = row.css("td")
-                    classes = " ".join(cell.attrib.get("class", "") for cell in header_cells).lower()
+                    classes = " ".join(
+                        cell.attrib.get("class", "") for cell in header_cells
+                    ).lower()
                     if "hdr" in classes or "header" in classes:
-                        headers = [self._clean_text(c) for c in row.css("td ::text").getall()]
-                        header_map = [self._map_header(h) for h in headers] if headers else []
+                        headers = [
+                            self._clean_text(c) for c in row.css("td ::text").getall()
+                        ]
+                        header_map = (
+                            [self._map_header(h) for h in headers] if headers else []
+                        )
                         header_row_index = idx
                         break
             if header_map and not any(header_map):
@@ -1158,7 +1260,11 @@ class CountySpider(scrapy.Spider):
                 cells = [self._clean_text(c) for c in row.css("td ::text").getall()]
                 if not cells:
                     continue
-                if header_map and len(cells) > len(header_map) and header_map[0] == "owner_name":
+                if (
+                    header_map
+                    and len(cells) > len(header_map)
+                    and header_map[0] == "owner_name"
+                ):
                     extra = len(cells) - len(header_map) + 1
                     owner_cells = [c for c in cells[:extra] if c]
                     merged = [" ".join(owner_cells).strip()] + cells[extra:]
@@ -1167,30 +1273,53 @@ class CountySpider(scrapy.Spider):
                 if header_map:
                     for key, value in zip(header_map, cells):
                         if key and value:
-                            if key in {"contact_phones", "contact_emails", "contact_addresses"}:
+                            if key in {
+                                "contact_phones",
+                                "contact_emails",
+                                "contact_addresses",
+                            }:
                                 mapped.setdefault(key, []).append(value)
                             else:
                                 mapped[key] = value
                 property_url = row.css("a::attr(href)").get()
-                has_parcel_link = bool(row.css("a::attr(href)").re_first(r"parcel\\.aspx"))
+                has_parcel_link = bool(
+                    row.css("a::attr(href)").re_first(r"parcel\\.aspx")
+                )
                 if property_url in {"/", "#"}:
                     property_url = None
-                if not header_map and (not property_url or "parcel.aspx" not in property_url):
+                if not header_map and (
+                    not property_url or "parcel.aspx" not in property_url
+                ):
                     continue
-                if not mapped and property_url and "parcel.aspx" in property_url and len(cells) >= 3:
+                if (
+                    not mapped
+                    and property_url
+                    and "parcel.aspx" in property_url
+                    and len(cells) >= 3
+                ):
                     start_index = 1 if cells and cells[0].lower() == "map" else 0
                     if len(cells) - start_index >= 3:
                         mapped["parcel_id"] = cells[start_index]
-                        mapped["owner_name"] = " ".join(cells[start_index + 1 : -1]).strip()
+                        mapped["owner_name"] = " ".join(
+                            cells[start_index + 1 : -1]
+                        ).strip()
                         mapped["situs_address"] = cells[-1]
-                if header_map and not has_parcel_link and (not property_url or "parcel.aspx" not in property_url):
+                if (
+                    header_map
+                    and not has_parcel_link
+                    and (not property_url or "parcel.aspx" not in property_url)
+                ):
                     continue
-                if not mapped and (not property_url or "parcel.aspx" not in property_url):
+                if not mapped and (
+                    not property_url or "parcel.aspx" not in property_url
+                ):
                     continue
                 results.append({"mapped": mapped, "property_url": property_url})
         return results
 
-    def _extract_label_value_pairs(self, response: scrapy.http.Response) -> List[Tuple[str, str]]:
+    def _extract_label_value_pairs(
+        self, response: scrapy.http.Response
+    ) -> List[Tuple[str, str]]:
         pairs: List[Tuple[str, str]] = []
         for row in response.css("tr"):
             cells = row.css("th, td")
@@ -1208,7 +1337,9 @@ class CountySpider(scrapy.Spider):
                 pairs.append((label, value))
         for label_node in response.css("li.med.bold"):
             label = self._clean_text(label_node.css("::text").getall())
-            value = self._clean_text(label_node.xpath("following-sibling::li[1]//text()").getall())
+            value = self._clean_text(
+                label_node.xpath("following-sibling::li[1]//text()").getall()
+            )
             if label and value:
                 pairs.append((label, value))
         for label_node in response.css("div.col-sm-5 strong"):
@@ -1221,7 +1352,9 @@ class CountySpider(scrapy.Spider):
                 pairs.append((label, value))
         return pairs
 
-    def _extract_history_tables(self, response: scrapy.http.Response, item: PropertyItem) -> None:
+    def _extract_history_tables(
+        self, response: scrapy.http.Response, item: PropertyItem
+    ) -> None:
         for table in response.css("table"):
             headers = [self._clean_text(h) for h in table.css("th::text").getall()]
             if not headers:
@@ -1232,7 +1365,9 @@ class CountySpider(scrapy.Spider):
                     cells = [self._clean_text(c) for c in row.css("td::text").getall()]
                     if len(cells) != len(headers):
                         continue
-                    entry = {self._clean_text(h): v for h, v in zip(headers, cells) if v}
+                    entry = {
+                        self._clean_text(h): v for h, v in zip(headers, cells) if v
+                    }
                     if entry:
                         item.setdefault("purchase_history", []).append(entry)
             if lower_headers & MORTGAGE_HEADERS:
@@ -1240,7 +1375,9 @@ class CountySpider(scrapy.Spider):
                     cells = [self._clean_text(c) for c in row.css("td::text").getall()]
                     if len(cells) != len(headers):
                         continue
-                    entry = {self._clean_text(h): v for h, v in zip(headers, cells) if v}
+                    entry = {
+                        self._clean_text(h): v for h, v in zip(headers, cells) if v
+                    }
                     if entry:
                         item.setdefault("mortgage", []).append(entry)
 
@@ -1255,7 +1392,9 @@ class CountySpider(scrapy.Spider):
                 elif field == "contact_addresses":
                     item.setdefault(field, []).append(value)
                 elif field == "mailing_address":
-                    cleaned = value.replace("Update Mailing Address", "").replace("Update Physical Address", "")
+                    cleaned = value.replace("Update Mailing Address", "").replace(
+                        "Update Physical Address", ""
+                    )
                     cleaned = self._clean_text(cleaned)
                     if cleaned:
                         item[field] = cleaned
@@ -1371,7 +1510,9 @@ class CountySpider(scrapy.Spider):
         return ", ".join(parts)
 
     def _join_fields(self, values: List[Optional[str]], separator: str = " ") -> str:
-        cleaned = [str(v).strip() for v in values if v not in (None, "") and str(v).strip()]
+        cleaned = [
+            str(v).strip() for v in values if v not in (None, "") and str(v).strip()
+        ]
         return separator.join(cleaned)
 
     def _looks_like_address(self, value: str) -> bool:
@@ -1400,11 +1541,11 @@ class CountySpider(scrapy.Spider):
         if addr_index is None:
             return lines, []
         owner_lines = lines[:addr_index]
-        mailing_lines = lines[addr_index:addr_index + 2]
+        mailing_lines = lines[addr_index : addr_index + 2]
         return owner_lines, mailing_lines
 
     def _split_situs(self, lines: List[str]) -> List[str]:
         for idx, line in enumerate(lines):
             if self._looks_like_address(line):
-                return lines[idx:idx + 2]
+                return lines[idx : idx + 2]
         return lines[:2]

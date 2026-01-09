@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from scripts import add_county
 
 
@@ -14,7 +12,10 @@ def test_add_county_defaults_to_fl_router(tmp_path):
     fixtures_dir.mkdir(parents=True, exist_ok=True)
     tests_dir.mkdir(parents=True, exist_ok=True)
 
-    (routers_dir / "fl.py").write_text("from florida_property_scraper.routers.fl_coverage import FL_COUNTIES\n", encoding="utf-8")
+    (routers_dir / "fl.py").write_text(
+        "from florida_property_scraper.routers.fl_coverage import FL_COUNTIES\n",
+        encoding="utf-8",
+    )
     (routers_dir / "fl_coverage.py").write_text("FL_COUNTIES = []\n", encoding="utf-8")
     (spiders_dir / "__init__.py").write_text("SPIDERS = {}\n", encoding="utf-8")
 
@@ -33,4 +34,4 @@ def test_add_county_defaults_to_fl_router(tmp_path):
     )
 
     coverage = (routers_dir / "fl_coverage.py").read_text(encoding="utf-8")
-    assert "\"slug\": \"sample\"" in coverage
+    assert '"slug": "sample"' in coverage

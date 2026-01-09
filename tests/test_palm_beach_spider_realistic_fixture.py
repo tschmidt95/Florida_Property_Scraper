@@ -9,8 +9,8 @@ PalmBeachSpider = spiders_pkg.palm_beach_spider.PalmBeachSpider
 
 
 def test_palm_beach_spider_realistic_fixture():
-    sample = Path('tests/fixtures/palm_beach_realistic.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/palm_beach_realistic.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

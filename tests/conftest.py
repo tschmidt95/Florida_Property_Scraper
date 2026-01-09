@@ -1,8 +1,3 @@
-import sys
-import pathlib
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 import os
 import socket
 import sys
@@ -12,10 +7,14 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC = REPO_ROOT / "src"
+
+# Prefer repo sources over any installed package.
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 @pytest.fixture(autouse=True)
@@ -39,9 +38,3 @@ def block_network(monkeypatch):
             RuntimeError("Network access blocked in tests")
         ),
     )
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))

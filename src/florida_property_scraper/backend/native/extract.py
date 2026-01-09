@@ -90,7 +90,9 @@ def _extract_owner_address_from_pairs(pairs):
 def _extract_owner_address_from_text(text):
     combined = safe_text(text)
     match_owner = re.search(r"owner\s*[:\-]\s*([^\|]+)", combined, re.I)
-    match_addr = re.search(r"(mailing|site|situs|property)?\s*address\s*[:\-]\s*([^\|]+)", combined, re.I)
+    match_addr = re.search(
+        r"(mailing|site|situs|property)?\s*address\s*[:\-]\s*([^\|]+)", combined, re.I
+    )
     owner = safe_text(match_owner.group(1)) if match_owner else ""
     address = safe_text(match_addr.group(2)) if match_addr else ""
     return owner, address
@@ -132,13 +134,17 @@ def parse_table_rows(html_text, county_slug):
         return []
     items = []
     for row in selector.css("table tr"):
-        cells = [safe_text("".join(cell.css("::text").getall())) for cell in row.css("td")]
+        cells = [
+            safe_text("".join(cell.css("::text").getall())) for cell in row.css("td")
+        ]
         if not cells:
             continue
         owner = cells[0] if len(cells) > 0 else ""
         address = cells[1] if len(cells) > 1 else ""
         raw_html = truncate_raw_html(row.get() or html_text)
-        items.append(ensure_fields({"owner": owner, "address": address}, county_slug, raw_html))
+        items.append(
+            ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)
+        )
     return items
 
 
@@ -161,11 +167,17 @@ def parse_cards(html_text, county_slug, selectors):
         pairs = find_label_value_pairs(card)
         owner, address = _extract_owner_address_from_pairs(pairs)
         if not owner or not address:
-            owner_fallback, address_fallback = _extract_owner_address_from_text(" ".join(card.css("::text").getall()))
+            owner_fallback, address_fallback = _extract_owner_address_from_text(
+                " ".join(card.css("::text").getall())
+            )
             owner = pick_first_nonempty(owner, owner_fallback)
             address = pick_first_nonempty(address, address_fallback)
         if owner or address:
-            items.append(ensure_fields({"owner": owner, "address": address}, county_slug, raw_html))
+            items.append(
+                ensure_fields(
+                    {"owner": owner, "address": address}, county_slug, raw_html
+                )
+            )
     return items
 
 
@@ -179,7 +191,9 @@ def parse_label_items(html_text, county_slug):
         owner = pick_first_nonempty(owner, owner_fallback)
         address = pick_first_nonempty(address, address_fallback)
     if owner or address:
-        return [ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)]
+        return [
+            ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)
+        ]
     return []
 
 
@@ -246,7 +260,9 @@ def split_result_blocks(html_text, max_blocks=None):
     if len(label_starts) > 1:
         blocks = []
         for idx, start in enumerate(label_starts):
-            end = label_starts[idx + 1] if idx + 1 < len(label_starts) else len(html_text)
+            end = (
+                label_starts[idx + 1] if idx + 1 < len(label_starts) else len(html_text)
+            )
             blocks.append(html_text[start:end])
             if limit and len(blocks) >= limit:
                 return blocks
@@ -258,7 +274,9 @@ def grab_label_value(block, label):
     pattern_colon = LABEL_COLON_PATTERNS.get(label)
     if pattern_colon is None:
         label_pattern = r"\s+".join(re.escape(part) for part in label.split())
-        pattern_colon = re.compile(rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE)
+        pattern_colon = re.compile(
+            rf"{label_pattern}\s*:\s*([^<]+)", flags=re.IGNORECASE
+        )
         LABEL_COLON_PATTERNS[label] = pattern_colon
     match = pattern_colon.search(block)
     if match:

@@ -8,8 +8,10 @@ BBox = Tuple[float, float, float, float]
 
 
 def _walk_coords(obj: Any) -> Iterable[Tuple[float, float]]:
-    if isinstance(obj, (list, tuple)) and len(obj) == 2 and all(
-        isinstance(x, (int, float)) for x in obj
+    if (
+        isinstance(obj, (list, tuple))
+        and len(obj) == 2
+        and all(isinstance(x, (int, float)) for x in obj)
     ):
         yield float(obj[0]), float(obj[1])
         return
@@ -32,7 +34,9 @@ def geometry_bbox(geometry: Dict[str, Any]) -> Optional[BBox]:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def circle_polygon(*, center_lon: float, center_lat: float, miles: float, steps: int = 36) -> Dict[str, Any]:
+def circle_polygon(
+    *, center_lon: float, center_lat: float, miles: float, steps: int = 36
+) -> Dict[str, Any]:
     """Approximate a radius search as a GeoJSON Polygon.
 
     Uses a simple spherical earth approximation.
@@ -60,7 +64,9 @@ def circle_polygon(*, center_lon: float, center_lat: float, miles: float, steps:
     return {"type": "Polygon", "coordinates": [ring]}
 
 
-def intersects(search_geometry: Dict[str, Any], feature_geometry: Dict[str, Any]) -> bool:
+def intersects(
+    search_geometry: Dict[str, Any], feature_geometry: Dict[str, Any]
+) -> bool:
     """Return True if feature_geometry intersects search_geometry.
 
     Prefers Shapely if available. Falls back to bbox intersection.

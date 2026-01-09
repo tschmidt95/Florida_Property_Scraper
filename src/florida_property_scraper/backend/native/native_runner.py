@@ -39,13 +39,21 @@ def main(argv=None):
     args = parser.parse_args(argv)
     entry = get_entry("fl", args.county)
     parser_fn = get_parser(args.county)
-    engine = NativeEngine(max_items=args.max_items, per_county_limit=args.per_county_limit)
+    engine = NativeEngine(
+        max_items=args.max_items, per_county_limit=args.per_county_limit
+    )
     allowed_hosts = _allowed_hosts(entry)
 
     def log_fn(payload):
         sys.stderr.write(json.dumps(payload) + "\n")
 
-    items = engine.run(args.start_url, parser_fn, args.county, allowed_hosts=allowed_hosts, log_fn=log_fn)
+    items = engine.run(
+        args.start_url,
+        parser_fn,
+        args.county,
+        allowed_hosts=allowed_hosts,
+        log_fn=log_fn,
+    )
     sys.stdout.write(json.dumps(items))
 
 

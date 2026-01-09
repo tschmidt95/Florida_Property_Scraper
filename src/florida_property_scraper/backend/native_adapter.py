@@ -31,7 +31,10 @@ class NativeAdapter:
         if entry.get("query_param_style") == "form":
             form_url = entry.get("form_url", "")
             form_fields = entry.get("form_fields_template", {})
-            payload = {k: (v.format(query=query) if isinstance(v, str) else v) for k, v in form_fields.items()}
+            payload = {
+                k: (v.format(query=query) if isinstance(v, str) else v)
+                for k, v in form_fields.items()
+            }
             return [self.http.build_form_request(form_url, payload)]
         start_urls = build_start_urls(state, county_slug, query)
         return [{"url": url, "method": "GET"} for url in start_urls]
