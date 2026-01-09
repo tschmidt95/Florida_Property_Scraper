@@ -25,9 +25,9 @@ def test_api_parcels_zoom_gating(tmp_path, monkeypatch):
         store.upsert(
             apply_defaults(
                 {
-                    "county": "seminole",
-                    "parcel_id": "SEM-0001",
-                    "situs_address": "100 E SAMPLE ST",
+						"county": "seminole",
+						"parcel_id": "SEM-0001",
+						"situs_address": "100 E SAMPLE ST",
                     "owner_names": ["DEMO OWNER"],
                     "last_sale_date": "2024-06-01",
                     "last_sale_price": 2500000,
@@ -139,8 +139,8 @@ def test_api_parcel_hover_contract(tmp_path, monkeypatch):
         store.upsert(
             apply_defaults(
                 {
-                        "county": "seminole",
-                        "parcel_id": "SEM-0001",
+                    "county": "seminole",
+                    "parcel_id": "SEM-0001",
                     "situs_address": "100 E SAMPLE ST",
                     "owner_names": ["DEMO OWNER"],
                     "last_sale_date": "2024-06-01",
