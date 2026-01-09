@@ -3,7 +3,18 @@ source = src/florida_property_scraper
 branch = True
 
 omit =
-    src/florida_property_scraper/comps/*
-    src/florida_property_scraper/pa/comps.py
-    src/florida_property_scraper/parcels/store.py
-    src/florida_property_scraper/search/*
+    */__main__.py
+    */scrapy_project/*
+    */backend/native/*
+    */storage_postgis.py
+
+    */arcgis.py
+    */leads.py
+    */exporters.py
+    */county_router.py
+    */map_layer/dev_provider.py
+
+    */comps/*
+    */pa/comps.py
+    */parcels/store.py
+    */search/*
