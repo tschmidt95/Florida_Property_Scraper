@@ -13,7 +13,7 @@ permissions:
 jobs:
   alert:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Check recent Image monitor runs and open issue if repeated failures
         uses: actions/github-script@v8
