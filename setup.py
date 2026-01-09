@@ -21,7 +21,7 @@ setup(
     package_dir={"": "src"},
     include_package_data=True,
     install_requires=requirements,
-    extras_require={"test": ["pytest", "responses"]},
+    extras_require={"test": ["pytest", "responses", "httpx>=0.27"]},
     entry_points={
         "console_scripts": [
             "florida_property_scraper=florida_property_scraper.__main__:main",

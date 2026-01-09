@@ -30,10 +30,10 @@ jobs:
       - name: Install project (and test deps)
         run: |
           python -m pip install -U pip
-          # Prefer dev extras; fall back gracefully if extras are not defined.
-          python -m pip install -e ".[dev]" || python -m pip install -e .
-          # Ensure test tooling is present even if dev extras don't include it.
-          python -m pip install pytest pytest-cov
+          # Install test extras (includes httpx for FastAPI TestClient).
+          python -m pip install -e ".[test]" || python -m pip install -e .
+          # Ensure coverage plugin is present.
+          python -m pip install pytest-cov
 
       - name: Run tests (fail on warnings + coverage gate)
         env:
