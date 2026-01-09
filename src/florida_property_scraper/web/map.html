@@ -22,11 +22,78 @@
       #map {
         flex: 1;
       }
-      #panel {
-        width: 320px;
+      #drawer {
+        width: 420px;
         border-left: 1px solid #ddd;
         padding: 12px;
         overflow: auto;
+        background: #fff;
+        display: none;
+      }
+      #drawerHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #drawerHeader h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+      #drawerClose {
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .card {
+        border: 1px solid #eee;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 10px 0;
+        background: #fafafa;
+      }
+      .row {
+        margin: 4px 0;
+      }
+      .muted {
+        color: #666;
+      }
+      details {
+        border: 1px solid #eee;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin: 10px 0;
+        background: #fff;
+      }
+      details > summary {
+        cursor: pointer;
+        user-select: none;
+      }
+      input[type="text"], textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-family: inherit;
+      }
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+      #metaSave {
+        margin-top: 8px;
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      #metaStatus {
+        margin-top: 6px;
+        font-size: 12px;
       }
       #toolbar {
         position: absolute;
@@ -46,6 +113,7 @@
         padding: 4px 6px;
         border-radius: 4px;
         font-size: 12px;
+        white-space: pre;
         display: none;
         z-index: 20;
       }
@@ -63,16 +131,45 @@
         </select>
       </label>
       <label>
-        County:
+        Geometry County:
         <select id="countySelect"></select>
       </label>
     </div>
     <div id="tooltip"></div>
     <div id="app">
       <div id="map"></div>
-      <div id="panel">
-        <h3>Parcel Details</h3>
-        <pre id="details">Click a parcel</pre>
+      <div id="drawer">
+        <div id="drawerHeader">
+          <h3>Parcel</h3>
+          <button id="drawerClose" type="button">Close</button>
+        </div>
+
+        <div id="drawerBody">
+          <div class="muted">Click a parcel</div>
+        </div>
+
+        <div id="drawerMeta" style="display:none">
+          <h4 style="margin: 14px 0 8px 0;">User Meta</h4>
+          <div class="card">
+            <label class="row">
+              <input id="metaStar" type="checkbox" /> Star
+            </label>
+            <div class="row">
+              <div class="muted">Tags (comma-separated)</div>
+              <input id="metaTags" type="text" placeholder="warm, followup" />
+            </div>
+            <div class="row">
+              <div class="muted">Lists (comma-separated)</div>
+              <input id="metaLists" type="text" placeholder="call-list" />
+            </div>
+            <div class="row">
+              <div class="muted">Notes</div>
+              <textarea id="metaNotes" placeholder="Your notes..."></textarea>
+            </div>
+            <button id="metaSave" type="button">Save</button>
+            <div id="metaStatus" class="muted"></div>
+          </div>
+        </div>
       </div>
     </div>
     <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>

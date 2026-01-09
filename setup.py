@@ -11,14 +11,21 @@ requirements = parse_requirements('requirements.txt')
 setup(
     name="florida_property_scraper",
     version="0.1.0",
-    packages=find_packages(where="src"),
+    packages=find_packages(
+        where="src",
+        exclude=(
+            "florida_property_scraper.comps",
+            "florida_property_scraper.comps.*",
+        ),
+    ),
     package_dir={"": "src"},
     include_package_data=True,
     install_requires=requirements,
-    extras_require={"test": ["pytest", "responses"]},
+    extras_require={"test": ["pytest", "responses", "httpx>=0.27"]},
     entry_points={
         "console_scripts": [
-            "florida_property_scraper=florida_property_scraper.__main__:main"
+            "florida_property_scraper=florida_property_scraper.__main__:main",
+            "florida-property-scraper=florida_property_scraper.__main__:main",
         ]
     },
 )

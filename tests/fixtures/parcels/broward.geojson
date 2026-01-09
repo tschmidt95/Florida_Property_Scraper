@@ -1,0 +1,43 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-80.138, 26.122],
+            [-80.136, 26.122],
+            [-80.136, 26.124],
+            [-80.138, 26.124],
+            [-80.138, 26.122]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SUBJECT-001",
+        "situs_address": "100 E SAMPLE ST"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-80.146, 26.119],
+            [-80.144, 26.119],
+            [-80.144, 26.121],
+            [-80.146, 26.121],
+            [-80.146, 26.119]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "COMP-002",
+        "situs_address": "120 E SAMPLE ST"
+      }
+    }
+  ]
+}

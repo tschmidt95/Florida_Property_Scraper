@@ -1,0 +1,41 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3700, 28.6500],
+            [-81.3680, 28.6500],
+            [-81.3680, 28.6520],
+            [-81.3700, 28.6520],
+            [-81.3700, 28.6500]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0001"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3650, 28.6480],
+            [-81.3630, 28.6480],
+            [-81.3630, 28.6500],
+            [-81.3650, 28.6500],
+            [-81.3650, 28.6480]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0002"
+      }
+    }
+  ]
+}

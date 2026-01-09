@@ -1,0 +1,4 @@
+listing_id,source,status,address,property_type,distance_miles,building_sqft,asking_price,price_per_sqft,cap_rate,year_built,score,url
+L-0001,mock,active,"120 E SAMPLE ST, FORT LAUDERDALE, FL 33301",office,0.043,9500,2450000,257.89,0.0650,2001,0.976462,https://example.com/listing/L-0001
+L-0002,mock,active,"500 W SAMPLE AVE, FORT LAUDERDALE, FL 33301",office,0.506,12000,3300000,275.00,0.0720,1995,0.909643,https://example.com/listing/L-0002
+L-0003,mock,active,"900 N SAMPLE RD, FORT LAUDERDALE, FL 33301",office,0.884,10500,2850000,271.43,0.0600,2005,0.901640,https://example.com/listing/L-0003

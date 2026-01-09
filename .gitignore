@@ -20,3 +20,15 @@ repo_old/
 # Node
 node_modules/
 
+# Local-only scratch tests/fixtures (not part of map geometry search work)
+tests/test_pa_cli.py
+tests/test_pa_defaults.py
+tests/test_pa_query_builder.py
+tests/fixtures/pa/sample_records.json
+tests/fixtures/comps/
+
+
+# test artifacts
+.coverage
+coverage.xml
+junit.xml

@@ -82,9 +82,146 @@ def run_human_command(argv):
     print(f"Records validated: {len(items)}")
 
 
+def run_pa_search_command(argv):
+    """Query stored PAProperty records via checkbox-like filters."""
+
+    import csv
+    from pathlib import Path
+
+    from .pa.storage import PASQLite
+    from .search.query import build_where
+
+    parser = argparse.ArgumentParser(description="PA-only property attribute search")
+    parser.add_argument("--db", default="./leads.sqlite", help="SQLite DB path")
+    parser.add_argument("--county", default=None, help="Optional county slug")
+    parser.add_argument(
+        "--where",
+        action="append",
+        default=[],
+        help='Where clause, e.g. "year_built>=2000" (repeatable)',
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        default=[],
+        help='Fields to output (repeatable or comma-separated). Always includes id/county/parcel_id.',
+    )
+    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--out", required=True, help="Output path (.json or .csv)")
+    args = parser.parse_args(argv)
+
+    where_clauses = list(args.where or [])
+    if args.county:
+        where_clauses = [f"county={canonicalize_county_name(args.county)}"] + where_clauses
+
+    built = build_where(where_clauses)
+
+    store = PASQLite(args.db)
+    try:
+        rows = store.query(where_sql=built.where_sql, params=built.params, limit=args.limit)
+    finally:
+        store.close()
+
+    selects = []
+    for s in args.select or []:
+        for part in str(s).split(","):
+            part = part.strip()
+            if part:
+                selects.append(part)
+
+    payload = []
+    for row_id, record in rows:
+        record_dict = record.to_dict()
+        base = {
+            "id": row_id,
+            "county": record_dict.get("county", ""),
+            "parcel_id": record_dict.get("parcel_id", ""),
+        }
+        if selects:
+            for key in selects:
+                if key in ("id", "county", "parcel_id"):
+                    continue
+                base[key] = record_dict.get(key)
+            payload.append(base)
+        else:
+            record_dict["id"] = row_id
+            payload.append(record_dict)
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.suffix.lower() == ".csv":
+        if not payload:
+            out_path.write_text("", encoding="utf-8")
+        else:
+            with out_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(payload[0].keys()))
+                writer.writeheader()
+                for row in payload:
+                    writer.writerow(row)
+    else:
+        out_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    print(json.dumps({"count": len(payload), "out": str(out_path)}))
+
+
+def run_pa_comps_command(argv):
+    """Rank similar properties using PA-only attributes."""
+
+    from pathlib import Path
+
+    from .pa.comps import rank_comps
+    from .pa.storage import PASQLite
+    from .search.query import build_where
+
+    parser = argparse.ArgumentParser(description="PA-only comps")
+    parser.add_argument("--db", default="./leads.sqlite", help="SQLite DB path")
+    parser.add_argument("--county", required=True)
+    parser.add_argument("--parcel", required=True)
+    parser.add_argument("--top", type=int, default=10)
+    parser.add_argument("--out", required=True, help="Output path (.json)")
+    args = parser.parse_args(argv)
+
+    county = canonicalize_county_name(args.county)
+    store = PASQLite(args.db)
+    try:
+        subject = store.get(county=county, parcel_id=args.parcel)
+        if subject is None:
+            raise SystemExit(2)
+        built = build_where([f"county={county}"])
+        rows = store.query(where_sql=built.where_sql, params=built.params, limit=100000)
+        candidates = [r for _id, r in rows]
+    finally:
+        store.close()
+
+    ranked = rank_comps(subject, candidates, top_n=args.top)
+    report = {
+        "subject": {"county": subject.county, "parcel_id": subject.parcel_id},
+        "comps": [
+            {
+                "county": r.county,
+                "parcel_id": r.parcel_id,
+                "score": round(r.score, 6),
+                "explanation": r.explanation,
+            }
+            for r in ranked
+        ],
+    }
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"count": len(ranked), "out": str(out_path)}))
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "run":
         run_human_command(sys.argv[2:])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "pa-search":
+        run_pa_search_command(sys.argv[2:])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "pa-comps":
+        run_pa_comps_command(sys.argv[2:])
         return
     parser = argparse.ArgumentParser(
         description="Florida property scraper CLI",

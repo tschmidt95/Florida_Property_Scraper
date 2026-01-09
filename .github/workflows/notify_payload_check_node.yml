@@ -6,7 +6,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -20,7 +20,7 @@ jobs:
       - name: Install Node dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Install jq
+      - name: Notify payload check (node)
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Setup Python

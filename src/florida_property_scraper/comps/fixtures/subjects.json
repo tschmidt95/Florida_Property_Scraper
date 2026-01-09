@@ -1,0 +1,11 @@
+{
+  "broward::123-456-789": {
+    "address": "100 E SAMPLE ST, FORT LAUDERDALE, FL 33301",
+    "property_type": "office",
+    "building_sqft": 10000,
+    "land_sqft": 20000,
+    "year_built": 1998,
+    "latitude": 26.122439,
+    "longitude": -80.137317
+  }
+}
