@@ -146,7 +146,7 @@ class SeminoleProvider:
             else:
                 query_geom = s_box(bbox[0], bbox[1], bbox[2], bbox[3])
                 candidates = self._tree.query(query_geom)
-                if not candidates:
+                if candidates is None or len(candidates) == 0:
                     return []
 
                 idx_by_id = {}
