@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       CHECK_TAG: ${{ github.event.inputs.tag || 'latest' }}
     steps:
