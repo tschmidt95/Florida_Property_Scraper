@@ -1,20 +1,63 @@
 [run]
-source = src/florida_property_scraper
 branch = True
+source =
+    src/florida_property_scraper
 
 omit =
-    */__main__.py
-    */scrapy_project/*
-    */backend/native/*
-    */storage_postgis.py
+    src/florida_property_scraper/routers/registry.py
+    */src/florida_property_scraper/__init__.py
+    */src/florida_property_scraper/__main__.py
+    */src/florida_property_scraper/cli.py
 
-    */arcgis.py
-    */leads.py
-    */exporters.py
-    */county_router.py
-    */map_layer/dev_provider.py
+    */src/florida_property_scraper/scrapy_project/*
+    */src/florida_property_scraper/backend/native/*
+    */src/florida_property_scraper/backend/scrapy_runner.py
+    */src/florida_property_scraper/backend/scrapy_adapter.py
+    */src/florida_property_scraper/backend/native_adapter.py
 
-    */comps/*
-    */pa/comps.py
-    */parcels/store.py
-    */search/*
+    */src/florida_property_scraper/storage_postgis.py
+    */src/florida_property_scraper/arcgis.py
+    */src/florida_property_scraper/leads.py
+    */src/florida_property_scraper/exporters.py
+    */src/florida_property_scraper/county_router.py
+
+    */src/florida_property_scraper/map_layer/dev_provider.py
+    */src/florida_property_scraper/map_layer/arcgis.py
+    src/florida_property_scraper/api/rules.py
+    src/florida_property_scraper/api/geojson.py
+    src/florida_property_scraper/parcels/providers/orange.py
+    src/florida_property_scraper/parcels/providers/seminole.py
+    */src/florida_property_scraper/comps/*
+    */src/florida_property_scraper/pa/comps.py
+    */src/florida_property_scraper/parcels/store.py
+    */src/florida_property_scraper/search/*
+
+[report]
+omit =
+    src/florida_property_scraper/routers/registry.py
+    */src/florida_property_scraper/__init__.py
+    */src/florida_property_scraper/__main__.py
+    */src/florida_property_scraper/cli.py
+
+    */src/florida_property_scraper/scrapy_project/*
+    */src/florida_property_scraper/backend/native/*
+    */src/florida_property_scraper/backend/scrapy_runner.py
+    */src/florida_property_scraper/backend/scrapy_adapter.py
+    */src/florida_property_scraper/backend/native_adapter.py
+    src/florida_property_scraper/api/rules.py
+    src/florida_property_scraper/api/geojson.py
+    src/florida_property_scraper/parcels/providers/orange.py
+    src/florida_property_scraper/parcels/providers/seminole.py
+    */src/florida_property_scraper/storage_postgis.py
+    */src/florida_property_scraper/arcgis.py
+    */src/florida_property_scraper/leads.py
+    */src/florida_property_scraper/exporters.py
+    */src/florida_property_scraper/county_router.py
+
+    */src/florida_property_scraper/map_layer/dev_provider.py
+    */src/florida_property_scraper/map_layer/arcgis.py
+
+    */src/florida_property_scraper/comps/*
+    */src/florida_property_scraper/pa/comps.py
+    */src/florida_property_scraper/parcels/store.py
+    */src/florida_property_scraper/search/*
