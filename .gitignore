@@ -27,3 +27,8 @@ tests/test_pa_query_builder.py
 tests/fixtures/pa/sample_records.json
 tests/fixtures/comps/
 
+
+# test artifacts
+.coverage
+coverage.xml
+junit.xml
