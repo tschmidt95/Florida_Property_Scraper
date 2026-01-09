@@ -14,18 +14,24 @@ jobs:
         python: ['3.10', '3.11']
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Setup OS deps (for Scrapy native deps)
+            - name: Setup OS deps (for Scrapy native deps)
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends jq
-            build-essential libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev
+          sudo apt-get install -y --no-install-recommends \
+            jq \
+            build-essential \
+            libxml2-dev \
+            libxslt1-dev \
+            zlib1g-dev \
+            libffi-dev \
+            libssl-dev
           sudo rm -rf /var/lib/apt/lists/*
 
       - name: Cache pip
