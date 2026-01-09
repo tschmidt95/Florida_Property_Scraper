@@ -146,22 +146,57 @@ class SeminoleProvider:
             else:
                 query_geom = s_box(bbox[0], bbox[1], bbox[2], bbox[3])
                 candidates = self._tree.query(query_geom)
-                if candidates is None or len(candidates) == 0:
+
+                # shapely STRtree.query may return a numpy array; never rely on truthiness.
+                try:
+                    n = int(getattr(candidates, "size", len(candidates)))
+                except Exception:
+                    n = 0
+                if candidates is None or n == 0:
                     return []
 
-                idx_by_id = {}
-                for i, g in enumerate(self._geoms):
-                    if g is not None:
-                        idx_by_id[id(g)] = i
+                # Depending on Shapely version, candidates may be:
+                # - array of integer indices into the STRtree input geometries
+                # - array of geometry objects
+                first = candidates[0]
 
                 out: List[Feature] = []
-                for g in candidates:
-                    i = idx_by_id.get(id(g))
-                    if i is None:
-                        continue
-                    if not g.intersects(query_geom):
-                        continue
-                    out.append(self._features[i])
+                # Index-returning path (common in shapely 2.x builds)
+                if isinstance(first, (int,)) or first.__class__.__name__ in ("int64", "int32"):
+                    valid_indices = [i for i, g in enumerate(self._geoms) if g is not None]
+                    for v in candidates:
+                        try:
+                            tree_idx = int(v)
+                        except Exception:
+                            continue
+                        if tree_idx < 0 or tree_idx >= len(valid_indices):
+                            continue
+                        feat_idx = valid_indices[tree_idx]
+                        g = self._geoms[feat_idx]
+                        if g is None:
+                            continue
+                        try:
+                            if not g.intersects(query_geom):
+                                continue
+                        except Exception:
+                            continue
+                        out.append(self._features[feat_idx])
+                else:
+                    idx_by_id = {}
+                    for i, g in enumerate(self._geoms):
+                        if g is not None:
+                            idx_by_id[id(g)] = i
+
+                    for g in candidates:
+                        i = idx_by_id.get(id(g))
+                        if i is None:
+                            continue
+                        try:
+                            if not g.intersects(query_geom):
+                                continue
+                        except Exception:
+                            continue
+                        out.append(self._features[i])
                 out.sort(key=lambda f: f.parcel_id)
                 return out
 
