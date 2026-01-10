@@ -9,8 +9,8 @@ AlachuaSpider = spiders_pkg.alachua_spider.AlachuaSpider
 
 
 def test_alachua_spider_realistic_fixture():
-    sample = Path('tests/fixtures/alachua_realistic.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/alachua_realistic.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

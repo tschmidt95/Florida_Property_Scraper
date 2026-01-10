@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,13 @@ def compile_filters(raw: Any) -> List[Condition]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        out.append(Condition(field=str(item.get("field", "")), op=str(item.get("op", "")), value=item.get("value")))
+        out.append(
+            Condition(
+                field=str(item.get("field", "")),
+                op=str(item.get("op", "")),
+                value=item.get("value"),
+            )
+        )
     return [c for c in out if c.field and c.op]
 
 

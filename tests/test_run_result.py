@@ -1,5 +1,3 @@
-import types
-
 import scrapy
 
 from florida_property_scraper.scraper import FloridaPropertyScraper
@@ -8,7 +6,9 @@ from florida_property_scraper.scraper import FloridaPropertyScraper
 class DummySpider(scrapy.Spider):
     name = "dummy"
 
-    def __init__(self, query: str, counties=None, max_items=None, allow_forms=True, **kwargs):
+    def __init__(
+        self, query: str, counties=None, max_items=None, allow_forms=True, **kwargs
+    ):
         super().__init__(**kwargs)
         self.query = query
 
@@ -16,7 +16,11 @@ class DummySpider(scrapy.Spider):
         yield scrapy.Request("data:text/plain,ok", callback=self.parse)
 
     def parse(self, response):
-        yield {"county": "Test", "search_query": self.query, "owner_name": "Dummy Owner"}
+        yield {
+            "county": "Test",
+            "search_query": self.query,
+            "owner_name": "Dummy Owner",
+        }
 
 
 def test_run_result_fields(monkeypatch):
@@ -24,7 +28,13 @@ def test_run_result_fields(monkeypatch):
 
     monkeypatch.setattr(scraper_module, "CountySpider", DummySpider)
     scraper = FloridaPropertyScraper(log_level="ERROR", obey_robots=True)
-    result = scraper.search(query="SMITH", counties=["Test"], max_items=1, output_path=None, storage_path=None)
+    result = scraper.search(
+        query="SMITH",
+        counties=["Test"],
+        max_items=1,
+        output_path=None,
+        storage_path=None,
+    )
 
     assert result.run_id
     assert result.started_at

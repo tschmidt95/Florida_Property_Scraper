@@ -8,10 +8,12 @@ def test_subprocess_args_are_list(monkeypatch):
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
+
         class Dummy:
             stdout = "[]"
             stderr = ""
             returncode = 0
+
         return Dummy()
 
     monkeypatch.setattr(subprocess, "run", fake_run)

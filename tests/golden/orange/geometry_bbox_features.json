@@ -1,0 +1,29 @@
+{
+  "bbox": "-81.312,28.535,-81.301,28.543",
+  "county": "orange",
+  "features": [
+    {
+      "bbox": [
+        -81.31,
+        28.54,
+        -81.308,
+        28.542
+      ],
+      "feature_id": "orange:ORA-0001",
+      "geometry_type": "Polygon",
+      "parcel_id": "ORA-0001"
+    },
+    {
+      "bbox": [
+        -81.304,
+        28.536,
+        -81.302,
+        28.538
+      ],
+      "feature_id": "orange:ORA-0002",
+      "geometry_type": "Polygon",
+      "parcel_id": "ORA-0002"
+    }
+  ],
+  "source": "parcels.geometry_registry"
+}

@@ -1,7 +1,6 @@
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 
 def test_path_traversal_output_rejected(tmp_path):

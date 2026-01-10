@@ -28,9 +28,7 @@ def sanitize_path(path_str: str, project_root: Path) -> Path:
     else:
         resolved = (project_root / raw_path).resolve()
 
-    allowed = any(
-        _is_relative_to(resolved, root) for root in (project_root, tmp_root)
-    )
+    allowed = any(_is_relative_to(resolved, root) for root in (project_root, tmp_root))
     if not allowed:
         raise ValueError("path outside allowed roots")
     for parent in [resolved] + list(resolved.parents):

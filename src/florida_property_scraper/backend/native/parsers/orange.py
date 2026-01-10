@@ -1,4 +1,10 @@
-from ..extract import ensure_fields, extract_address, extract_owner, split_result_blocks, truncate_raw_html
+from ..extract import (
+    ensure_fields,
+    extract_address,
+    extract_owner,
+    split_result_blocks,
+    truncate_raw_html,
+)
 
 
 def parse(html, url, county_slug):
@@ -9,7 +15,9 @@ def parse(html, url, county_slug):
         if not owner and not address:
             continue
         raw_html = truncate_raw_html(block)
-        items.append(ensure_fields({"owner": owner, "address": address}, county_slug, raw_html))
+        items.append(
+            ensure_fields({"owner": owner, "address": address}, county_slug, raw_html)
+        )
     return items
 
 

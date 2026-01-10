@@ -1,4 +1,8 @@
 """Spider registry for available county spiders."""
+
+import importlib
+from typing import Any
+
 from .alachua_spider import AlachuaSpider
 from .broward_spider import BrowardSpider
 from .duval_spider import DuvalSpider
@@ -9,7 +13,6 @@ from .palm_beach_spider import PalmBeachSpider
 from .pinellas_spider import PinellasSpider
 from .polk_spider import PolkSpider
 from .seminole_spider import SeminoleSpider
-from . import broward_spider  # keeps tests that expect spiders_pkg.broward_spider working
 
 SPIDERS = {
     "alachua": AlachuaSpider,
@@ -33,3 +36,29 @@ SPIDERS = {
     "seminole": SeminoleSpider,
     "seminole_spider": SeminoleSpider,
 }
+
+
+_SUBMODULES = {
+    "alachua_spider",
+    "broward_spider",
+    "duval_spider",
+    "hillsborough_spider",
+    "miami_dade_spider",
+    "orange_spider",
+    "palm_beach_spider",
+    "pinellas_spider",
+    "polk_spider",
+    "seminole_spider",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy-load spider submodules for tests and backwards compatibility."""
+
+    if name in _SUBMODULES:
+        return importlib.import_module(f"{__name__}.{name}")
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_SUBMODULES))

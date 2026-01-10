@@ -33,8 +33,10 @@ def _geom_bbox(geom: Dict[str, Any]) -> Optional[BBox]:
         return None
 
     def _walk_numbers(obj: Any) -> Iterable[Tuple[float, float]]:
-        if isinstance(obj, (list, tuple)) and len(obj) == 2 and all(
-            isinstance(x, (int, float)) for x in obj
+        if (
+            isinstance(obj, (list, tuple))
+            and len(obj) == 2
+            and all(isinstance(x, (int, float)) for x in obj)
         ):
             yield (float(obj[0]), float(obj[1]))
             return
@@ -53,11 +55,11 @@ def _geom_bbox(geom: Dict[str, Any]) -> Optional[BBox]:
 
 
 class ParcelGeometryStore(Protocol):
-    def get_by_bbox(self, *, bbox: BBox, zoom: int, county: Optional[str]) -> Dict[str, Any]:
-        ...
+    def get_by_bbox(
+        self, *, bbox: BBox, zoom: int, county: Optional[str]
+    ) -> Dict[str, Any]: ...
 
-    def get_minimal_hover(self, *, county: str, parcel_id: str) -> Dict[str, Any]:
-        ...
+    def get_minimal_hover(self, *, county: str, parcel_id: str) -> Dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,9 @@ class FileGeoJSONParcelGeometryStore:
             return {"type": "FeatureCollection", "features": []}
         return raw
 
-    def get_by_bbox(self, *, bbox: BBox, zoom: int, county: Optional[str]) -> Dict[str, Any]:
+    def get_by_bbox(
+        self, *, bbox: BBox, zoom: int, county: Optional[str]
+    ) -> Dict[str, Any]:
         # Zoom gating here (endpoint also gates; keep store safe on its own).
         if int(zoom) < 15:
             return {"type": "FeatureCollection", "features": []}
@@ -119,7 +123,11 @@ class FileGeoJSONParcelGeometryStore:
             if not _bbox_intersects(bbox, gb):
                 continue
 
-            props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
+            props = (
+                feat.get("properties")
+                if isinstance(feat.get("properties"), dict)
+                else {}
+            )
             parcel_id = (
                 props.get("parcel_id")
                 or props.get("PARCEL_ID")

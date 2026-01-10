@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Sequence
 
 from .filters import FILTER_FIELDS, FieldDefinition
 
@@ -13,13 +13,18 @@ class BuiltQuery:
     params: List[Any]
 
 
-_OP_RE = re.compile(r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s*(?P<op>>=|<=|!=|==|=|>|<)\s*(?P<value>.+)$")
+_OP_RE = re.compile(
+    r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s*(?P<op>>=|<=|!=|==|=|>|<)\s*(?P<value>.+)$"
+)
 _IN_RE = re.compile(r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+\[(?P<items>.*)\]$")
 _BETWEEN_RE = re.compile(
     r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s+between\s+(?P<a>[^\s]+)\s+and\s+(?P<b>[^\s]+)$",
     flags=re.IGNORECASE,
 )
-_CONTAINS_RE = re.compile(r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s+contains\s+\"(?P<value>.*)\"$", flags=re.IGNORECASE)
+_CONTAINS_RE = re.compile(
+    r"^(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)\s+contains\s+\"(?P<value>.*)\"$",
+    flags=re.IGNORECASE,
+)
 
 
 def _coerce_value(field: FieldDefinition, raw: str) -> Any:
@@ -32,7 +37,9 @@ def _coerce_value(field: FieldDefinition, raw: str) -> Any:
         return raw.lower() in ("1", "true", "yes", "y")
     # date and str: keep as string
     # (dates should be ISO YYYY-MM-DD so lexicographic comparisons work)
-    if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
+    if (raw.startswith('"') and raw.endswith('"')) or (
+        raw.startswith("'") and raw.endswith("'")
+    ):
         raw = raw[1:-1]
     return raw
 
@@ -44,7 +51,9 @@ def _parse_in_list_items(items: str) -> List[str]:
         v = part.strip()
         if not v:
             continue
-        if (v.startswith("\"") and v.endswith("\"")) or (v.startswith("'") and v.endswith("'")):
+        if (v.startswith('"') and v.endswith('"')) or (
+            v.startswith("'") and v.endswith("'")
+        ):
             v = v[1:-1]
         out.append(v)
     return out

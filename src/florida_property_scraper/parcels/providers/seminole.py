@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from florida_property_scraper.parcels.geometry_provider import BBox, Feature, feature_id
 
@@ -59,8 +59,17 @@ class SeminoleProvider:
             geom = feat.get("geometry")
             if not isinstance(geom, dict):
                 continue
-            props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
-            parcel_id = props.get("parcel_id") or props.get("PARCEL_ID") or feat.get("parcel_id") or feat.get("PARCEL_ID")
+            props = (
+                feat.get("properties")
+                if isinstance(feat.get("properties"), dict)
+                else {}
+            )
+            parcel_id = (
+                props.get("parcel_id")
+                or props.get("PARCEL_ID")
+                or feat.get("parcel_id")
+                or feat.get("PARCEL_ID")
+            )
             if not parcel_id:
                 continue
             parcel_id = str(parcel_id)
@@ -108,8 +117,10 @@ class SeminoleProvider:
             return None
 
         def _walk(obj: Any):
-            if isinstance(obj, (list, tuple)) and len(obj) == 2 and all(
-                isinstance(x, (int, float)) for x in obj
+            if (
+                isinstance(obj, (list, tuple))
+                and len(obj) == 2
+                and all(isinstance(x, (int, float)) for x in obj)
             ):
                 yield float(obj[0]), float(obj[1])
                 return
@@ -162,8 +173,13 @@ class SeminoleProvider:
 
                 out: List[Feature] = []
                 # Index-returning path (common in shapely 2.x builds)
-                if isinstance(first, (int,)) or first.__class__.__name__ in ("int64", "int32"):
-                    valid_indices = [i for i, g in enumerate(self._geoms) if g is not None]
+                if isinstance(first, (int,)) or first.__class__.__name__ in (
+                    "int64",
+                    "int32",
+                ):
+                    valid_indices = [
+                        i for i, g in enumerate(self._geoms) if g is not None
+                    ]
                     for v in candidates:
                         try:
                             tree_idx = int(v)

@@ -5,11 +5,14 @@ This implementation prefers running a separate subprocess (via
 multiple crawls in the same process (e.g., during tests).
 """
 
-from typing import List, Dict, Any, Optional
+import os
+from typing import Any, Dict, List, Optional
 import json
 import subprocess
 import sys
 import time
+
+from florida_property_scraper.backend.native_adapter import NativeAdapter
 
 
 class InMemoryPipeline:
@@ -89,13 +92,14 @@ class ScrapyAdapter:
             if not start_urls:
                 return []
             if any(
-                isinstance(u, str) and not u.startswith("file://")
-                for u in start_urls
+                isinstance(u, str) and not u.startswith("file://") for u in start_urls
             ):
                 return []
         else:
             from florida_property_scraper.routers.fl import build_start_urls
-            from florida_property_scraper.routers.fl import get_entry as get_county_entry
+            from florida_property_scraper.routers.fl import (
+                get_entry as get_county_entry,
+            )
 
             slug = (
                 spider_name[: -len("_spider")]
@@ -196,7 +200,9 @@ class ScrapyAdapter:
             sys.stderr.write(f"Runner STDERR:\n{last_stderr}\n")
 
         return []
-import os as _os
 
-if _os.environ.get("FL_SCRAPER_BACKEND") == "native":
-    from florida_property_scraper.backend.native_adapter import NativeAdapter as ScrapyAdapter
+
+if os.environ.get("FL_SCRAPER_BACKEND") == "native":
+    # Keep legacy env override working while ensuring imports remain
+    # at module top for linting/formatting.
+    ScrapyAdapter = NativeAdapter  # type: ignore[misc]

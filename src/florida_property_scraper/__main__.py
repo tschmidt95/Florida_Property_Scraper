@@ -76,7 +76,7 @@ def run_human_command(argv):
 
     print("Owner | Address")
     for item in items[:5]:
-        print(f"{item.get('owner','')} | {item.get('address','')}")
+        print(f"{item.get('owner', '')} | {item.get('address', '')}")
     print(f"Blocks found: {len(blocks)}")
     print(f"Records parsed: {parsed_count}")
     print(f"Records validated: {len(items)}")
@@ -104,7 +104,7 @@ def run_pa_search_command(argv):
         "--select",
         action="append",
         default=[],
-        help='Fields to output (repeatable or comma-separated). Always includes id/county/parcel_id.',
+        help="Fields to output (repeatable or comma-separated). Always includes id/county/parcel_id.",
     )
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--out", required=True, help="Output path (.json or .csv)")
@@ -112,13 +112,17 @@ def run_pa_search_command(argv):
 
     where_clauses = list(args.where or [])
     if args.county:
-        where_clauses = [f"county={canonicalize_county_name(args.county)}"] + where_clauses
+        where_clauses = [
+            f"county={canonicalize_county_name(args.county)}"
+        ] + where_clauses
 
     built = build_where(where_clauses)
 
     store = PASQLite(args.db)
     try:
-        rows = store.query(where_sql=built.where_sql, params=built.params, limit=args.limit)
+        rows = store.query(
+            where_sql=built.where_sql, params=built.params, limit=args.limit
+        )
     finally:
         store.close()
 
@@ -159,7 +163,9 @@ def run_pa_search_command(argv):
                 for row in payload:
                     writer.writerow(row)
     else:
-        out_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        out_path.write_text(
+            json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
 
     print(json.dumps({"count": len(payload), "out": str(out_path)}))
 
@@ -209,7 +215,9 @@ def run_pa_comps_command(argv):
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps({"count": len(ranked), "out": str(out_path)}))
 
 
@@ -256,9 +264,7 @@ def main():
         "--no-stop",
         dest="stop_after_first",
         action="store_false",
-        help=(
-            "Search all counties instead of stopping after first result"
-        ),
+        help=("Search all counties instead of stopping after first result"),
     )
 
     parser.add_argument(
@@ -474,9 +480,7 @@ def main():
         counties.append(canonicalize_county_name(args.county))
     if args.counties:
         counties.extend(
-            canonicalize_county_name(c)
-            for c in args.counties.split(",")
-            if c.strip()
+            canonicalize_county_name(c) for c in args.counties.split(",") if c.strip()
         )
     counties = [c for c in counties if c]
     if not counties:
@@ -608,7 +612,7 @@ def main():
     print(f"Found {len(all_results)} properties:")
     for i, result in enumerate(all_results):
         print(
-            f"{i+1}. {result.get('county', 'Unknown')}: "
+            f"{i + 1}. {result.get('county', 'Unknown')}: "
             f"{result.get('owner', 'N/A')} - {result.get('address', 'N/A')}"
         )
     if args.log_json:

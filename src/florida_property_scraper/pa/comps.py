@@ -53,15 +53,21 @@ class RankedPAComp:
     explanation: Dict[str, Any]
 
 
-def score_similarity(subject: PAProperty, candidate: PAProperty) -> Tuple[float, Dict[str, Any]]:
+def score_similarity(
+    subject: PAProperty, candidate: PAProperty
+) -> Tuple[float, Dict[str, Any]]:
     explanation: Dict[str, Any] = {"weights": dict(WEIGHTS), "components": {}}
     comps: Dict[str, float] = {}
 
     if subject.land_use_code and candidate.land_use_code:
-        comps["land_use_code"] = 1.0 if subject.land_use_code == candidate.land_use_code else 0.0
+        comps["land_use_code"] = (
+            1.0 if subject.land_use_code == candidate.land_use_code else 0.0
+        )
 
     if subject.property_class and candidate.property_class:
-        comps["property_class"] = 1.0 if subject.property_class == candidate.property_class else 0.0
+        comps["property_class"] = (
+            1.0 if subject.property_class == candidate.property_class else 0.0
+        )
 
     # Distance only if both have coords; otherwise ignore by not adding the component.
     if (
@@ -70,7 +76,9 @@ def score_similarity(subject: PAProperty, candidate: PAProperty) -> Tuple[float,
         and candidate.latitude is not None
         and candidate.longitude is not None
     ):
-        miles = haversine_miles(subject.latitude, subject.longitude, candidate.latitude, candidate.longitude)
+        miles = haversine_miles(
+            subject.latitude, subject.longitude, candidate.latitude, candidate.longitude
+        )
         # half-life 2 miles
         comps["distance"] = _clamp01(0.5 ** (miles / 2.0))
         explanation["distance_miles"] = round(miles, 6)
@@ -124,7 +132,11 @@ def rank_comps(
         if cand.parcel_id == subject.parcel_id:
             continue
         s, exp = score_similarity(subject, cand)
-        ranked.append(RankedPAComp(county=cand.county, parcel_id=cand.parcel_id, score=s, explanation=exp))
+        ranked.append(
+            RankedPAComp(
+                county=cand.county, parcel_id=cand.parcel_id, score=s, explanation=exp
+            )
+        )
 
     ranked.sort(key=lambda r: (-r.score, r.parcel_id))
     return ranked[: max(0, int(top_n))]

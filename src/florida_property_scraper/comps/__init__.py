@@ -6,6 +6,6 @@ Property Appraiser (PA) extracted data.
 """
 
 raise ImportError(
-	"Legacy listing-based comps workflow removed. Use the PA-only commands: "
-	"`pa-search` and `pa-comps`."
+    "Legacy listing-based comps workflow removed. Use the PA-only commands: "
+    "`pa-search` and `pa-comps`."
 )

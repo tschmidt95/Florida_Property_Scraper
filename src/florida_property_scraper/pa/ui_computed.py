@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
@@ -21,7 +20,9 @@ def _parse_iso_date(v: Optional[str]) -> Optional[date]:
         return None
 
 
-def compute_ui_fields(pa: Optional[Dict[str, Any]], *, today: Optional[date] = None) -> Dict[str, Any]:
+def compute_ui_fields(
+    pa: Optional[Dict[str, Any]], *, today: Optional[date] = None
+) -> Dict[str, Any]:
     """Compute UI-only fields derived strictly from PA data.
 
     Rules (PA-only):

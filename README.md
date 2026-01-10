@@ -15,6 +15,22 @@ Scan properties and look up owner information in Florida
   python -m pip install --upgrade pip setuptools wheel
   python -m pip install -e .[test]
 
+### Pre-commit (recommended)
+
+We use `pre-commit` to enforce formatting + basic hygiene (Ruff + Ruff format, whitespace, YAML validation).
+
+- Install dev tools:
+
+  python -m pip install -r requirements-dev.txt
+
+- Install git hooks:
+
+  pre-commit install
+
+- Run locally (CI runs this too):
+
+  pre-commit run --all-files
+
 - Run smoke tests:
 
   python -m pytest -q tests/test_smoke.py

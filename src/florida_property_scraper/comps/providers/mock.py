@@ -7,6 +7,7 @@ from typing import Dict, List
 from .base import ListingProvider
 from ..models import ComparableListing, SubjectProperty
 
+
 class MockProvider(ListingProvider):
     """Fixture-backed deterministic provider.
 
@@ -18,7 +19,9 @@ class MockProvider(ListingProvider):
     def __init__(self, fixture_path: str | Path | None = None) -> None:
         if fixture_path is None:
             repo_root = Path(__file__).resolve().parents[4]
-            fixture_path = repo_root / "tests" / "fixtures" / "comps" / "mock_listings.json"
+            fixture_path = (
+                repo_root / "tests" / "fixtures" / "comps" / "mock_listings.json"
+            )
         self._fixture_path = Path(fixture_path)
 
         raw = json.loads(self._fixture_path.read_text(encoding="utf-8"))
@@ -57,12 +60,13 @@ class MockProvider(ListingProvider):
 
         if subject.property_type:
             preferred = [
-                l
-                for l in listings
-                if (l.property_type or "").lower() == subject.property_type.lower()
+                listing
+                for listing in listings
+                if (listing.property_type or "").lower()
+                == subject.property_type.lower()
             ]
             if preferred:
                 listings = preferred
 
-        listings.sort(key=lambda l: l.id)
+        listings.sort(key=lambda listing: listing.id)
         return listings

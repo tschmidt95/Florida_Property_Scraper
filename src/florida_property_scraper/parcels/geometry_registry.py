@@ -35,15 +35,21 @@ def get_provider(county: str) -> ParcelGeometryProvider:
     county_key = (county or "").strip().lower()
 
     providers: Dict[str, ParcelGeometryProvider] = {
-        "seminole": SeminoleProvider(geojson_path=_default_geojson_dir() / "seminole.geojson"),
-        "orange": OrangeProvider(geojson_path=_default_geojson_dir() / "orange.geojson"),
+        "seminole": SeminoleProvider(
+            geojson_path=_default_geojson_dir() / "seminole.geojson"
+        ),
+        "orange": OrangeProvider(
+            geojson_path=_default_geojson_dir() / "orange.geojson"
+        ),
     }
 
     provider = providers.get(county_key)
     if provider is None:
         # Return SeminoleProvider pointed at a non-existent file to keep the type
         # stable without adding extra provider classes.
-        provider = SeminoleProvider(geojson_path=_default_geojson_dir() / "__none__.geojson")
+        provider = SeminoleProvider(
+            geojson_path=_default_geojson_dir() / "__none__.geojson"
+        )
         provider.county = county_key.strip()  # type: ignore[attr-defined]
     provider.load()
     return provider

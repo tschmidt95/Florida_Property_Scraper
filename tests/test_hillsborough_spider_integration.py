@@ -9,8 +9,8 @@ HillsboroughSpider = spiders_pkg.hillsborough_spider.HillsboroughSpider
 
 
 def test_hillsborough_spider_collects_items():
-    sample = Path('tests/fixtures/hillsborough_sample.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/hillsborough_sample.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

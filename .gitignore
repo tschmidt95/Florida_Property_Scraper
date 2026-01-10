@@ -32,3 +32,11 @@ tests/fixtures/comps/
 .coverage
 coverage.xml
 junit.xml
+
+# Build artifacts
+*.egg-info/
+*.bak
+
+# local artifacts
+payload.json
+requirements.txt.bak

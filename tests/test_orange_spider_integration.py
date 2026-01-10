@@ -9,8 +9,8 @@ OrangeSpider = spiders_pkg.orange_spider.OrangeSpider
 
 
 def test_orange_spider_collects_items():
-    sample = Path('tests/fixtures/orange_sample.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/orange_sample.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

@@ -9,8 +9,8 @@ SeminoleSpider = spiders_pkg.seminole_spider.SeminoleSpider
 
 
 def test_seminole_spider_collects_items():
-    sample = Path('tests/fixtures/seminole_sample.html').absolute()
-    file_url = 'file://' + pathname2url(str(sample))
+    sample = Path("tests/fixtures/seminole_sample.html").absolute()
+    file_url = "file://" + pathname2url(str(sample))
 
     html = sample.read_bytes()
     resp = TextResponse(url=file_url, body=html)

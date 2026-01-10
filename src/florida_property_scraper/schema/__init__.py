@@ -1,3 +1,11 @@
+from .records import (
+    PropertyRecord,
+    clean_text,
+    is_html_like,
+    normalize_record,
+    strip_html,
+)
+
 REQUIRED_FIELDS = [
     "county",
     "state",
@@ -13,7 +21,15 @@ REQUIRED_FIELDS = [
     "raw_html",
 ]
 
-from .records import PropertyRecord, normalize_record, clean_text, strip_html, is_html_like  # noqa: E402
+__all__ = [
+    "REQUIRED_FIELDS",
+    "normalize_item",
+    "PropertyRecord",
+    "normalize_record",
+    "clean_text",
+    "strip_html",
+    "is_html_like",
+]
 
 
 def normalize_item(item):

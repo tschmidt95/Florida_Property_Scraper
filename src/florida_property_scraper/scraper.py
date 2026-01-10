@@ -113,9 +113,7 @@ class FloridaPropertyScraper:
             )
             return demo_results
         if counties:
-            slugs = [
-                canonicalize_jurisdiction_name(c) for c in counties if c.strip()
-            ]
+            slugs = [canonicalize_jurisdiction_name(c) for c in counties if c.strip()]
         else:
             slugs = enabled_jurisdictions(self.state)
         for idx, slug in enumerate(slugs):
@@ -234,7 +232,9 @@ class FloridaPropertyScraper:
         if counties:
             normalized_counties = [c for c in counties if c]
         if (webhook_url or zoho_sync) and not output_path:
-            warnings.append("Webhook/Zoho sync disabled because output_path is not set.")
+            warnings.append(
+                "Webhook/Zoho sync disabled because output_path is not set."
+            )
         store = None
         if storage_path:
             store = SQLiteStore(storage_path)

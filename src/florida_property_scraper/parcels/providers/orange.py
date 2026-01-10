@@ -70,7 +70,11 @@ class OrangeProvider:
             if not isinstance(geom, dict):
                 continue
 
-            props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
+            props = (
+                feat.get("properties")
+                if isinstance(feat.get("properties"), dict)
+                else {}
+            )
 
             parcel_id = (
                 props.get("parcel_id")
@@ -88,11 +92,25 @@ class OrangeProvider:
             # Normalize commonly-seen Orange fields to a stable internal shape.
             self._meta[parcel_id] = {
                 "parcel_id": parcel_id,
-                "situs": props.get("situs") or props.get("SITUS") or props.get("situs_address") or "",
-                "owner": props.get("owner") or props.get("OWNER") or props.get("owner_name") or "",
-                "sale_price": props.get("sale_price") or props.get("SALE_PRICE") or props.get("last_sale_price") or 0,
-                "sale_date": props.get("sale_date") or props.get("SALE_DATE") or props.get("last_sale_date") or None,
-                "mortgage_amount": props.get("mortgage_amount") or props.get("MORTGAGE_AMOUNT") or 0,
+                "situs": props.get("situs")
+                or props.get("SITUS")
+                or props.get("situs_address")
+                or "",
+                "owner": props.get("owner")
+                or props.get("OWNER")
+                or props.get("owner_name")
+                or "",
+                "sale_price": props.get("sale_price")
+                or props.get("SALE_PRICE")
+                or props.get("last_sale_price")
+                or 0,
+                "sale_date": props.get("sale_date")
+                or props.get("SALE_DATE")
+                or props.get("last_sale_date")
+                or None,
+                "mortgage_amount": props.get("mortgage_amount")
+                or props.get("MORTGAGE_AMOUNT")
+                or 0,
             }
 
             sgeom = None
@@ -133,8 +151,10 @@ class OrangeProvider:
             return None
 
         def _walk(obj: Any):
-            if isinstance(obj, (list, tuple)) and len(obj) == 2 and all(
-                isinstance(x, (int, float)) for x in obj
+            if (
+                isinstance(obj, (list, tuple))
+                and len(obj) == 2
+                and all(isinstance(x, (int, float)) for x in obj)
             ):
                 yield float(obj[0]), float(obj[1])
                 return
@@ -190,8 +210,13 @@ class OrangeProvider:
 
                 out: List[Feature] = []
                 # Index-returning path (common in shapely 2.x builds)
-                if isinstance(first, (int,)) or first.__class__.__name__ in ("int64", "int32"):
-                    valid_indices = [i for i, g in enumerate(self._geoms) if g is not None]
+                if isinstance(first, (int,)) or first.__class__.__name__ in (
+                    "int64",
+                    "int32",
+                ):
+                    valid_indices = [
+                        i for i, g in enumerate(self._geoms) if g is not None
+                    ]
                     for v in candidates:
                         try:
                             tree_idx = int(v)

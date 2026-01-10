@@ -1,5 +1,3 @@
-import time
-
 import florida_property_scraper.scraper as scraper_module
 from florida_property_scraper.scraper import FloridaPropertyScraper
 

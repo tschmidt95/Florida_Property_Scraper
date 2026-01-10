@@ -8,7 +8,12 @@ def test_geojson_contract():
             "properties": {"parcel_id": "P-1", "address": "123 Demo"},
         },
         {
-            "geometry": {"type": "Polygon", "coordinates": [[[-81, 27], [-81, 28], [-80, 28], [-80, 27], [-81, 27]]]},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [[-81, 27], [-81, 28], [-80, 28], [-80, 27], [-81, 27]]
+                ],
+            },
             "properties": {"parcel_id": "P-2", "address": ""},
         },
     ]

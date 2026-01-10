@@ -20,6 +20,6 @@ def test_full_dry_run_all_counties():
     lines = [line for line in proc.stdout.splitlines() if line.startswith("{")]
     logs = [json.loads(line) for line in lines]
     summary = logs[-1]
-    log_entries = [l for l in logs[:-1] if "county" in l]
+    log_entries = [entry for entry in logs[:-1] if "county" in entry]
     assert len(log_entries) == len(enabled_counties())
     assert summary["total_counties"] == len(enabled_counties())

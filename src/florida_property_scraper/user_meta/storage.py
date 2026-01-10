@@ -60,7 +60,9 @@ class UserMetaSQLite:
             )
             """
         )
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_user_meta_county ON user_meta(county)")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_meta_county ON user_meta(county)"
+        )
         self.conn.commit()
 
     @staticmethod

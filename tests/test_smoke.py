@@ -8,11 +8,12 @@ from florida_property_scraper.backend.scrapy_adapter import ScrapyAdapter
 
 def test_smoke_import():
     import importlib.util
-    spec = importlib.util.find_spec('florida_property_scraper')
+
+    spec = importlib.util.find_spec("florida_property_scraper")
     assert spec is not None
     # simple import to ensure module can be imported
-    module = __import__('florida_property_scraper')
-    assert hasattr(module, '__name__')
+    module = __import__("florida_property_scraper")
+    assert hasattr(module, "__name__")
 
 
 def test_adapter_demo_returns_fixture():
@@ -28,9 +29,7 @@ def test_adapter_demo_returns_fixture():
 
 def test_scrapy_runner_on_fixture():
     sample = Path(__file__).parent / "fixtures" / "broward_sample.html"
-    assert sample.exists(), (
-        "Fixture missing: tests/fixtures/broward_sample.html"
-    )
+    assert sample.exists(), "Fixture missing: tests/fixtures/broward_sample.html"
     file_url = sample.resolve().as_uri()
 
     cmd = [
@@ -48,4 +47,3 @@ def test_scrapy_runner_on_fixture():
     data = json.loads(proc.stdout)
     assert isinstance(data, list)
     assert len(data) >= 2
-

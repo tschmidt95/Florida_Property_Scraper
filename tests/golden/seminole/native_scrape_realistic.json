@@ -1,0 +1,45 @@
+{
+  "county": "seminole",
+  "fixture": "tests/fixtures/seminole_realistic.html",
+  "records": [
+    {
+      "address": "77 Cypress Way",
+      "bathrooms": "",
+      "bedrooms": "",
+      "building_size": "",
+      "county": "seminole",
+      "jurisdiction": "seminole",
+      "land_size": "",
+      "mailing_address": "",
+      "owner": "Seminole Live Owner 1",
+      "parcel_id": "",
+      "property_class": "",
+      "raw_html_len": 157,
+      "sale_date": "",
+      "sale_price": "",
+      "situs_address": "",
+      "state": "fl",
+      "zoning": ""
+    },
+    {
+      "address": "88 Palm Ave",
+      "bathrooms": "",
+      "bedrooms": "",
+      "building_size": "",
+      "county": "seminole",
+      "jurisdiction": "seminole",
+      "land_size": "",
+      "mailing_address": "",
+      "owner": "Seminole Live Owner 2",
+      "parcel_id": "",
+      "property_class": "",
+      "raw_html_len": 157,
+      "sale_date": "",
+      "sale_price": "",
+      "situs_address": "",
+      "state": "fl",
+      "zoning": ""
+    }
+  ],
+  "source": "native_adapter.iter_records"
+}

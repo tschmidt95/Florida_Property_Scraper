@@ -1,6 +1,6 @@
 from scrapy import FormRequest, Request, Spider
 
-from florida_property_scraper.schema import REQUIRED_FIELDS, normalize_item
+from florida_property_scraper.schema import normalize_item
 from florida_property_scraper.spider_utils import (
     extract_label_items,
     extract_label_items_from_nodes,

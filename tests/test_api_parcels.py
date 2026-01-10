@@ -1,4 +1,3 @@
-import json
 import os
 
 from florida_property_scraper.api.app import app
@@ -25,9 +24,9 @@ def test_api_parcels_zoom_gating(tmp_path, monkeypatch):
         store.upsert(
             apply_defaults(
                 {
-						"county": "seminole",
-						"parcel_id": "SEM-0001",
-						"situs_address": "100 E SAMPLE ST",
+                    "county": "seminole",
+                    "parcel_id": "SEM-0001",
+                    "situs_address": "100 E SAMPLE ST",
                     "owner_names": ["DEMO OWNER"],
                     "last_sale_date": "2024-06-01",
                     "last_sale_price": 2500000,
@@ -43,7 +42,9 @@ def test_api_parcels_zoom_gating(tmp_path, monkeypatch):
 
     bbox = "-81.38,28.64,-81.36,28.66"
 
-    r = client.get("/api/parcels", params={"county": "seminole", "bbox": bbox, "zoom": 14})
+    r = client.get(
+        "/api/parcels", params={"county": "seminole", "bbox": bbox, "zoom": 14}
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["type"] == "FeatureCollection"
@@ -51,7 +52,9 @@ def test_api_parcels_zoom_gating(tmp_path, monkeypatch):
 
     # Use a bbox that intersects the seminole fixtures.
     bbox = "-81.38,28.64,-81.36,28.66"
-    r = client.get("/api/parcels", params={"county": "seminole", "bbox": bbox, "zoom": 15})
+    r = client.get(
+        "/api/parcels", params={"county": "seminole", "bbox": bbox, "zoom": 15}
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["type"] == "FeatureCollection"
@@ -113,7 +116,9 @@ def test_api_parcels_county_switch_and_default(tmp_path, monkeypatch):
 
     # Switching county to orange returns orange features in orange bbox.
     orange_bbox = "-81.312,28.535,-81.301,28.543"
-    r = client.get("/api/parcels", params={"county": "orange", "bbox": orange_bbox, "zoom": 15})
+    r = client.get(
+        "/api/parcels", params={"county": "orange", "bbox": orange_bbox, "zoom": 15}
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["type"] == "FeatureCollection"
@@ -378,7 +383,9 @@ def test_api_parcel_meta_roundtrip(tmp_path, monkeypatch):
         "notes": "call next week",
         "lists": ["followup"],
     }
-    r = client.put("/api/parcels/SEM-0001/meta", params={"county": "seminole"}, json=payload)
+    r = client.put(
+        "/api/parcels/SEM-0001/meta", params={"county": "seminole"}, json=payload
+    )
     assert r.status_code == 200
     saved = r.json()
     assert saved["county"] == "seminole"

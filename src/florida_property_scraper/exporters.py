@@ -34,7 +34,9 @@ class ZohoExporter(Exporter):
         timeout: int = 10,
     ):
         self.access_token = access_token or os.environ.get("ZOHO_ACCESS_TOKEN")
-        self.api_domain = api_domain or os.environ.get("ZOHO_API_DOMAIN", "https://www.zohoapis.com")
+        self.api_domain = api_domain or os.environ.get(
+            "ZOHO_API_DOMAIN", "https://www.zohoapis.com"
+        )
         self.timeout = timeout
         if not self.access_token:
             raise ValueError("ZOHO_ACCESS_TOKEN is required for Zoho sync")
