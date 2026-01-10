@@ -36,3 +36,7 @@ junit.xml
 # Build artifacts
 *.egg-info/
 *.bak
+
+# local artifacts
+payload.json
+requirements.txt.bak
