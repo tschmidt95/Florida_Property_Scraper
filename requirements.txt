@@ -1,6 +1,7 @@
 requests
 scrapy==2.14.0
 fastapi
+httpx>=0.27
 uvicorn
 jsonschema>=4.0
 shapely>=2.0
