@@ -23,7 +23,16 @@ def test_flag_strict_schema_validation_toggles_native_engine(monkeypatch):
     start_requests = [{"url": url, "method": "GET"}]
 
     def bad_parser(_html: str, _final_url: str, _county: str):
-        return [{"county": "seminole", "state": "fl", "jurisdiction": "seminole", "owner": "", "address": "", "raw_html": ""}]
+        return [
+            {
+                "county": "seminole",
+                "state": "fl",
+                "jurisdiction": "seminole",
+                "owner": "",
+                "address": "",
+                "raw_html": "",
+            }
+        ]
 
     engine = NativeEngine()
 
@@ -78,7 +87,13 @@ def test_flag_geometry_search_disables_endpoint(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 
     client = TestClient(app)
-    payload = {"county": "seminole", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 0], [0, 0], [0, 0]]]}}
+    payload = {
+        "county": "seminole",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [0, 0], [0, 0], [0, 0]]],
+        },
+    }
     r = client.post("/api/parcels/search", json=payload)
     assert r.status_code == 404
 
@@ -119,13 +134,26 @@ def test_flag_triggers_toggles_filtering(monkeypatch, tmp_path):
     client = TestClient(app)
     geometry = {
         "type": "Polygon",
-        "coordinates": [[[-81.371, 28.649], [-81.367, 28.649], [-81.367, 28.653], [-81.371, 28.653], [-81.371, 28.649]]],
+        "coordinates": [
+            [
+                [-81.371, 28.649],
+                [-81.367, 28.649],
+                [-81.367, 28.653],
+                [-81.371, 28.653],
+                [-81.371, 28.649],
+            ]
+        ],
     }
     payload = {
         "county": "seminole",
         "geometry": geometry,
         # A trigger that will NOT match (price threshold too high).
-        "triggers": [{"code": "TOO_EXPENSIVE", "all": [{"field": "last_sale_price", "op": ">", "value": 9_999_999}]}],
+        "triggers": [
+            {
+                "code": "TOO_EXPENSIVE",
+                "all": [{"field": "last_sale_price", "op": ">", "value": 9_999_999}],
+            }
+        ],
         "limit": 10,
     }
 
@@ -181,7 +209,15 @@ def test_flag_sale_filtering_toggles_filter_eval(monkeypatch, tmp_path):
     client = TestClient(app)
     geometry = {
         "type": "Polygon",
-        "coordinates": [[[-81.371, 28.649], [-81.367, 28.649], [-81.367, 28.653], [-81.371, 28.653], [-81.371, 28.649]]],
+        "coordinates": [
+            [
+                [-81.371, 28.649],
+                [-81.367, 28.649],
+                [-81.367, 28.653],
+                [-81.371, 28.653],
+                [-81.371, 28.649],
+            ]
+        ],
     }
     payload = {
         "county": "seminole",

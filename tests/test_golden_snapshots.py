@@ -15,7 +15,9 @@ class _FakeRequest:
 
 
 class _FakeResponse:
-    def __init__(self, *, url: str, text: str, request_meta: Dict[str, object] | None = None) -> None:
+    def __init__(
+        self, *, url: str, text: str, request_meta: Dict[str, object] | None = None
+    ) -> None:
         self.url = url
         self.text = text
         self.request = _FakeRequest(request_meta)
@@ -80,7 +82,7 @@ def _scrape_fixture_records(county: str, *, max_items: int = 5) -> List[Dict[str
 
     # Normalize to the canonical record schema to keep snapshots stable.
     records = []
-    for it in items[: max_items]:
+    for it in items[:max_items]:
         rec = normalize_record(it).to_dict()
         raw_html = rec.get("raw_html") or ""
         rec.pop("raw_html", None)

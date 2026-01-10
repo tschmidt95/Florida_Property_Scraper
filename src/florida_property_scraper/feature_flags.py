@@ -39,7 +39,9 @@ class FeatureFlags:
             geometry_search=_env_bool("FPS_FEATURE_GEOMETRY_SEARCH", True),
             triggers=_env_bool("FPS_FEATURE_TRIGGERS", True),
             sale_filtering=_env_bool("FPS_FEATURE_SALE_FILTERING", True),
-            strict_schema_validation=_env_bool("FPS_FEATURE_STRICT_SCHEMA_VALIDATION", False),
+            strict_schema_validation=_env_bool(
+                "FPS_FEATURE_STRICT_SCHEMA_VALIDATION", False
+            ),
         )
 
 

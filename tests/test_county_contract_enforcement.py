@@ -42,7 +42,9 @@ def _assert_capabilities(slug: str) -> None:
 
     entry = get_entry(slug)
     if not entry or entry.get("slug") != slug:
-        raise AssertionError(f"Router entry missing for county '{slug}' in src/florida_property_scraper/routers/fl_coverage.py")
+        raise AssertionError(
+            f"Router entry missing for county '{slug}' in src/florida_property_scraper/routers/fl_coverage.py"
+        )
 
     caps = entry.get("capabilities")
     if not isinstance(caps, dict):
@@ -100,7 +102,9 @@ def _assert_schema_validation(slug: str, fixture: Path) -> None:
     from florida_property_scraper.backend import spiders as spiders_pkg
     from florida_property_scraper.schema.records import normalize_record
 
-    spider_cls = spiders_pkg.SPIDERS.get(slug) or spiders_pkg.SPIDERS.get(f"{slug}_spider")
+    spider_cls = spiders_pkg.SPIDERS.get(slug) or spiders_pkg.SPIDERS.get(
+        f"{slug}_spider"
+    )
     if spider_cls is None:
         raise AssertionError(
             f"Missing spider registration for '{slug}' in src/florida_property_scraper/backend/spiders/__init__.py"
@@ -111,7 +115,9 @@ def _assert_schema_validation(slug: str, fixture: Path) -> None:
     spider = spider_cls(start_urls=["file://fixture"])
     items = list(spider.parse(resp))
     if not items:
-        raise AssertionError(f"Realistic fixture produced no items for '{slug}': {fixture}")
+        raise AssertionError(
+            f"Realistic fixture produced no items for '{slug}': {fixture}"
+        )
 
     # Validate records against canonical schema.
     for i, item in enumerate(items[:25]):

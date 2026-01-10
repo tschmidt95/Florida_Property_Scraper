@@ -36,4 +36,3 @@ junit.xml
 # Build artifacts
 *.egg-info/
 *.bak
-
