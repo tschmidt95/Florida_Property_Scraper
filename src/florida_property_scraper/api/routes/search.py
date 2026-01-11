@@ -6,6 +6,11 @@ except Exception:  # pragma: no cover - optional dependency
     APIRouter = None
     FASTAPI_AVAILABLE = False
 
+import os
+import sqlite3
+from pathlib import Path
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -17,34 +22,271 @@ class SearchResult(BaseModel):
     address: str
     county: str
     score: int
+    parcel_id: str | None = None
+    source: str | None = None
+
+
+_DB_ENV_VARS = ("LEADS_SQLITE_PATH", "LEADS_DB", "PA_DB")
+
+
+def _get_db_path() -> Path:
+    for name in _DB_ENV_VARS:
+        value = os.getenv(name)
+        if value:
+            return Path(value)
+    return Path("./leads.sqlite")
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    except Exception:
+        return set()
+    # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    return {str(r[1]) for r in rows}
+
+
+def _clamp_limit(limit: int | None) -> int:
+    try:
+        n = int(limit or 50)
+    except Exception:
+        n = 50
+    return max(1, min(n, 200))
+
+
+def _norm(s: str | None) -> str:
+    return (s or "").strip()
+
+
+def _like_param(q: str) -> str:
+    # Parameterized LIKE; callers wrap with LOWER() to keep case-insensitive.
+    return f"%{q.lower()}%"
+
+
+def _search_from_properties(
+    *,
+    conn: sqlite3.Connection,
+    q: str,
+    county: str,
+    limit: int,
+) -> list[SearchResult]:
+    cols = _table_columns(conn, "properties")
+    has_parcel_id = "parcel_id" in cols
+    has_raw_html = "raw_html" in cols
+    like = _like_param(q)
+    q_lower = q.lower()
+
+    where_parts: list[str] = []
+    params: list[Any] = []
+
+    if county:
+        where_parts.append("LOWER(TRIM(properties.county)) = LOWER(TRIM(?))")
+        params.append(county)
+
+    match_parts: list[str] = [
+        "LOWER(owners.name) LIKE ?",
+        "LOWER(properties.address) LIKE ?",
+    ]
+    params.extend([like, like])
+
+    if has_parcel_id:
+        match_parts.append("LOWER(properties.parcel_id) LIKE ?")
+        params.append(like)
+
+    if has_raw_html:
+        match_parts.append("LOWER(properties.raw_html) LIKE ?")
+        params.append(like)
+
+    where_parts.append(f"({' OR '.join(match_parts)})")
+
+    parcel_select = "properties.parcel_id" if has_parcel_id else "''"
+
+    # Heuristic score ordering: parcel_id match > owner match > address match > raw_html match.
+    score_sql = "CASE "
+    score_params: list[Any] = []
+    if has_parcel_id:
+        score_sql += (
+            "WHEN instr(LOWER(COALESCE(properties.parcel_id,'')), ?) > 0 THEN 95 "
+        )
+        score_params.append(q_lower)
+    score_sql += "WHEN instr(LOWER(owners.name), ?) > 0 THEN 90 "
+    score_params.append(q_lower)
+    score_sql += "WHEN instr(LOWER(properties.address), ?) > 0 THEN 80 "
+    score_params.append(q_lower)
+    score_sql += "ELSE 70 END"
+
+    sql = f"""
+        SELECT
+            owners.name AS owner,
+            properties.address AS address,
+            properties.county AS county,
+            {parcel_select} AS parcel_id,
+            'properties' AS source,
+            {score_sql} AS score
+        FROM properties
+        JOIN owners ON owners.id = properties.owner_id
+        WHERE {" AND ".join(where_parts)}
+        ORDER BY score DESC, LOWER(owners.name), LOWER(properties.address)
+        LIMIT ?
+    """
+
+    # Note: SQLite binds parameters in order of '?' appearance. Our score CASE is in
+    # the SELECT list, so its params come before the WHERE params.
+    rows = conn.execute(sql, tuple(score_params) + tuple(params) + (limit,)).fetchall()
+    out: list[SearchResult] = []
+    for row in rows:
+        out.append(
+            SearchResult(
+                owner=str(row["owner"] or ""),
+                address=str(row["address"] or ""),
+                county=str(row["county"] or ""),
+                score=int(row["score"] or 0),
+                parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
+                source=str(row["source"] or "") or None,
+            )
+        )
+    return out
+
+
+def _search_from_leads(
+    *,
+    conn: sqlite3.Connection,
+    q: str,
+    county: str,
+    limit: int,
+) -> list[SearchResult]:
+    cols = _table_columns(conn, "leads")
+    q_lower = q.lower()
+    like = _like_param(q)
+
+    owner_col = "owner_name" if "owner_name" in cols else None
+    county_col = "county" if "county" in cols else None
+    mailing_col = "mailing_address" if "mailing_address" in cols else None
+    situs_col = "situs_address" if "situs_address" in cols else None
+    parcel_col = "parcel_id" if "parcel_id" in cols else None
+    source_col = (
+        "source_url"
+        if "source_url" in cols
+        else ("property_url" if "property_url" in cols else None)
+    )
+    score_col = "lead_score" if "lead_score" in cols else None
+
+    if not owner_col or not county_col:
+        return []
+
+    # Choose a single address field for UI.
+    address_expr_parts: list[str] = []
+    if situs_col:
+        address_expr_parts.append(f"NULLIF({situs_col}, '')")
+    if mailing_col:
+        address_expr_parts.append(f"NULLIF({mailing_col}, '')")
+    address_expr = "COALESCE(" + ", ".join(address_expr_parts + ["''"]) + ")"
+
+    where_parts: list[str] = []
+    params: list[Any] = []
+
+    if county:
+        where_parts.append(f"LOWER(TRIM({county_col})) = LOWER(TRIM(?))")
+        params.append(county)
+
+    match_parts: list[str] = [
+        f"LOWER({owner_col}) LIKE ?",
+        f"LOWER({address_expr}) LIKE ?",
+    ]
+    params.extend([like, like])
+
+    if parcel_col:
+        match_parts.append(f"LOWER({parcel_col}) LIKE ?")
+        params.append(like)
+
+    where_parts.append(f"({' OR '.join(match_parts)})")
+
+    parcel_select = parcel_col if parcel_col else "''"
+    source_select = source_col if source_col else "''"
+
+    # Prefer stored lead_score if present; otherwise heuristic.
+    if score_col:
+        score_sql = f"CASE WHEN {score_col} IS NOT NULL THEN MIN(MAX(CAST({score_col} AS INTEGER), 0), 100) ELSE 0 END"
+        score_params: list[Any] = []
+    else:
+        score_sql = "CASE "
+        score_params = []
+        if parcel_col:
+            score_sql += f"WHEN instr(LOWER(COALESCE({parcel_col},'')), ?) > 0 THEN 95 "
+            score_params.append(q_lower)
+        score_sql += f"WHEN instr(LOWER(COALESCE({owner_col},'')), ?) > 0 THEN 90 "
+        score_params.append(q_lower)
+        score_sql += f"WHEN instr(LOWER({address_expr}), ?) > 0 THEN 80 "
+        score_params.append(q_lower)
+        score_sql += "ELSE 70 END"
+
+    sql = f"""
+        SELECT
+            {owner_col} AS owner,
+            {address_expr} AS address,
+            {county_col} AS county,
+            {parcel_select} AS parcel_id,
+            {source_select} AS source,
+            {score_sql} AS score
+        FROM leads
+        WHERE {" AND ".join(where_parts)}
+        ORDER BY score DESC, LOWER(owner), LOWER(address)
+        LIMIT ?
+    """
+
+    # Note: SQLite binds parameters in order of '?' appearance. Our score CASE is in
+    # the SELECT list, so its params come before the WHERE params.
+    rows = conn.execute(sql, tuple(score_params) + tuple(params) + (limit,)).fetchall()
+    out: list[SearchResult] = []
+    for row in rows:
+        out.append(
+            SearchResult(
+                owner=str(row["owner"] or ""),
+                address=str(row["address"] or ""),
+                county=str(row["county"] or ""),
+                score=int(row["score"] or 0),
+                parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
+                source=str(row["source"]) if row["source"] else None,
+            )
+        )
+    return out
 
 
 if router:
 
     @router.get("/search", response_model=list[SearchResult])
-    def search(q: str = "", county: str = "Orange") -> list[SearchResult]:
-        # TEMP: fake data so UI works end-to-end. We'll replace with real search later.
-        q = (q or "").strip().lower()
-        rows = [
-            {
-                "owner": "John Smith",
-                "address": "123 Main St",
-                "county": county,
-                "score": 92,
-            },
-            {
-                "owner": "Acme Holdings LLC",
-                "address": "45 Lakeview Dr",
-                "county": county,
-                "score": 88,
-            },
-            {
-                "owner": "Maria Garcia",
-                "address": "9 Palm Ave",
-                "county": county,
-                "score": 81,
-            },
-        ]
-        if not q:
-            return rows
-        return [r for r in rows if q in r["owner"].lower() or q in r["address"].lower()]
+    def search(q: str = "", county: str = "", limit: int = 50) -> list[SearchResult]:
+        qn = _norm(q)
+        if not qn:
+            return []
+
+        cn = _norm(county)
+        lim = _clamp_limit(limit)
+
+        db_path = _get_db_path()
+        if not db_path.exists():
+            # Stable response shape; missing DB returns empty set.
+            return []
+
+        conn = _connect(db_path)
+        try:
+            if _table_exists(conn, "leads"):
+                return _search_from_leads(conn=conn, q=qn, county=cn, limit=lim)
+            if _table_exists(conn, "properties") and _table_exists(conn, "owners"):
+                return _search_from_properties(conn=conn, q=qn, county=cn, limit=lim)
+            return []
+        finally:
+            conn.close()
