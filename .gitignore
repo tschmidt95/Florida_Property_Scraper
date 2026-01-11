@@ -20,6 +20,9 @@ repo_old/
 # Node
 node_modules/
 
+# Vite
+.vite/
+
 # Local-only scratch tests/fixtures (not part of map geometry search work)
 tests/test_pa_cli.py
 tests/test_pa_defaults.py
