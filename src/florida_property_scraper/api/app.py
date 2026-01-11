@@ -123,7 +123,6 @@ app = FastAPI() if FASTAPI_AVAILABLE else None
 
 
 if app:
-
     app.include_router(search_router, prefix="/api")
 
     @app.get("/health")
