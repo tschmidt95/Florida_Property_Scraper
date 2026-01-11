@@ -7,6 +7,8 @@ try:
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
 
+    from florida_property_scraper.api.routes.search import router as search_router
+
     FASTAPI_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
     FastAPI = None
@@ -121,6 +123,8 @@ app = FastAPI() if FASTAPI_AVAILABLE else None
 
 
 if app:
+
+    app.include_router(search_router, prefix="/api")
 
     @app.get("/health")
     def health_route():

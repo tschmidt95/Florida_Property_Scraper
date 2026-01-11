@@ -72,6 +72,32 @@ Run the API:
 
   uvicorn florida_property_scraper.api.app:app --reload
 
+---
+
+## UI dev
+
+From repo root:
+
+```bash
+# Install frontend deps
+npm --prefix web install
+
+# Run backend API (http://localhost:8000)
+uvicorn florida_property_scraper.api.app:app --reload --host 0.0.0.0 --port 8000
+
+# Run frontend dev server (proxy /api -> http://localhost:8000)
+npm --prefix web run dev -- --host 0.0.0.0 --port 5173
+
+# Verify API
+curl "http://127.0.0.1:8000/api/search?q=smith&county=Orange"
+
+# Run both (single command)
+bash scripts/dev.sh
+
+# Build UI
+npm --prefix web run build
+```
+
 Environment variables:
 
 - `POSTGIS_ENABLED=1` to use PostGIS for map layers

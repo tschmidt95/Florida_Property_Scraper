@@ -77,3 +77,23 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  ui-build:
+    name: ui-build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web deps
+        run: npm --prefix web install
+
+      - name: Build web
+        run: npm --prefix web run build
