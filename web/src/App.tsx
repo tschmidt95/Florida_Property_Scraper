@@ -173,25 +173,27 @@ export default function App() {
                       <th className="px-3 py-2">Owner</th>
                       <th className="px-3 py-2">Address</th>
                       <th className="px-3 py-2">County</th>
+                      <th className="px-3 py-2">Parcel</th>
+                      <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Score</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={4}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={4}>
+                        <td className="px-3 py-3 text-red-700" colSpan={6}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={4}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -204,6 +206,8 @@ export default function App() {
                           <td className="px-3 py-2">{r.owner}</td>
                           <td className="px-3 py-2">{r.address}</td>
                           <td className="px-3 py-2">{r.county}</td>
+                          <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
+                          <td className="px-3 py-2">{r.source ?? ''}</td>
                           <td className="px-3 py-2">{r.score}</td>
                         </tr>
                       ))
