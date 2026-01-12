@@ -3,6 +3,23 @@ export type SearchResult = {
   address: string;
   county: string;
   score: number;
+  parcel_id?: string;
+  source?: string;
+  last_permit_date?: string;
+};
+
+export type AdvancedSearchFilters = {
+  has_parcel_id?: boolean;
+  min_score?: number;
+  no_permits_in_years?: number;
+};
+
+export type AdvancedSearchRequest = {
+  q: string;
+  counties?: string[];
+  filters?: AdvancedSearchFilters;
+  limit?: number;
+  offset?: number;
 };
 
 function buildSearchUrl(q: string, county: string): string {
@@ -45,6 +62,9 @@ export async function search(q: string, county: string): Promise<SearchResult[]>
     const address = record.address;
     const countyField = record.county;
     const score = record.score;
+    const parcelId = record.parcel_id;
+    const source = record.source;
+    const lastPermitDate = record.last_permit_date;
 
     if (
       typeof owner === 'string' &&
@@ -52,7 +72,134 @@ export async function search(q: string, county: string): Promise<SearchResult[]>
       typeof countyField === 'string' &&
       typeof score === 'number'
     ) {
-      results.push({ owner, address, county: countyField, score });
+      results.push({
+        owner,
+        address,
+        county: countyField,
+        score,
+        parcel_id: typeof parcelId === 'string' ? parcelId : undefined,
+        source: typeof source === 'string' ? source : undefined,
+        last_permit_date: typeof lastPermitDate === 'string' ? lastPermitDate : undefined,
+      });
+    }
+  }
+
+  return results;
+}
+
+export async function searchAdvanced(
+  req: AdvancedSearchRequest,
+): Promise<SearchResult[]> {
+  const resp = await fetch('/api/search/advanced', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(req),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+
+  const data: unknown = await resp.json();
+  if (!Array.isArray(data)) {
+    throw new Error('Unexpected response: expected an array');
+  }
+
+  const results: SearchResult[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    const owner = record.owner;
+    const address = record.address;
+    const countyField = record.county;
+    const score = record.score;
+    const parcelId = record.parcel_id;
+    const source = record.source;
+    const lastPermitDate = record.last_permit_date;
+
+    if (
+      typeof owner === 'string' &&
+      typeof address === 'string' &&
+      typeof countyField === 'string' &&
+      typeof score === 'number'
+    ) {
+      results.push({
+        owner,
+        address,
+        county: countyField,
+        score,
+        parcel_id: typeof parcelId === 'string' ? parcelId : undefined,
+        source: typeof source === 'string' ? source : undefined,
+        last_permit_date:
+          typeof lastPermitDate === 'string' ? lastPermitDate : undefined,
+      });
+    }
+  }
+
+  return results;
+}
+
+export async function scrape(
+  county: string,
+  query: string,
+  limit: number = 50,
+): Promise<SearchResult[]> {
+  const resp = await fetch('/api/scrape', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ county, query, limit }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+
+  const data: unknown = await resp.json();
+  if (!Array.isArray(data)) {
+    throw new Error('Unexpected response: expected an array');
+  }
+
+  const results: SearchResult[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    const owner = record.owner;
+    const address = record.address;
+    const countyField = record.county;
+    const score = record.score;
+    const parcelId = record.parcel_id;
+    const source = record.source;
+
+    if (
+      typeof owner === 'string' &&
+      typeof address === 'string' &&
+      typeof countyField === 'string' &&
+      typeof score === 'number'
+    ) {
+      results.push({
+        owner,
+        address,
+        county: countyField,
+        score,
+        parcel_id: typeof parcelId === 'string' ? parcelId : undefined,
+        source: typeof source === 'string' ? source : undefined,
+      });
     }
   }
 
