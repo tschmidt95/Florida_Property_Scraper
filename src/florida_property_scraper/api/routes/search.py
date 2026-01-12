@@ -26,6 +26,38 @@ class SearchResult(BaseModel):
     source: str | None = None
 
 
+class AdvancedSearchFilters(BaseModel):
+    no_permits_in_years: int | None = None
+    permit_status: list[str] | None = None
+    permit_types: list[str] | None = None
+    city: str | None = None
+    zip: str | None = None
+    min_score: int | None = None
+
+
+class AdvancedSearchRequest(BaseModel):
+    county: str | None = None
+    text: str | None = None
+    fields: list[str] = ["owner", "address", "parcel_id", "city", "zip"]
+    filters: AdvancedSearchFilters = AdvancedSearchFilters()
+    sort: str = (
+        "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
+    )
+    limit: int = 50
+
+
+class AdvancedSearchResult(BaseModel):
+    owner: str
+    address: str
+    county: str
+    score: int
+    parcel_id: str | None = None
+    source: str | None = None
+    last_permit_date: str | None = None
+    permits_last_15y_count: int = 0
+    matched_fields: list[str] = []
+
+
 _DB_ENV_VARS = ("LEADS_SQLITE_PATH", "LEADS_DB", "PA_DB")
 
 
@@ -290,35 +322,6 @@ if router:
             return []
         finally:
             conn.close()
-
-    class AdvancedSearchFilters(BaseModel):
-        no_permits_in_years: int | None = None
-        permit_status: list[str] | None = None
-        permit_types: list[str] | None = None
-        city: str | None = None
-        zip: str | None = None
-        min_score: int | None = None
-
-    class AdvancedSearchRequest(BaseModel):
-        county: str | None = None
-        text: str | None = None
-        fields: list[str] = ["owner", "address", "parcel_id", "city", "zip"]
-        filters: AdvancedSearchFilters = AdvancedSearchFilters()
-        sort: str = (
-            "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
-        )
-        limit: int = 50
-
-    class AdvancedSearchResult(BaseModel):
-        owner: str
-        address: str
-        county: str
-        score: int
-        parcel_id: str | None = None
-        source: str | None = None
-        last_permit_date: str | None = None
-        permits_last_15y_count: int = 0
-        matched_fields: list[str] = []
 
     @router.post("/search/advanced", response_model=list[AdvancedSearchResult])
     def search_advanced(request: AdvancedSearchRequest) -> list[AdvancedSearchResult]:
