@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { search, type SearchResult } from './lib/api';
+import { scrape, search, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -13,10 +13,7 @@ export default function App() {
 
   const activeRequestId = useRef(0);
 
-  const counties = useMemo(
-    () => ['Alachua', 'Broward', 'Duval', 'Hillsborough', 'Orange', 'Palm Beach'],
-    [],
-  );
+  const counties = useMemo(() => ['Seminole'], []);
 
   async function runSearch() {
     const requestId = activeRequestId.current + 1;
@@ -28,6 +25,34 @@ export default function App() {
 
     try {
       const next = await search(query, selectedCounty);
+      if (activeRequestId.current !== requestId) {
+        return;
+      }
+      setResults(next);
+    } catch (e) {
+      if (activeRequestId.current !== requestId) {
+        return;
+      }
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      setError(message);
+      setResults([]);
+    } finally {
+      if (activeRequestId.current === requestId) {
+        setLoading(false);
+      }
+    }
+  }
+
+  async function runScrape() {
+    const requestId = activeRequestId.current + 1;
+    activeRequestId.current = requestId;
+
+    setLoading(true);
+    setError(null);
+    setHasSearched(true);
+
+    try {
+      const next = await scrape(selectedCounty, query, 50);
       if (activeRequestId.current !== requestId) {
         return;
       }
@@ -85,9 +110,17 @@ export default function App() {
             type="button"
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
             onClick={() => void runSearch()}
-            disabled={loading}
+            disabled={loading || query.trim().length === 0}
           >
-            {loading ? 'Running…' : 'Run'}
+            {loading ? 'Running…' : 'Search'}
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50"
+            onClick={() => void runScrape()}
+            disabled={loading || query.trim().length === 0}
+          >
+            {loading ? 'Running…' : 'Scrape'}
           </button>
         </div>
       </header>
@@ -173,25 +206,27 @@ export default function App() {
                       <th className="px-3 py-2">Owner</th>
                       <th className="px-3 py-2">Address</th>
                       <th className="px-3 py-2">County</th>
+                      <th className="px-3 py-2">Parcel</th>
+                      <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Score</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={4}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={4}>
+                        <td className="px-3 py-3 text-red-700" colSpan={6}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={4}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -204,6 +239,21 @@ export default function App() {
                           <td className="px-3 py-2">{r.owner}</td>
                           <td className="px-3 py-2">{r.address}</td>
                           <td className="px-3 py-2">{r.county}</td>
+                          <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
+                          <td className="px-3 py-2">
+                            {r.source ? (
+                              <a
+                                className="text-slate-900 underline decoration-slate-300 hover:decoration-slate-600"
+                                href={r.source}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                link
+                              </a>
+                            ) : (
+                              ''
+                            )}
+                          </td>
                           <td className="px-3 py-2">{r.score}</td>
                         </tr>
                       ))
