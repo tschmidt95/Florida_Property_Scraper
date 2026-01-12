@@ -542,8 +542,8 @@ if app:
         return JSONResponse(payload)
 
     @app.get("/")
-    def index():
-        return FileResponse(WEB_DIR / "map.html")
+    def root():
+        return {"status": "ok", "message": "API running"}
 
     if WEB_DIR.exists():
         app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
