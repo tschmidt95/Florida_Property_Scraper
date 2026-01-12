@@ -1,9 +1,9 @@
 """Test permits sync API endpoint."""
+
 import os
 import tempfile
 from unittest import mock
 
-import pytest
 
 from florida_property_scraper.permits.models import PermitRecord
 

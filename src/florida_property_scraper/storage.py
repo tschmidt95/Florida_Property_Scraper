@@ -461,13 +461,13 @@ class SQLiteStore:
 
     def upsert_many_permits(self, records: List[Dict[str, Any]]) -> None:
         """Upsert multiple permit records.
-        
+
         Args:
             records: List of permit dictionaries with keys matching PermitRecord fields
         """
         if not records:
             return
-        
+
         for record in records:
             self.conn.execute(
                 """

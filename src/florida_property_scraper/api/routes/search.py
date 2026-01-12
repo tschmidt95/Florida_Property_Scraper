@@ -310,7 +310,9 @@ if router:
         text: str | None = None
         fields: list[str] = []  # owner, address, parcel_id, city, zip
         filters: AdvancedSearchFilters = AdvancedSearchFilters()
-        sort: str = "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
+        sort: str = (
+            "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
+        )
         limit: int = 50
 
     class AdvancedSearchResult(BaseModel):
@@ -395,7 +397,6 @@ def _advanced_search_leads(
     has_permits: bool,
 ) -> list[AdvancedSearchResult]:
     """Perform advanced search on leads table."""
-    from pydantic import BaseModel
 
     cols = _table_columns(conn, "leads")
 
@@ -411,7 +412,6 @@ def _advanced_search_leads(
     # Build WHERE clause
     where_parts: list[str] = []
     params: list[Any] = []
-    matched_fields_map: dict[str, list[str]] = {}
 
     if county:
         where_parts.append("LOWER(TRIM(leads.county)) = LOWER(TRIM(?))")
@@ -510,7 +510,9 @@ def _advanced_search_leads(
 
     parcel_select = "leads.parcel_id" if "parcel_id" in cols else "''"
     source_select = (
-        "leads.source_url" if "source_url" in cols else "leads.property_url"
+        "leads.source_url"
+        if "source_url" in cols
+        else "leads.property_url"
         if "property_url" in cols
         else "''"
     )

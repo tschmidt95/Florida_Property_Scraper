@@ -1,4 +1,5 @@
 """Permits scraper registry."""
+
 from typing import Optional, Protocol
 
 from florida_property_scraper.permits.models import PermitRecord
@@ -14,17 +15,18 @@ class PermitsScraper(Protocol):
 
 def get_permits_scraper(county: str) -> Optional[PermitsScraper]:
     """Get permits scraper for a given county.
-    
+
     Args:
         county: County name (lowercase, e.g., 'seminole')
-        
+
     Returns:
         PermitsScraper instance or None if county not supported
     """
     county_lower = county.lower().strip()
-    
+
     if county_lower == "seminole":
         from florida_property_scraper.permits.seminole import SeminolePermitsScraper
+
         return SeminolePermitsScraper()
-    
+
     return None
