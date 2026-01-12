@@ -91,7 +91,7 @@ def test_permits_sync_monkeypatched():
             mock_scraper.search_permits.return_value = fake_permits
 
             with patch(
-                "florida_property_scraper.api.routes.permits.get_permits_scraper",
+                "florida_property_scraper.permits.registry.get_permits_scraper",
                 return_value=mock_scraper,
             ):
                 client = TestClient(app)

@@ -409,10 +409,10 @@ def _advanced_search_from_leads(
         if isinstance(col_names, list):
             for col in col_names:
                 if col in cols:
-                    match_parts.append(f"LOWER({col}) LIKE ?")
+                    match_parts.append(f"LOWER(leads.{col}) LIKE ?")
                     params.append(like)
         elif col_names in cols:
-            match_parts.append(f"LOWER({col_names}) LIKE ?")
+            match_parts.append(f"LOWER(leads.{col_names}) LIKE ?")
             params.append(like)
 
     if not match_parts:
@@ -428,7 +428,7 @@ def _advanced_search_from_leads(
     # Apply filters
     min_score = filters.get("min_score")
     if min_score is not None and "lead_score" in cols:
-        where_parts.append("lead_score >= ?")
+        where_parts.append("leads.lead_score >= ?")
         params.append(int(min_score))
 
     # Build base query with permits aggregation
@@ -443,9 +443,9 @@ def _advanced_search_from_leads(
     mailing_col = "mailing_address" if "mailing_address" in cols else None
     address_expr_parts = []
     if situs_col:
-        address_expr_parts.append(f"NULLIF({situs_col}, '')")
+        address_expr_parts.append(f"NULLIF(leads.{situs_col}, '')")
     if mailing_col:
-        address_expr_parts.append(f"NULLIF({mailing_col}, '')")
+        address_expr_parts.append(f"NULLIF(leads.{mailing_col}, '')")
     address_expr = "COALESCE(" + ", ".join(address_expr_parts + ["''"]) + ")"
 
     score_col = "lead_score" if "lead_score" in cols else None
@@ -453,15 +453,15 @@ def _advanced_search_from_leads(
 
     # Score calculation
     if score_col:
-        score_sql = f"COALESCE({score_col}, 0)"
+        score_sql = f"COALESCE(leads.{score_col}, 0)"
         score_params: list[Any] = []
     else:
         score_sql = "CASE "
         score_params = []
         if parcel_col:
-            score_sql += f"WHEN instr(LOWER(COALESCE({parcel_col},'')), ?) > 0 THEN 95 "
+            score_sql += f"WHEN instr(LOWER(COALESCE(leads.{parcel_col},'')), ?) > 0 THEN 95 "
             score_params.append(text_lower)
-        score_sql += f"WHEN instr(LOWER(COALESCE({owner_col},'')), ?) > 0 THEN 90 "
+        score_sql += f"WHEN instr(LOWER(COALESCE(leads.{owner_col},'')), ?) > 0 THEN 90 "
         score_params.append(text_lower)
         score_sql += f"WHEN instr(LOWER({address_expr}), ?) > 0 THEN 80 "
         score_params.append(text_lower)
@@ -492,11 +492,11 @@ def _advanced_search_from_leads(
 
     sql = f"""
         SELECT
-            {owner_col} AS owner,
+            leads.{owner_col} AS owner,
             {address_expr} AS address,
-            {county_col} AS county,
-            {parcel_col} AS parcel_id,
-            {source_col if source_col else "''"} AS source,
+            leads.{county_col} AS county,
+            leads.{parcel_col} AS parcel_id,
+            {('leads.' + source_col) if source_col else "''"} AS source,
             {score_sql} AS score,
             {last_permit_select} AS last_permit_date,
             {permits_count_select} AS permits_last_15y_count
