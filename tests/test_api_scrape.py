@@ -29,7 +29,7 @@ def test_api_scrape_uses_scraper_and_persists(tmp_path, monkeypatch):
     db_path = tmp_path / "leads.sqlite"
     monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
 
-    # Patch where get_scraper is used in the scrape route module.
+    # Patch where get_scraper is used (scrape route imports it at module import time).
     import florida_property_scraper.api.routes.scrape as scrape_module
 
     monkeypatch.setattr(scrape_module, "get_scraper", lambda county: _FakeScraper())

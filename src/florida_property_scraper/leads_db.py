@@ -135,13 +135,11 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
     if schema.kind == "new":
         for r in items:
             if r.parcel_id:
-                # Check if exists with this county+parcel_id.
                 existing = conn.execute(
                     "SELECT id FROM leads WHERE county = ? AND parcel_id = ? LIMIT 1",
                     (r.county, r.parcel_id),
                 ).fetchone()
                 if existing:
-                    # Update existing record.
                     conn.execute(
                         """
                         UPDATE leads
@@ -158,7 +156,6 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
                         ),
                     )
                 else:
-                    # Insert new record.
                     conn.execute(
                         """
                         INSERT INTO leads (owner, address, county, parcel_id, source, score)
