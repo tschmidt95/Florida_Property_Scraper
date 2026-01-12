@@ -1,4 +1,5 @@
 """Data models for permit records."""
+
 from typing import Optional
 from pydantic import BaseModel
 

@@ -53,7 +53,7 @@ export default function App() {
         sort: sortBy,
         limit: 50,
       });
-      
+
       if (activeRequestId.current !== requestId) {
         return;
       }

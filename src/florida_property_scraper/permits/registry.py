@@ -1,4 +1,5 @@
 """Registry for county-specific permit scrapers."""
+
 from typing import Dict, Type
 
 from florida_property_scraper.permits.base import PermitScraperBase

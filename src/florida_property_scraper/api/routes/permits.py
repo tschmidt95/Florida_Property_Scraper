@@ -1,4 +1,5 @@
 """Permits API endpoints."""
+
 try:
     from fastapi import APIRouter, Body, HTTPException
 

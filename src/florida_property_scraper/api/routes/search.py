@@ -322,7 +322,7 @@ def _advanced_search_from_leads(
 ) -> list[SearchResult]:
     """Advanced search implementation for leads table."""
     cols = _table_columns(conn, "leads")
-    
+
     # Map field names to column names
     field_map = {
         "owner": "owner_name",
@@ -334,52 +334,54 @@ def _advanced_search_from_leads(
         "city": "city",
         "zip": "zip",
     }
-    
+
     # Validate requested fields exist in table
     search_fields = []
     for field in request.fields:
         col_name = field_map.get(field, field)
         if col_name in cols:
             search_fields.append(col_name)
-    
+
     if not search_fields:
         # No valid fields to search
         return []
-    
+
     q = _norm(request.text or "")
     q_lower = q.lower()
     like = _like_param(q)
     county = _norm(request.county or "")
     limit = _clamp_limit(request.limit)
-    
+
     # Build WHERE clause
     where_parts: list[str] = []
     params: list[Any] = []
-    
+
     if county:
         where_parts.append("LOWER(TRIM(county)) = LOWER(TRIM(?))")
         params.append(county)
-    
+
     # Text search on selected fields only
     if q:
-        match_parts = [f"LOWER(COALESCE({field}, '')) LIKE ?" for field in search_fields]
+        match_parts = [
+            f"LOWER(COALESCE({field}, '')) LIKE ?" for field in search_fields
+        ]
         where_parts.append(f"({' OR '.join(match_parts)})")
         params.extend([like] * len(search_fields))
-    
+
     # Filters
     if request.filters.city:
         if "city" in cols:
             where_parts.append("LOWER(TRIM(city)) = LOWER(TRIM(?))")
             params.append(request.filters.city)
-    
+
     if request.filters.zip:
         if "zip" in cols:
             where_parts.append("zip = ?")
             params.append(request.filters.zip)
-    
+
     # Build base query
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
-    
+
     # Score calculation
     score_col = "lead_score" if "lead_score" in cols else None
     if score_col and not q:
@@ -391,22 +393,24 @@ def _advanced_search_from_leads(
         score_params = []
         for i, field in enumerate(search_fields):
             priority = 90 - (i * 5)  # First field gets highest priority
-            score_sql += f"WHEN instr(LOWER(COALESCE({field}, '')), ?) > 0 THEN {priority} "
+            score_sql += (
+                f"WHEN instr(LOWER(COALESCE({field}, '')), ?) > 0 THEN {priority} "
+            )
             score_params.append(q_lower)
         score_sql += "ELSE 70 END"
     else:
         score_sql = "50"
         score_params = []
-    
+
     # Build main query
     owner_col = "owner_name" if "owner_name" in cols else "''"
     situs_col = "situs_address" if "situs_address" in cols else "''"
     mailing_col = "mailing_address" if "mailing_address" in cols else "''"
     parcel_col = "parcel_id" if "parcel_id" in cols else "''"
     source_col = "source_url" if "source_url" in cols else "''"
-    
+
     address_expr = f"COALESCE(NULLIF({situs_col}, ''), NULLIF({mailing_col}, ''), '')"
-    
+
     sql = f"""
         SELECT
             {owner_col} AS owner,
@@ -419,12 +423,12 @@ def _advanced_search_from_leads(
         FROM leads
         WHERE {where_clause}
     """
-    
+
     # Min score filter
     if request.filters.min_score is not None:
         sql += f" AND ({score_sql}) >= ?"
         params.append(request.filters.min_score)
-    
+
     # Join with permits if needed
     has_permits_table = _table_exists(conn, "permits")
     if has_permits_table:
@@ -455,12 +459,14 @@ def _advanced_search_from_leads(
         FROM base_results br
         LEFT JOIN permit_agg pa ON br.county = pa.county AND br.parcel_for_join = pa.parcel_id
         """
-        
+
         # Apply no_permits_in_years filter
         if request.filters.no_permits_in_years is not None:
             years = request.filters.no_permits_in_years
-            cutoff_date = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
-            sql += f" WHERE (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
+            cutoff_date = (datetime.now() - timedelta(days=years * 365)).strftime(
+                "%Y-%m-%d"
+            )
+            sql += " WHERE (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
             params.append(cutoff_date)
     else:
         # No permits table - add null columns
@@ -479,7 +485,7 @@ def _advanced_search_from_leads(
             0 AS permits_last_15y_count
         FROM base_results
         """
-    
+
     # Sort
     if request.sort == "score_desc":
         sql += " ORDER BY score DESC"
@@ -489,14 +495,14 @@ def _advanced_search_from_leads(
         sql += " ORDER BY last_permit_date DESC NULLS LAST"
     else:  # relevance (default)
         sql += " ORDER BY score DESC"
-    
-    sql += f" LIMIT ?"
+
+    sql += " LIMIT ?"
     params.append(limit)
-    
+
     # Execute query
     all_params = tuple(score_params) + tuple(params)
     rows = conn.execute(sql, all_params).fetchall()
-    
+
     results: list[SearchResult] = []
     for row in rows:
         # Determine matched fields
@@ -510,7 +516,7 @@ def _advanced_search_from_leads(
                         if col_name == field and req_field in request.fields:
                             matched.append(req_field)
                             break
-        
+
         results.append(
             SearchResult(
                 owner=str(row["owner"] or ""),
@@ -519,22 +525,26 @@ def _advanced_search_from_leads(
                 score=int(row["score"] or 0),
                 parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
                 source=str(row["source"]) if row.get("source") else None,
-                last_permit_date=str(row["last_permit_date"]) if row.get("last_permit_date") else None,
+                last_permit_date=str(row["last_permit_date"])
+                if row.get("last_permit_date")
+                else None,
                 permits_last_15y_count=int(row.get("permits_last_15y_count", 0)),
                 matched_fields=matched,
             )
         )
-    
+
     return results
 
 
 if router:
 
     @router.post("/search/advanced", response_model=list[SearchResult])
-    def advanced_search(request: AdvancedSearchRequest = Body(...)) -> list[SearchResult]:
+    def advanced_search(
+        request: AdvancedSearchRequest = Body(...),
+    ) -> list[SearchResult]:
         """
         Advanced search with field selection, filters, and permits enrichment.
-        
+
         - Only searches the fields specified in 'fields' array
         - Supports filters: no_permits_in_years, city, zip, min_score
         - Enriches results with permit data if available
@@ -543,7 +553,7 @@ if router:
         db_path = _get_db_path()
         if not db_path.exists():
             return []
-        
+
         conn = _connect(db_path)
         try:
             if _table_exists(conn, "leads"):

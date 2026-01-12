@@ -4,10 +4,11 @@ Seminole County Permit Scraper.
 Target portal: https://semc-egov.aspgov.com/Click2GovBP/
 This scraper targets the Click2GovBP building permit portal for Seminole County, FL.
 """
+
 import os
 import time
 from typing import List
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -51,7 +52,10 @@ class SeminolePermitScraper(PermitScraperBase):
 
             # Check if this looks like a permits table
             header_row = rows[0]
-            headers = [th.get_text(strip=True).lower() for th in header_row.find_all(["th", "td"])]
+            headers = [
+                th.get_text(strip=True).lower()
+                for th in header_row.find_all(["th", "td"])
+            ]
 
             # Look for permit-related headers
             has_permit_headers = any(
@@ -94,13 +98,28 @@ class SeminolePermitScraper(PermitScraperBase):
                     # Address pattern (contains numbers and street keywords)
                     elif not address and any(
                         keyword in text.upper()
-                        for keyword in [" ST", " RD", " AVE", " BLVD", " DR", " LN", " WAY"]
+                        for keyword in [
+                            " ST",
+                            " RD",
+                            " AVE",
+                            " BLVD",
+                            " DR",
+                            " LN",
+                            " WAY",
+                        ]
                     ):
                         address = text
                     # Status keywords
                     elif not status and any(
                         keyword in text.upper()
-                        for keyword in ["ISSUED", "APPROVED", "PENDING", "FINALED", "CLOSED", "ACTIVE"]
+                        for keyword in [
+                            "ISSUED",
+                            "APPROVED",
+                            "PENDING",
+                            "FINALED",
+                            "CLOSED",
+                            "ACTIVE",
+                        ]
                     ):
                         status = text
                     # Date pattern (MM/DD/YYYY or similar)
@@ -129,9 +148,7 @@ class SeminolePermitScraper(PermitScraperBase):
 
         return permits
 
-    def search_permits(
-        self, query: str, limit: int = 50
-    ) -> List[PermitRecord]:
+    def search_permits(self, query: str, limit: int = 50) -> List[PermitRecord]:
         """
         Search for permits on Click2GovBP portal.
 
@@ -172,12 +189,11 @@ class SeminolePermitScraper(PermitScraperBase):
         # Implement retry logic with exponential backoff
         max_retries = 3
         backoff_factor = 2.0
-        last_exception = None
 
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
-                    sleep_time = backoff_factor ** attempt
+                    sleep_time = backoff_factor**attempt
                     time.sleep(sleep_time)
 
                 # Make the search request
@@ -196,7 +212,6 @@ class SeminolePermitScraper(PermitScraperBase):
                 return permits[:limit]
 
             except Exception as e:
-                last_exception = e
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Failed to fetch permits after {max_retries} attempts: {e}"

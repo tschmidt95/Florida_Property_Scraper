@@ -1,4 +1,5 @@
 """Test permits sync API endpoint (no live HTTP)."""
+
 import pytest
 
 try:
@@ -64,7 +65,7 @@ def test_permits_sync_with_mock_scraper(monkeypatch, tmp_path):
         ),
     ]
 
-    def mock_search_permits(query, limit):
+    def mock_search_permits(self, query, limit):
         return fake_permits
 
     # Patch the scraper
@@ -82,7 +83,13 @@ def test_permits_sync_with_mock_scraper(monkeypatch, tmp_path):
             json={"county": "seminole", "query": "123 Test St", "limit": 10},
         )
 
-        assert response.status_code == 200
+        # Debug: print response details
+        print(f"\nResponse status: {response.status_code}")
+        print(f"Response text: {response.text}")
+
+        assert response.status_code == 200, (
+            f"Expected 200 but got {response.status_code}: {response.text}"
+        )
         data = response.json()
         assert len(data) == 2
         assert data[0]["permit_number"] == "BP-2023-001"
@@ -94,7 +101,9 @@ def test_permits_sync_with_mock_scraper(monkeypatch, tmp_path):
 
         store = SQLiteStore(str(db_path))
         try:
-            rows = store.conn.execute("SELECT * FROM permits ORDER BY permit_number").fetchall()
+            rows = store.conn.execute(
+                "SELECT * FROM permits ORDER BY permit_number"
+            ).fetchall()
             assert len(rows) == 2
             assert rows[0]["permit_number"] == "BP-2023-001"
             assert rows[1]["permit_number"] == "BP-2023-002"
