@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { search, type SearchResult } from './lib/api';
+import { advancedSearch, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -10,6 +10,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+
+  // Advanced search state
+  const [searchFields, setSearchFields] = useState({
+    owner_name: true,
+    situs_address: true,
+    parcel_id: true,
+    city: false,
+    zip: false,
+  });
+  const [noPermitsYears, setNoPermitsYears] = useState(15);
+  const [sortBy, setSortBy] = useState<'relevance' | 'score_desc' | 'last_permit_oldest' | 'last_permit_newest'>('relevance');
 
   const activeRequestId = useRef(0);
 
@@ -27,7 +38,22 @@ export default function App() {
     setHasSearched(true);
 
     try {
-      const next = await search(query, selectedCounty);
+      // Build fields list
+      const fields = Object.entries(searchFields)
+        .filter(([_, enabled]) => enabled)
+        .map(([field, _]) => field);
+
+      const next = await advancedSearch({
+        county: selectedCounty,
+        text: query || null,
+        fields,
+        filters: {
+          no_permits_in_years: noPermitsYears > 0 ? noPermitsYears : null,
+        },
+        sort: sortBy,
+        limit: 50,
+      });
+
       if (activeRequestId.current !== requestId) {
         return;
       }
@@ -134,6 +160,116 @@ export default function App() {
               </label>
             </div>
           </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Search in
+            </div>
+            <div className="mt-2 space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={searchFields.owner_name}
+                  onChange={(e) =>
+                    setSearchFields({ ...searchFields, owner_name: e.target.checked })
+                  }
+                />
+                <span>Owner Name</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={searchFields.situs_address}
+                  onChange={(e) =>
+                    setSearchFields({ ...searchFields, situs_address: e.target.checked })
+                  }
+                />
+                <span>Address</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={searchFields.parcel_id}
+                  onChange={(e) =>
+                    setSearchFields({ ...searchFields, parcel_id: e.target.checked })
+                  }
+                />
+                <span>Parcel ID</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-400">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={searchFields.city}
+                  onChange={(e) =>
+                    setSearchFields({ ...searchFields, city: e.target.checked })
+                  }
+                  disabled
+                />
+                <span>City (not available)</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-400">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300"
+                  checked={searchFields.zip}
+                  onChange={(e) =>
+                    setSearchFields({ ...searchFields, zip: e.target.checked })
+                  }
+                  disabled
+                />
+                <span>ZIP (not available)</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Filters
+            </div>
+            <div className="mt-2">
+              <label className="text-sm font-medium">No permits in last</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="number"
+                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-sm"
+                  value={noPermitsYears}
+                  onChange={(e) => setNoPermitsYears(parseInt(e.target.value) || 0)}
+                  min="0"
+                />
+                <span className="text-sm text-slate-600">years</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Sort by
+            </div>
+            <div className="mt-2">
+              <select
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
+                value={sortBy}
+                onChange={(e) =>
+                  setSortBy(
+                    e.target.value as
+                      | 'relevance'
+                      | 'score_desc'
+                      | 'last_permit_oldest'
+                      | 'last_permit_newest',
+                  )
+                }
+              >
+                <option value="relevance">Relevance</option>
+                <option value="score_desc">Score (High to Low)</option>
+                <option value="last_permit_oldest">Last Permit (Oldest)</option>
+                <option value="last_permit_newest">Last Permit (Newest)</option>
+              </select>
+            </div>
+          </div>
         </aside>
 
         <main className="flex-1 p-4">
@@ -176,24 +312,26 @@ export default function App() {
                       <th className="px-3 py-2">Parcel</th>
                       <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Score</th>
+                      <th className="px-3 py-2">Last Permit</th>
+                      <th className="px-3 py-2">Permits(15y)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={8}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={6}>
+                        <td className="px-3 py-3 text-red-700" colSpan={8}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={8}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -209,6 +347,12 @@ export default function App() {
                           <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
                           <td className="px-3 py-2">{r.source ?? ''}</td>
                           <td className="px-3 py-2">{r.score}</td>
+                          <td className="px-3 py-2">
+                            {r.last_permit_date ?? '-'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.permits_last_15y_count ?? 0}
+                          </td>
                         </tr>
                       ))
                     )}
