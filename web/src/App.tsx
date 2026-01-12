@@ -1,11 +1,24 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { search, type SearchResult } from './lib/api';
+import { advancedSearch, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
   const [selectedCounty, setSelectedCounty] = useState('Orange');
+  const [searchFields, setSearchFields] = useState({
+    owner: true,
+    address: true,
+    parcel_id: true,
+    city: false,
+    zip: false,
+  });
+  const [noPermitsYears, setNoPermitsYears] = useState(15);
+  const [permitStatus, setPermitStatus] = useState<string>('');
+  const [permitTypes, setPermitTypes] = useState<string>('');
+  const [sort, setSort] = useState<
+    'relevance' | 'score_desc' | 'last_permit_oldest' | 'last_permit_newest'
+  >('relevance');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +31,16 @@ export default function App() {
     [],
   );
 
+  const selectedFields = useMemo(() => {
+    const out: Array<'owner' | 'address' | 'parcel_id' | 'city' | 'zip'> = [];
+    if (searchFields.owner) out.push('owner');
+    if (searchFields.address) out.push('address');
+    if (searchFields.parcel_id) out.push('parcel_id');
+    if (searchFields.city) out.push('city');
+    if (searchFields.zip) out.push('zip');
+    return out;
+  }, [searchFields]);
+
   async function runSearch() {
     const requestId = activeRequestId.current + 1;
     activeRequestId.current = requestId;
@@ -27,7 +50,35 @@ export default function App() {
     setHasSearched(true);
 
     try {
-      const next = await search(query, selectedCounty);
+      if (selectedFields.length === 0) {
+        setError('Select at least one field to search in.');
+        setResults([]);
+        return;
+      }
+
+      const permitStatusList = permitStatus.trim()
+        ? [permitStatus.trim()]
+        : null;
+      const permitTypesList = permitTypes
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      const next = await advancedSearch({
+        county: selectedCounty,
+        text: query.trim().length > 0 ? query.trim() : null,
+        fields: selectedFields,
+        filters: {
+          no_permits_in_years: Number.isFinite(noPermitsYears) ? noPermitsYears : 15,
+          permit_status: permitStatusList,
+          permit_types: permitTypesList.length ? permitTypesList : null,
+          city: null,
+          zip: null,
+          min_score: null,
+        },
+        sort,
+        limit: 50,
+      });
       if (activeRequestId.current !== requestId) {
         return;
       }
@@ -134,6 +185,118 @@ export default function App() {
               </label>
             </div>
           </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Search In
+            </div>
+            <div className="mt-2 space-y-2 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={searchFields.owner}
+                  onChange={(e) =>
+                    setSearchFields((s) => ({ ...s, owner: e.target.checked }))
+                  }
+                />
+                Owner
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={searchFields.address}
+                  onChange={(e) =>
+                    setSearchFields((s) => ({ ...s, address: e.target.checked }))
+                  }
+                />
+                Address
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={searchFields.parcel_id}
+                  onChange={(e) =>
+                    setSearchFields((s) => ({ ...s, parcel_id: e.target.checked }))
+                  }
+                />
+                Parcel ID
+              </label>
+              <label className="flex items-center gap-2 opacity-60">
+                <input type="checkbox" checked={false} disabled />
+                City (requires DB column)
+              </label>
+              <label className="flex items-center gap-2 opacity-60">
+                <input type="checkbox" checked={false} disabled />
+                ZIP (requires DB column)
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Filters
+            </div>
+            <div className="mt-2 space-y-3 text-sm">
+              <label className="block">
+                <div className="text-xs text-slate-500">No permits in last N years</div>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={noPermitsYears}
+                  onChange={(e) => setNoPermitsYears(Number(e.target.value))}
+                />
+              </label>
+
+              <label className="block">
+                <div className="text-xs text-slate-500">Permit status</div>
+                <select
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
+                  value={permitStatus}
+                  onChange={(e) => setPermitStatus(e.target.value)}
+                >
+                  <option value="">Any</option>
+                  <option value="Open">Open</option>
+                  <option value="Closed">Closed</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <div className="text-xs text-slate-500">Permit types (comma-separated)</div>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
+                  placeholder="Building, Electrical"
+                  value={permitTypes}
+                  onChange={(e) => setPermitTypes(e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Sort
+            </div>
+            <select
+              className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
+              value={sort}
+              onChange={(e) =>
+                setSort(
+                  e.target.value as
+                    | 'relevance'
+                    | 'score_desc'
+                    | 'last_permit_oldest'
+                    | 'last_permit_newest',
+                )
+              }
+            >
+              <option value="relevance">Relevance</option>
+              <option value="score_desc">Score (desc)</option>
+              <option value="last_permit_newest">Last permit newest</option>
+              <option value="last_permit_oldest">Last permit oldest</option>
+            </select>
+          </div>
         </aside>
 
         <main className="flex-1 p-4">
@@ -174,6 +337,8 @@ export default function App() {
                       <th className="px-3 py-2">Address</th>
                       <th className="px-3 py-2">County</th>
                       <th className="px-3 py-2">Parcel</th>
+                      <th className="px-3 py-2">Last Permit</th>
+                      <th className="px-3 py-2">Permits (15y)</th>
                       <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Score</th>
                     </tr>
@@ -181,19 +346,19 @@ export default function App() {
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={8}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={6}>
+                        <td className="px-3 py-3 text-red-700" colSpan={8}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={8}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -207,6 +372,8 @@ export default function App() {
                           <td className="px-3 py-2">{r.address}</td>
                           <td className="px-3 py-2">{r.county}</td>
                           <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
+                          <td className="px-3 py-2">{r.last_permit_date ?? ''}</td>
+                          <td className="px-3 py-2">{r.permits_last_15y_count ?? 0}</td>
                           <td className="px-3 py-2">{r.source ?? ''}</td>
                           <td className="px-3 py-2">{r.score}</td>
                         </tr>

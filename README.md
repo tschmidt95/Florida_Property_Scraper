@@ -61,6 +61,19 @@ Optional live smoke tests:
 
 ---
 
+## Permits (WIP)
+
+Chosen Florida public permits portal (Phase 1 discovery):
+
+- Seminole County, FL: https://semc-egov.aspgov.com/Click2GovBP/
+
+Notes:
+
+- CI never hits live websites.
+- Live permits sync is **explicitly gated**: set `LIVE=1` to enable `/api/permits/sync`.
+
+---
+
 ## Map Mode (planned)
 
 ## Native backend
