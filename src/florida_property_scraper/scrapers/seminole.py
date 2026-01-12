@@ -31,9 +31,13 @@ class _RateLimiter:
         self._last_at = _now()
 
 
-def _get_robot_parser(base_url: str, *, session: requests.Session, timeout: float) -> urllib.robotparser.RobotFileParser:
+def _get_robot_parser(
+    base_url: str, *, session: requests.Session, timeout: float
+) -> urllib.robotparser.RobotFileParser:
     parsed = urllib.parse.urlparse(base_url)
-    robots_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
+    robots_url = urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, "/robots.txt", "", "", "")
+    )
 
     rp = urllib.robotparser.RobotFileParser()
     rp.set_url(robots_url)
@@ -62,7 +66,9 @@ def _score(query: str, owner: str, address: str) -> int:
     return 60
 
 
-def parse_results(html: str, *, county: str, query: str, base_url: str) -> list[SearchResult]:
+def parse_results(
+    html: str, *, county: str, query: str, base_url: str
+) -> list[SearchResult]:
     """Parse Seminole HTML into SearchResults.
 
     This is intentionally conservative and fixture-friendly: it looks for repeated "card"/"result" containers
@@ -100,7 +106,9 @@ def parse_results(html: str, *, county: str, query: str, base_url: str) -> list[
     def find_value(lines: list[str], labels: set[str]) -> str:
         for idx, line in enumerate(lines):
             lower = line.lower().strip()
-            if lower in labels or any(lower.startswith(l + ":") for l in labels):
+            if lower in labels or any(
+                lower.startswith(label + ":") for label in labels
+            ):
                 if ":" in line:
                     after = line.split(":", 1)[1].strip()
                     if after:
@@ -112,7 +120,20 @@ def parse_results(html: str, *, county: str, query: str, base_url: str) -> list[
     def find_address_like(lines: list[str]) -> str:
         for line in lines:
             # naive street-ish heuristic
-            if any(ch.isdigit() for ch in line) and any(tok in line.upper() for tok in [" ST", " AVE", " RD", " DR", " BLVD", " WAY", " LN", " CT", " PL"]):
+            if any(ch.isdigit() for ch in line) and any(
+                tok in line.upper()
+                for tok in [
+                    " ST",
+                    " AVE",
+                    " RD",
+                    " DR",
+                    " BLVD",
+                    " WAY",
+                    " LN",
+                    " CT",
+                    " PL",
+                ]
+            ):
                 return line
         for line in lines:
             if line[:1].isdigit():
@@ -164,7 +185,14 @@ class SeminoleScraper:
         )
         self._limiter = _RateLimiter(min_interval_s=1.0)
 
-    def _request(self, method: str, url: str, *, data: dict[str, str] | None = None, timeout: float = 20.0) -> requests.Response:
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        data: dict[str, str] | None = None,
+        timeout: float = 20.0,
+    ) -> requests.Response:
         # Rate limit: 1 req/sec.
         self._limiter.wait()
 
@@ -197,7 +225,9 @@ class SeminoleScraper:
 
         # robots.txt best-effort.
         rp = _get_robot_parser(base_url, session=self._session, timeout=10.0)
-        if not rp.can_fetch(self._session.headers.get("User-Agent", _DEFAULT_UA), base_url):
+        if not rp.can_fetch(
+            self._session.headers.get("User-Agent", _DEFAULT_UA), base_url
+        ):
             return []
 
         # This endpoint is configured as a form POST in existing coverage metadata.
@@ -205,5 +235,7 @@ class SeminoleScraper:
         if resp.status_code != 200:
             return []
 
-        results = parse_results(resp.text, county=self.county, query=q, base_url=base_url)
+        results = parse_results(
+            resp.text, county=self.county, query=q, base_url=base_url
+        )
         return results[:limit]

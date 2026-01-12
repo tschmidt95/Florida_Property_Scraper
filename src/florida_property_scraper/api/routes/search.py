@@ -16,7 +16,9 @@ router = APIRouter(tags=["search"]) if FASTAPI_AVAILABLE else None
 if router:
 
     @router.get("/search", response_model=list[SearchResult])
-    def search(q: str, county: str | None = None, limit: int = 50) -> list[SearchResult]:
+    def search(
+        q: str, county: str | None = None, limit: int = 50
+    ) -> list[SearchResult]:
         limit = max(1, min(int(limit or 50), 200))
         with open_conn() as conn:
             return db_search(conn, q=q, county=county, limit=limit)

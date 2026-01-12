@@ -1,4 +1,3 @@
-import os
 import sqlite3
 
 from florida_property_scraper.api.app import app

@@ -5,7 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from florida_property_scraper.leads_models import SearchResult
 
@@ -195,8 +195,10 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
 
     # Choose address destination.
     address_col = "situs_address" if "situs_address" in cols else "mailing_address"
-    source_col = "source_url" if "source_url" in cols else (
-        "property_url" if "property_url" in cols else None
+    source_col = (
+        "source_url"
+        if "source_url" in cols
+        else ("property_url" if "property_url" in cols else None)
     )
     score_col = "lead_score" if "lead_score" in cols else None
 
@@ -221,7 +223,9 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
                 values["dedupe_key"] = key
             else:
                 # Best-effort key when parcel_id missing.
-                values["dedupe_key"] = f"{r.county.lower()}::{r.owner.lower()}::{r.address.lower()}"
+                values["dedupe_key"] = (
+                    f"{r.county.lower()}::{r.owner.lower()}::{r.address.lower()}"
+                )
 
         insert_cols = [c for c in values.keys() if c in cols]
         if not insert_cols:
@@ -234,7 +238,9 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
         if has_dedupe and "dedupe_key" in insert_cols:
             conn.execute(
                 f"INSERT INTO leads ({columns_sql}) VALUES ({placeholders}) ON CONFLICT(dedupe_key) DO UPDATE SET "
-                + ", ".join([f"{c}=excluded.{c}" for c in insert_cols if c != "dedupe_key"]),
+                + ", ".join(
+                    [f"{c}=excluded.{c}" for c in insert_cols if c != "dedupe_key"]
+                ),
                 payload,
             )
         else:
@@ -298,18 +304,26 @@ def search(
 
     # Legacy search.
     cols = _get_columns(conn, "leads")
-    owner_col = "owner_name" if "owner_name" in cols else ("owner" if "owner" in cols else None)
+    owner_col = (
+        "owner_name" if "owner_name" in cols else ("owner" if "owner" in cols else None)
+    )
     if not owner_col:
         return []
 
-    address_col = "situs_address" if "situs_address" in cols else (
-        "mailing_address" if "mailing_address" in cols else None
+    address_col = (
+        "situs_address"
+        if "situs_address" in cols
+        else ("mailing_address" if "mailing_address" in cols else None)
     )
     parcel_col = "parcel_id" if "parcel_id" in cols else None
-    source_col = "source_url" if "source_url" in cols else (
-        "property_url" if "property_url" in cols else None
+    source_col = (
+        "source_url"
+        if "source_url" in cols
+        else ("property_url" if "property_url" in cols else None)
     )
-    score_col = "lead_score" if "lead_score" in cols else ("score" if "score" in cols else None)
+    score_col = (
+        "lead_score" if "lead_score" in cols else ("score" if "score" in cols else None)
+    )
 
     select_cols = ["county", owner_col]
     if address_col:
