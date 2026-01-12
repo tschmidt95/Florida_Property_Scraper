@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from florida_property_scraper.schema import normalize_item
+from florida_property_scraper.permits.models import PermitRecord
 
 
 class SQLiteStorage:
@@ -199,6 +200,90 @@ class SQLiteStore:
         )
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_property_time ON events(property_uid, event_at DESC)"
+        )
+
+        # Permits (joinable by county + parcel_id when available)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS permits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                address TEXT,
+                permit_number TEXT NOT NULL,
+                permit_type TEXT,
+                status TEXT,
+                issue_date TEXT,
+                final_date TEXT,
+                description TEXT,
+                source TEXT,
+                raw TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_permits_county_permit_number ON permits(county, permit_number)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_county_parcel_id ON permits(county, parcel_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_issue_date ON permits(issue_date)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_final_date ON permits(final_date)"
+        )
+        self.conn.commit()
+
+    def upsert_many_permits(self, records: List[PermitRecord]) -> None:
+        if not records:
+            return
+
+        payload = [
+            (
+                r.county,
+                r.parcel_id,
+                r.address,
+                r.permit_number,
+                r.permit_type,
+                r.status,
+                r.issue_date,
+                r.final_date,
+                r.description,
+                r.source,
+                r.raw,
+            )
+            for r in records
+        ]
+
+        self.conn.executemany(
+            """
+            INSERT INTO permits (
+                county,
+                parcel_id,
+                address,
+                permit_number,
+                permit_type,
+                status,
+                issue_date,
+                final_date,
+                description,
+                source,
+                raw
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, permit_number) DO UPDATE SET
+                parcel_id=excluded.parcel_id,
+                address=excluded.address,
+                permit_type=excluded.permit_type,
+                status=excluded.status,
+                issue_date=excluded.issue_date,
+                final_date=excluded.final_date,
+                description=excluded.description,
+                source=excluded.source,
+                raw=excluded.raw
+            """,
+            payload,
         )
         self.conn.commit()
 
