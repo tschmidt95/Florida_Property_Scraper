@@ -91,12 +91,104 @@ npm --prefix web run dev -- --host 0.0.0.0 --port 5173
 # Verify API
 curl "http://127.0.0.1:8000/api/search?q=smith&county=Orange"
 
+# Advanced search with permits enrichment
+curl -X POST "http://127.0.0.1:8000/api/search/advanced" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "seminole",
+    "text": "smith",
+    "fields": ["owner", "address", "parcel_id"],
+    "filters": {"no_permits_in_years": 15},
+    "sort": "last_permit_newest",
+    "limit": 50
+  }'
+
+# Sync permits from county portal (requires LIVE=1)
+LIVE=1 curl -X POST "http://127.0.0.1:8000/api/permits/sync" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "seminole",
+    "query": "123 Main Street",
+    "limit": 50
+  }'
+
 # Run both (single command)
 bash scripts/dev.sh
 
 # Build UI
 npm --prefix web run build
 ```
+
+---
+
+## Permits Support
+
+The system now includes permits search and enrichment for Seminole County via the Click2GovBP portal (`https://semc-egov.aspgov.com/Click2GovBP/`).
+
+### Features
+
+- **Permits sync endpoint**: `POST /api/permits/sync` - Scrapes permits from county portal and stores in database (requires `LIVE=1`)
+- **Advanced search**: `POST /api/search/advanced` - Search with field selection, permit filters, and enrichment
+- **Permit enrichment**: Results include `last_permit_date` and `permits_last_15y_count`
+- **No-permits filter**: Find properties with no permits in the last N years (treats NULL as match)
+- **Sort options**: Sort by relevance, score, or permit dates (oldest/newest)
+
+### LIVE Gating
+
+Live permit scraping requires the `LIVE=1` environment variable. The scraper enforces:
+- Rate limiting: ≤1 request per second
+- Explicit User-Agent header
+- Retries with exponential backoff
+- Best-effort robots.txt checking
+- Click2GovBP-only URLs (no other portals)
+
+### Example: Advanced Search
+
+```bash
+curl -X POST "http://localhost:8000/api/search/advanced" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "seminole",
+    "text": "smith",
+    "fields": ["owner", "address"],
+    "filters": {
+      "no_permits_in_years": 15
+    },
+    "sort": "last_permit_newest",
+    "limit": 50
+  }'
+```
+
+Response includes:
+```json
+[
+  {
+    "owner": "John Smith",
+    "address": "123 Main St",
+    "county": "seminole",
+    "score": 90,
+    "parcel_id": "ABC-123",
+    "source": "...",
+    "last_permit_date": "2023-01-15",
+    "permits_last_15y_count": 3,
+    "matched_fields": ["owner"]
+  }
+]
+```
+
+### Example: Permits Sync
+
+```bash
+LIVE=1 curl -X POST "http://localhost:8000/api/permits/sync" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "seminole",
+    "query": "123 Main Street",
+    "limit": 50
+  }'
+```
+
+Returns scraped permits stored in the database.
 
 Environment variables:
 
