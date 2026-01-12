@@ -1,20 +1,32 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { search, type SearchResult } from './lib/api';
+import { advancedSearch, search, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
-  const [selectedCounty, setSelectedCounty] = useState('Orange');
+  const [advancedMode, setAdvancedMode] = useState(true);
+  const [selectedCounty, setSelectedCounty] = useState('seminole');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Advanced search controls
+  const [searchFields, setSearchFields] = useState({
+    owner: true,
+    address: true,
+    parcel_id: true,
+    city: false,
+    zip: false,
+  });
+  const [noPermitsYears, setNoPermitsYears] = useState(15);
+  const [sortBy, setSortBy] = useState('relevance');
+
   const activeRequestId = useRef(0);
 
   const counties = useMemo(
-    () => ['Alachua', 'Broward', 'Duval', 'Hillsborough', 'Orange', 'Palm Beach'],
+    () => ['seminole', 'alachua', 'broward', 'duval', 'hillsborough', 'orange', 'palm beach'],
     [],
   );
 
@@ -27,7 +39,30 @@ export default function App() {
     setHasSearched(true);
 
     try {
-      const next = await search(query, selectedCounty);
+      let next: SearchResult[];
+      if (advancedMode) {
+        // Build fields array
+        const fields: string[] = [];
+        if (searchFields.owner) fields.push('owner');
+        if (searchFields.address) fields.push('address');
+        if (searchFields.parcel_id) fields.push('parcel_id');
+        if (searchFields.city) fields.push('city');
+        if (searchFields.zip) fields.push('zip');
+
+        next = await advancedSearch({
+          county: selectedCounty,
+          text: query,
+          fields,
+          filters: {
+            no_permits_in_years: noPermitsYears > 0 ? noPermitsYears : null,
+          },
+          sort: sortBy,
+          limit: 50,
+        });
+      } else {
+        next = await search(query, selectedCounty);
+      }
+
       if (activeRequestId.current !== requestId) {
         return;
       }
@@ -53,6 +88,10 @@ export default function App() {
     setError(null);
     setHasSearched(false);
     setLoading(false);
+  }
+
+  function toggleField(field: keyof typeof searchFields) {
+    setSearchFields((prev) => ({ ...prev, [field]: !prev[field] }));
   }
 
   return (
@@ -116,22 +155,132 @@ export default function App() {
             ))}
           </ul>
 
-          <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium">Geometry search</div>
-                <div className="text-xs text-slate-500">beta</div>
+          <div className="mt-6 space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Advanced search</div>
+                  <div className="text-xs text-slate-500">field selection + filters</div>
+                </div>
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    className="peer sr-only"
+                    checked={advancedMode}
+                    onChange={(e) => setAdvancedMode(e.target.checked)}
+                  />
+                  <div className="h-6 w-11 rounded-full bg-slate-300 peer-checked:bg-slate-900 after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
+                </label>
               </div>
+            </div>
 
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={geometrySearchEnabled}
-                  onChange={(e) => setGeometrySearchEnabled(e.target.checked)}
-                />
-                <div className="h-6 w-11 rounded-full bg-slate-300 peer-checked:bg-slate-900 after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
-              </label>
+            {advancedMode && (
+              <>
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Search In
+                  </div>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.owner}
+                      onChange={() => toggleField('owner')}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Owner</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.address}
+                      onChange={() => toggleField('address')}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Address</span>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.parcel_id}
+                      onChange={() => toggleField('parcel_id')}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Parcel ID</span>
+                  </label>
+                  <label className="flex items-center gap-2 opacity-50">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.city}
+                      onChange={() => toggleField('city')}
+                      className="rounded"
+                      disabled
+                    />
+                    <span className="text-sm">City (unavailable)</span>
+                  </label>
+                  <label className="flex items-center gap-2 opacity-50">
+                    <input
+                      type="checkbox"
+                      checked={searchFields.zip}
+                      onChange={() => toggleField('zip')}
+                      className="rounded"
+                      disabled
+                    />
+                    <span className="text-sm">ZIP (unavailable)</span>
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Filters
+                  </div>
+                  <div>
+                    <label className="text-sm">No permits in last N years</label>
+                    <input
+                      type="number"
+                      value={noPermitsYears}
+                      onChange={(e) => setNoPermitsYears(Number(e.target.value))}
+                      className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
+                      min="0"
+                      max="50"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Sort
+                  </div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm"
+                  >
+                    <option value="relevance">Relevance</option>
+                    <option value="score_desc">Score (high to low)</option>
+                    <option value="last_permit_oldest">Last permit (oldest)</option>
+                    <option value="last_permit_newest">Last permit (newest)</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Geometry search</div>
+                  <div className="text-xs text-slate-500">beta</div>
+                </div>
+
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    className="peer sr-only"
+                    checked={geometrySearchEnabled}
+                    onChange={(e) => setGeometrySearchEnabled(e.target.checked)}
+                  />
+                  <div className="h-6 w-11 rounded-full bg-slate-300 peer-checked:bg-slate-900 after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
+                </label>
+              </div>
             </div>
           </div>
         </aside>
@@ -167,53 +316,78 @@ export default function App() {
                 ) : null}
               </div>
               <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
-                <table className="w-full border-collapse text-left text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-600">
-                    <tr>
-                      <th className="px-3 py-2">Owner</th>
-                      <th className="px-3 py-2">Address</th>
-                      <th className="px-3 py-2">County</th>
-                      <th className="px-3 py-2">Parcel</th>
-                      <th className="px-3 py-2">Source</th>
-                      <th className="px-3 py-2">Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
-                          Loading…
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="bg-slate-50 text-xs text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2">Owner</th>
+                        <th className="px-3 py-2">Address</th>
+                        <th className="px-3 py-2">County</th>
+                        <th className="px-3 py-2">Parcel</th>
+                        {advancedMode && (
+                          <>
+                            <th className="px-3 py-2">Last Permit</th>
+                            <th className="px-3 py-2">Permits(15y)</th>
+                          </>
+                        )}
+                        <th className="px-3 py-2">Score</th>
                       </tr>
-                    ) : error ? (
-                      <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={6}>
-                          {error}
-                        </td>
-                      </tr>
-                    ) : results.length === 0 ? (
-                      <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
-                          {hasSearched ? 'No matches found.' : 'No results yet.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      results.map((r, idx) => (
-                        <tr
-                          key={`${r.owner}-${r.address}-${idx}`}
-                          className="border-t hover:bg-slate-50"
-                        >
-                          <td className="px-3 py-2">{r.owner}</td>
-                          <td className="px-3 py-2">{r.address}</td>
-                          <td className="px-3 py-2">{r.county}</td>
-                          <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
-                          <td className="px-3 py-2">{r.source ?? ''}</td>
-                          <td className="px-3 py-2">{r.score}</td>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <tr className="border-t">
+                          <td
+                            className="px-3 py-3 text-slate-500"
+                            colSpan={advancedMode ? 7 : 5}
+                          >
+                            Loading…
+                          </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : error ? (
+                        <tr className="border-t">
+                          <td
+                            className="px-3 py-3 text-red-700"
+                            colSpan={advancedMode ? 7 : 5}
+                          >
+                            {error}
+                          </td>
+                        </tr>
+                      ) : results.length === 0 ? (
+                        <tr className="border-t">
+                          <td
+                            className="px-3 py-3 text-slate-500"
+                            colSpan={advancedMode ? 7 : 5}
+                          >
+                            {hasSearched ? 'No matches found.' : 'No results yet.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        results.map((r, idx) => (
+                          <tr
+                            key={`${r.owner}-${r.address}-${idx}`}
+                            className="border-t hover:bg-slate-50"
+                          >
+                            <td className="px-3 py-2">{r.owner}</td>
+                            <td className="px-3 py-2">{r.address}</td>
+                            <td className="px-3 py-2">{r.county}</td>
+                            <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
+                            {advancedMode && (
+                              <>
+                                <td className="px-3 py-2">
+                                  {r.last_permit_date ?? 'N/A'}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {r.permits_last_15y_count ?? 0}
+                                </td>
+                              </>
+                            )}
+                            <td className="px-3 py-2">{r.score}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
                 <div>
