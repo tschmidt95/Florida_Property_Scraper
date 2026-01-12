@@ -135,25 +135,44 @@ def upsert_many(conn: sqlite3.Connection, rows: Iterable[SearchResult]) -> None:
     if schema.kind == "new":
         for r in items:
             if r.parcel_id:
-                conn.execute(
-                    """
-                    INSERT INTO leads (owner, address, county, parcel_id, source, score)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(county, parcel_id) DO UPDATE SET
-                        owner=excluded.owner,
-                        address=excluded.address,
-                        source=excluded.source,
-                        score=excluded.score
-                    """,
-                    (
-                        r.owner,
-                        r.address,
-                        r.county,
-                        r.parcel_id,
-                        r.source,
-                        int(r.score),
-                    ),
-                )
+                # Check if exists with this county+parcel_id.
+                existing = conn.execute(
+                    "SELECT id FROM leads WHERE county = ? AND parcel_id = ? LIMIT 1",
+                    (r.county, r.parcel_id),
+                ).fetchone()
+                if existing:
+                    # Update existing record.
+                    conn.execute(
+                        """
+                        UPDATE leads
+                        SET owner=?, address=?, source=?, score=?
+                        WHERE county=? AND parcel_id=?
+                        """,
+                        (
+                            r.owner,
+                            r.address,
+                            r.source,
+                            int(r.score),
+                            r.county,
+                            r.parcel_id,
+                        ),
+                    )
+                else:
+                    # Insert new record.
+                    conn.execute(
+                        """
+                        INSERT INTO leads (owner, address, county, parcel_id, source, score)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            r.owner,
+                            r.address,
+                            r.county,
+                            r.parcel_id,
+                            r.source,
+                            int(r.score),
+                        ),
+                    )
             else:
                 conn.execute(
                     """
