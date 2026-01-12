@@ -313,7 +313,6 @@ if router:
         - Sort: relevance, score_desc, last_permit_oldest, last_permit_newest
         - Permits enrichment: last_permit_date, permits_last_15y_count
         """
-        from datetime import datetime, timedelta
 
         text = _norm(request.text or "")
         if not text:
@@ -330,7 +329,9 @@ if router:
         try:
             # Check which tables exist
             has_leads = _table_exists(conn, "leads")
-            has_properties = _table_exists(conn, "properties") and _table_exists(conn, "owners")
+            has_properties = _table_exists(conn, "properties") and _table_exists(
+                conn, "owners"
+            )
             has_permits = _table_exists(conn, "permits")
 
             if not has_leads and not has_properties:
@@ -449,7 +450,11 @@ def _advanced_search_from_leads(
     address_expr = "COALESCE(" + ", ".join(address_expr_parts + ["''"]) + ")"
 
     score_col = "lead_score" if "lead_score" in cols else None
-    source_col = "source_url" if "source_url" in cols else ("property_url" if "property_url" in cols else None)
+    source_col = (
+        "source_url"
+        if "source_url" in cols
+        else ("property_url" if "property_url" in cols else None)
+    )
 
     # Score calculation
     if score_col:
@@ -459,9 +464,13 @@ def _advanced_search_from_leads(
         score_sql = "CASE "
         score_params = []
         if parcel_col:
-            score_sql += f"WHEN instr(LOWER(COALESCE(leads.{parcel_col},'')), ?) > 0 THEN 95 "
+            score_sql += (
+                f"WHEN instr(LOWER(COALESCE(leads.{parcel_col},'')), ?) > 0 THEN 95 "
+            )
             score_params.append(text_lower)
-        score_sql += f"WHEN instr(LOWER(COALESCE(leads.{owner_col},'')), ?) > 0 THEN 90 "
+        score_sql += (
+            f"WHEN instr(LOWER(COALESCE(leads.{owner_col},'')), ?) > 0 THEN 90 "
+        )
         score_params.append(text_lower)
         score_sql += f"WHEN instr(LOWER({address_expr}), ?) > 0 THEN 80 "
         score_params.append(text_lower)
@@ -496,7 +505,7 @@ def _advanced_search_from_leads(
             {address_expr} AS address,
             leads.{county_col} AS county,
             leads.{parcel_col} AS parcel_id,
-            {('leads.' + source_col) if source_col else "''"} AS source,
+            {("leads." + source_col) if source_col else "''"} AS source,
             {score_sql} AS score,
             {last_permit_select} AS last_permit_date,
             {permits_count_select} AS permits_last_15y_count
@@ -509,9 +518,11 @@ def _advanced_search_from_leads(
     if has_permits:
         no_permits_years = filters.get("no_permits_in_years")
         if no_permits_years is not None:
-            cutoff = (datetime.now() - timedelta(days=int(no_permits_years) * 365)).strftime("%Y-%m-%d")
+            cutoff = (
+                datetime.now() - timedelta(days=int(no_permits_years) * 365)
+            ).strftime("%Y-%m-%d")
             # Match if last_permit_date is NULL OR older than cutoff
-            sql += f" AND (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
+            sql += " AND (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
             params.append(cutoff)
 
     # Sort
@@ -533,11 +544,19 @@ def _advanced_search_from_leads(
     for row in rows:
         # Determine matched fields
         matched = []
-        if "owner" in fields and owner_col and text_lower in (row["owner"] or "").lower():
+        if (
+            "owner" in fields
+            and owner_col
+            and text_lower in (row["owner"] or "").lower()
+        ):
             matched.append("owner")
         if "address" in fields and text_lower in (row["address"] or "").lower():
             matched.append("address")
-        if "parcel_id" in fields and parcel_col and text_lower in (row["parcel_id"] or "").lower():
+        if (
+            "parcel_id" in fields
+            and parcel_col
+            and text_lower in (row["parcel_id"] or "").lower()
+        ):
             matched.append("parcel_id")
 
         results.append(
@@ -548,7 +567,9 @@ def _advanced_search_from_leads(
                 score=int(row["score"] or 0),
                 parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
                 source=str(row["source"]) if row["source"] else None,
-                last_permit_date=str(row["last_permit_date"]) if row["last_permit_date"] else None,
+                last_permit_date=str(row["last_permit_date"])
+                if row["last_permit_date"]
+                else None,
                 permits_last_15y_count=int(row["permits_last_15y_count"] or 0),
                 matched_fields=matched,
             )
@@ -611,7 +632,9 @@ def _advanced_search_from_properties(
     score_sql = "CASE "
     score_params: list[Any] = []
     if has_parcel_id:
-        score_sql += "WHEN instr(LOWER(COALESCE(properties.parcel_id,'')), ?) > 0 THEN 95 "
+        score_sql += (
+            "WHEN instr(LOWER(COALESCE(properties.parcel_id,'')), ?) > 0 THEN 95 "
+        )
         score_params.append(text_lower)
     score_sql += "WHEN instr(LOWER(owners.name), ?) > 0 THEN 90 "
     score_params.append(text_lower)
@@ -663,8 +686,10 @@ def _advanced_search_from_properties(
     if has_permits and has_parcel_id:
         no_permits_years = filters.get("no_permits_in_years")
         if no_permits_years is not None:
-            cutoff = (datetime.now() - timedelta(days=int(no_permits_years) * 365)).strftime("%Y-%m-%d")
-            sql += f" AND (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
+            cutoff = (
+                datetime.now() - timedelta(days=int(no_permits_years) * 365)
+            ).strftime("%Y-%m-%d")
+            sql += " AND (pa.last_permit_date IS NULL OR pa.last_permit_date < ?)"
             params.append(cutoff)
 
     # Sort
@@ -689,7 +714,11 @@ def _advanced_search_from_properties(
             matched.append("owner")
         if "address" in fields and text_lower in (row["address"] or "").lower():
             matched.append("address")
-        if "parcel_id" in fields and has_parcel_id and text_lower in (row["parcel_id"] or "").lower():
+        if (
+            "parcel_id" in fields
+            and has_parcel_id
+            and text_lower in (row["parcel_id"] or "").lower()
+        ):
             matched.append("parcel_id")
 
         results.append(
@@ -700,7 +729,9 @@ def _advanced_search_from_properties(
                 score=int(row["score"] or 0),
                 parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
                 source=str(row["source"] or "") or None,
-                last_permit_date=str(row["last_permit_date"]) if row["last_permit_date"] else None,
+                last_permit_date=str(row["last_permit_date"])
+                if row["last_permit_date"]
+                else None,
                 permits_last_15y_count=int(row["permits_last_15y_count"] or 0),
                 matched_fields=matched,
             )

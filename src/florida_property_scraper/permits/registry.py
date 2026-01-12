@@ -1,4 +1,5 @@
 """Registry mapping counties to permit scrapers."""
+
 from typing import Optional
 
 from florida_property_scraper.permits.base import PermitsScraper

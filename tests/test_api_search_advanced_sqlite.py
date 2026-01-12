@@ -1,6 +1,6 @@
 """Tests for advanced search API endpoint."""
+
 import os
-import sqlite3
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path

@@ -86,7 +86,9 @@ def _client():
 def test_api_search_empty_q_returns_empty_list(tmp_path, monkeypatch):
     db_path = tmp_path / "leads.sqlite"
     _init_properties_db(db_path)
-    _insert_property(db_path, owner_name="John Smith", county="Orange", address="123 Main St")
+    _insert_property(
+        db_path, owner_name="John Smith", county="Orange", address="123 Main St"
+    )
 
     monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
 
@@ -99,7 +101,9 @@ def test_api_search_empty_q_returns_empty_list(tmp_path, monkeypatch):
 def test_api_search_matches_owner_case_insensitive(tmp_path, monkeypatch):
     db_path = tmp_path / "leads.sqlite"
     _init_properties_db(db_path)
-    _insert_property(db_path, owner_name="John Smith", county="Orange", address="123 Main St")
+    _insert_property(
+        db_path, owner_name="John Smith", county="Orange", address="123 Main St"
+    )
 
     monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
 
@@ -143,8 +147,12 @@ def test_api_search_matches_address_and_parcel_id(tmp_path, monkeypatch):
 def test_api_search_county_filter(tmp_path, monkeypatch):
     db_path = tmp_path / "leads.sqlite"
     _init_properties_db(db_path)
-    _insert_property(db_path, owner_name="John Smith", county="Orange", address="123 Main St")
-    _insert_property(db_path, owner_name="John Smith", county="Broward", address="456 Ocean Dr")
+    _insert_property(
+        db_path, owner_name="John Smith", county="Orange", address="123 Main St"
+    )
+    _insert_property(
+        db_path, owner_name="John Smith", county="Broward", address="456 Ocean Dr"
+    )
 
     monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
 
@@ -171,7 +179,9 @@ def test_api_search_limit_is_capped_to_200(tmp_path, monkeypatch):
     monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
 
     client = _client()
-    r = client.get("/api/search", params={"q": "smith", "county": "Orange", "limit": 999})
+    r = client.get(
+        "/api/search", params={"q": "smith", "county": "Orange", "limit": 999}
+    )
     assert r.status_code == 200
     data = r.json()
     assert len(data) == 200

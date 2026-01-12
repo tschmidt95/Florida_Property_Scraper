@@ -1,4 +1,5 @@
 """Base interface for permits scrapers."""
+
 from abc import ABC, abstractmethod
 from typing import List
 

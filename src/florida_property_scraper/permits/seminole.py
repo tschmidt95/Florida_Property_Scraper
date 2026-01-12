@@ -2,6 +2,7 @@
 
 Targets: https://semc-egov.aspgov.com/Click2GovBP/
 """
+
 import os
 import time
 from typing import List, Optional
@@ -31,7 +32,9 @@ def parse_permits(html: str, source_url: str) -> List[PermitRecord]:
 
     # Click2GovBP typically shows results in a table or result divs
     # We'll look for common patterns in permit search results
-    rows = soup.find_all("tr", class_=lambda x: x and "result" in x.lower() if x else False)
+    rows = soup.find_all(
+        "tr", class_=lambda x: x and "result" in x.lower() if x else False
+    )
     if not rows:
         # Try alternative patterns
         rows = soup.find_all("tr")[1:]  # Skip header row if present
@@ -214,6 +217,8 @@ class SeminolePermitsScraper(PermitsScraper):
                     backoff = 2**attempt
                     time.sleep(backoff)
                 else:
-                    raise RuntimeError(f"Failed to fetch permits after {max_retries} attempts: {e}")
+                    raise RuntimeError(
+                        f"Failed to fetch permits after {max_retries} attempts: {e}"
+                    )
 
         raise RuntimeError("Unexpected error in fetch retry logic")

@@ -1,7 +1,7 @@
 """Permits API routes."""
+
 import os
 from pathlib import Path
-from typing import Optional
 
 try:
     from fastapi import APIRouter, HTTPException

@@ -1,4 +1,5 @@
 """Tests for permits sync API endpoint."""
+
 import os
 import tempfile
 from pathlib import Path
