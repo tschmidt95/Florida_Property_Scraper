@@ -8,7 +8,7 @@ Phase 1 Implementation:
 This scraper provides CI-safe parsing via parse_permits() and
 LIVE-gated network access via search_permits().
 """
-import json
+
 import os
 import re
 import time
@@ -24,6 +24,7 @@ except ImportError:
 
 from florida_property_scraper.permits.base import PermitScraperBase
 from florida_property_scraper.permits.models import PermitRecord
+from florida_property_scraper.permits.registry import register_scraper
 
 
 class SeminolePermitScraper(PermitScraperBase):
@@ -56,9 +57,9 @@ class SeminolePermitScraper(PermitScraperBase):
         # Look for permit result rows
         # The portal typically shows results in tables or divs
         # This is a generic parser that handles common patterns
-        rows = soup.find_all("tr", class_=re.compile(r".*row.*", re.I)) or soup.find_all(
-            "div", class_=re.compile(r".*permit.*|.*result.*", re.I)
-        )
+        rows = soup.find_all(
+            "tr", class_=re.compile(r".*row.*", re.I)
+        ) or soup.find_all("div", class_=re.compile(r".*permit.*|.*result.*", re.I))
 
         for row in rows:
             try:
@@ -71,9 +72,7 @@ class SeminolePermitScraper(PermitScraperBase):
 
         return permits
 
-    def _parse_permit_row(
-        self, element, source_url: str
-    ) -> Optional[PermitRecord]:
+    def _parse_permit_row(self, element, source_url: str) -> Optional[PermitRecord]:
         """Parse a single permit row from HTML.
 
         Args:
@@ -144,7 +143,11 @@ class SeminolePermitScraper(PermitScraperBase):
                     final_date = normalized_date
 
             # Type patterns
-            if re.search(r"\b(building|electrical|plumbing|mechanical|roofing)\b", cell_text, re.I):
+            if re.search(
+                r"\b(building|electrical|plumbing|mechanical|roofing)\b",
+                cell_text,
+                re.I,
+            ):
                 permit_type = cell_text
 
         # If no address found, try to extract from full text
@@ -273,15 +276,11 @@ class SeminolePermitScraper(PermitScraperBase):
             if response.status_code == 200:
                 # Simple check for Disallow: /PermitSearch
                 if "Disallow: /PermitSearch" in response.text:
-                    raise RuntimeError(
-                        "robots.txt disallows /PermitSearch - aborting"
-                    )
+                    raise RuntimeError("robots.txt disallows /PermitSearch - aborting")
         except requests.RequestException:
             # If robots.txt doesn't exist or is inaccessible, proceed cautiously
             pass
 
 
 # Register the scraper
-from florida_property_scraper.permits.registry import register_scraper
-
 register_scraper("seminole", SeminolePermitScraper())

@@ -1,4 +1,5 @@
 """Permits API endpoints."""
+
 try:
     from fastapi import APIRouter, HTTPException
 
@@ -10,7 +11,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 from pydantic import BaseModel
 

@@ -304,7 +304,9 @@ if router:
         text: str | None = None
         fields: list[str] = ["owner", "address", "parcel_id", "city", "zip"]
         filters: AdvancedSearchFilters = AdvancedSearchFilters()
-        sort: str = "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
+        sort: str = (
+            "relevance"  # relevance, score_desc, last_permit_oldest, last_permit_newest
+        )
         limit: int = 50
 
     class AdvancedSearchResult(BaseModel):
@@ -402,7 +404,6 @@ def _advanced_search_leads(
         params.append(county_filter)
 
     if text:
-        q_lower = text.lower()
         like = _like_param(text)
         match_parts: list[str] = []
 
@@ -501,7 +502,6 @@ def _advanced_search_properties(
         params.append(county_filter)
 
     if text:
-        q_lower = text.lower()
         like = _like_param(text)
         match_parts: list[str] = []
 
@@ -562,9 +562,9 @@ def _enrich_with_permits(
     results: list[AdvancedSearchResult] = []
 
     # Calculate cutoff date for 15-year permit count
-    cutoff_15y = (
-        datetime.datetime.now() - datetime.timedelta(days=15 * 365)
-    ).strftime("%Y-%m-%d")
+    cutoff_15y = (datetime.datetime.now() - datetime.timedelta(days=15 * 365)).strftime(
+        "%Y-%m-%d"
+    )
 
     for row in rows:
         owner = str(row["owner"] or "")
@@ -604,8 +604,7 @@ def _enrich_with_permits(
                 ).strftime("%Y-%m-%d")
 
                 has_recent_permit = any(
-                    p["issue_date"] and p["issue_date"] >= cutoff
-                    for p in permit_rows
+                    p["issue_date"] and p["issue_date"] >= cutoff for p in permit_rows
                 )
 
                 # If last_permit_date is null, treat as MATCH
@@ -615,7 +614,9 @@ def _enrich_with_permits(
             # Apply permit_status filter
             if filters.permit_status:
                 if not any(
-                    p["status"] and p["status"].lower() in [s.lower() for s in filters.permit_status]
+                    p["status"]
+                    and p["status"].lower()
+                    in [s.lower() for s in filters.permit_status]
                     for p in permit_rows
                 ):
                     continue
@@ -623,7 +624,9 @@ def _enrich_with_permits(
             # Apply permit_types filter
             if filters.permit_types:
                 if not any(
-                    p["permit_type"] and p["permit_type"].lower() in [t.lower() for t in filters.permit_types]
+                    p["permit_type"]
+                    and p["permit_type"].lower()
+                    in [t.lower() for t in filters.permit_types]
                     for p in permit_rows
                 ):
                     continue
@@ -655,8 +658,7 @@ def _enrich_with_permits(
                 ).strftime("%Y-%m-%d")
 
                 has_recent_permit = any(
-                    p["issue_date"] and p["issue_date"] >= cutoff
-                    for p in permit_rows
+                    p["issue_date"] and p["issue_date"] >= cutoff for p in permit_rows
                 )
 
                 if last_permit_date is not None and has_recent_permit:
@@ -664,14 +666,18 @@ def _enrich_with_permits(
 
             if filters.permit_status:
                 if not any(
-                    p["status"] and p["status"].lower() in [s.lower() for s in filters.permit_status]
+                    p["status"]
+                    and p["status"].lower()
+                    in [s.lower() for s in filters.permit_status]
                     for p in permit_rows
                 ):
                     continue
 
             if filters.permit_types:
                 if not any(
-                    p["permit_type"] and p["permit_type"].lower() in [t.lower() for t in filters.permit_types]
+                    p["permit_type"]
+                    and p["permit_type"].lower()
+                    in [t.lower() for t in filters.permit_types]
                     for p in permit_rows
                 ):
                     continue
@@ -715,4 +721,3 @@ def _apply_sort(
         results.sort(key=lambda r: r.score, reverse=True)
 
     return results
-

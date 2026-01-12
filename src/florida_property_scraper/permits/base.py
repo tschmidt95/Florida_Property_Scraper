@@ -1,4 +1,5 @@
 """Base classes for permit scrapers."""
+
 from abc import ABC, abstractmethod
 from typing import List
 
@@ -24,9 +25,7 @@ class PermitScraperBase(ABC):
         pass
 
     @abstractmethod
-    def search_permits(
-        self, query: str, limit: int = 100
-    ) -> List[PermitRecord]:
+    def search_permits(self, query: str, limit: int = 100) -> List[PermitRecord]:
         """Search permits with network requests.
 
         This method performs live HTTP requests and should only be called

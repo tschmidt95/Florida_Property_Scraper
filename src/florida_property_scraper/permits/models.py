@@ -1,4 +1,5 @@
 """Data models for permit records."""
+
 from dataclasses import dataclass
 from typing import Optional
 

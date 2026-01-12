@@ -1,4 +1,5 @@
 """Tests for Seminole County permits parser (CI-safe, no live HTTP)."""
+
 import pytest
 from pathlib import Path
 
@@ -11,7 +12,9 @@ def test_seminole_parse_permits_from_fixture():
     from florida_property_scraper.permits.seminole import SeminolePermitScraper
 
     scraper = SeminolePermitScraper()
-    fixture_path = Path(__file__).parent / "fixtures" / "permits" / "seminole_search_result.html"
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "permits" / "seminole_search_result.html"
+    )
 
     assert fixture_path.exists(), f"Fixture not found: {fixture_path}"
 

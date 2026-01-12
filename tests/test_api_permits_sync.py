@@ -1,8 +1,8 @@
 """Tests for permits sync API endpoint (no live HTTP)."""
+
 import os
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 
 pytest.importorskip("fastapi")
