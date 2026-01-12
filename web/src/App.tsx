@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { search, type SearchResult } from './lib/api';
+import { advancedSearch, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -11,10 +11,21 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Advanced search fields
+  const [searchFields, setSearchFields] = useState({
+    owner: true,
+    address: true,
+    parcel_id: true,
+    city: false,
+    zip: false,
+  });
+  const [noPermitsYears, setNoPermitsYears] = useState(15);
+  const [sortBy, setSortBy] = useState('relevance');
+
   const activeRequestId = useRef(0);
 
   const counties = useMemo(
-    () => ['Alachua', 'Broward', 'Duval', 'Hillsborough', 'Orange', 'Palm Beach'],
+    () => ['Alachua', 'Broward', 'Duval', 'Hillsborough', 'Orange', 'Palm Beach', 'Seminole'],
     [],
   );
 
@@ -27,7 +38,24 @@ export default function App() {
     setHasSearched(true);
 
     try {
-      const next = await search(query, selectedCounty);
+      // Build fields array from checkboxes
+      const fields: string[] = [];
+      if (searchFields.owner) fields.push('owner');
+      if (searchFields.address) fields.push('address');
+      if (searchFields.parcel_id) fields.push('parcel_id');
+      if (searchFields.city) fields.push('city');
+      if (searchFields.zip) fields.push('zip');
+
+      const next = await advancedSearch({
+        county: selectedCounty,
+        text: query,
+        fields,
+        filters: {
+          no_permits_in_years: noPermitsYears > 0 ? noPermitsYears : undefined,
+        },
+        sort: sortBy,
+        limit: 50,
+      });
       if (activeRequestId.current !== requestId) {
         return;
       }
@@ -116,6 +144,111 @@ export default function App() {
             ))}
           </ul>
 
+          <div className="mt-6 space-y-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Search In
+              </div>
+              <div className="mt-2 space-y-1">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={searchFields.owner}
+                    onChange={(e) =>
+                      setSearchFields({ ...searchFields, owner: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Owner
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={searchFields.address}
+                    onChange={(e) =>
+                      setSearchFields({ ...searchFields, address: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Address
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={searchFields.parcel_id}
+                    onChange={(e) =>
+                      setSearchFields({ ...searchFields, parcel_id: e.target.checked })
+                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Parcel ID
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-400" title="Not available in database">
+                  <input
+                    type="checkbox"
+                    checked={searchFields.city}
+                    onChange={(e) =>
+                      setSearchFields({ ...searchFields, city: e.target.checked })
+                    }
+                    disabled
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  City <span className="text-xs">(N/A)</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-400" title="Not available in database">
+                  <input
+                    type="checkbox"
+                    checked={searchFields.zip}
+                    onChange={(e) =>
+                      setSearchFields({ ...searchFields, zip: e.target.checked })
+                    }
+                    disabled
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  ZIP <span className="text-xs">(N/A)</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Filters
+              </div>
+              <div className="mt-2 space-y-2">
+                <div>
+                  <label className="text-xs text-slate-600">
+                    No permits in last N years
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={noPermitsYears}
+                    onChange={(e) => setNoPermitsYears(parseInt(e.target.value) || 0)}
+                    className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-slate-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Sort
+              </div>
+              <div className="mt-2">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-slate-400"
+                >
+                  <option value="relevance">Relevance</option>
+                  <option value="score_desc">Score (High to Low)</option>
+                  <option value="last_permit_oldest">Last Permit (Oldest)</option>
+                  <option value="last_permit_newest">Last Permit (Newest)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -174,26 +307,27 @@ export default function App() {
                       <th className="px-3 py-2">Address</th>
                       <th className="px-3 py-2">County</th>
                       <th className="px-3 py-2">Parcel</th>
-                      <th className="px-3 py-2">Source</th>
+                      <th className="px-3 py-2">Last Permit</th>
+                      <th className="px-3 py-2">Permits (15y)</th>
                       <th className="px-3 py-2">Score</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={7}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={6}>
+                        <td className="px-3 py-3 text-red-700" colSpan={7}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={7}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -207,7 +341,8 @@ export default function App() {
                           <td className="px-3 py-2">{r.address}</td>
                           <td className="px-3 py-2">{r.county}</td>
                           <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
-                          <td className="px-3 py-2">{r.source ?? ''}</td>
+                          <td className="px-3 py-2">{r.last_permit_date ?? '—'}</td>
+                          <td className="px-3 py-2">{r.permits_last_15y_count ?? 0}</td>
                           <td className="px-3 py-2">{r.score}</td>
                         </tr>
                       ))
