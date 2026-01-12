@@ -200,6 +200,36 @@ class SQLiteStore:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_property_time ON events(property_uid, event_at DESC)"
         )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS permits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                address TEXT,
+                permit_number TEXT NOT NULL,
+                permit_type TEXT,
+                status TEXT,
+                issue_date TEXT,
+                final_date TEXT,
+                description TEXT,
+                source TEXT NOT NULL,
+                raw TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_permits_county_number ON permits(county, permit_number)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_county_parcel ON permits(county, parcel_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_issue_date ON permits(issue_date)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_permits_final_date ON permits(final_date)"
+        )
         self.conn.commit()
 
     def record_run_start(
@@ -427,6 +457,65 @@ class SQLiteStore:
             ],
         )
         self.conn.commit()
+
+    def upsert_many_permits(self, records: List[Dict[str, Any]]) -> int:
+        """Upsert multiple permit records.
+
+        Args:
+            records: List of permit dictionaries
+
+        Returns:
+            Number of records inserted/updated
+        """
+        if not records:
+            return 0
+
+        count = 0
+        for record in records:
+            self.conn.execute(
+                """
+                INSERT INTO permits (
+                    county,
+                    parcel_id,
+                    address,
+                    permit_number,
+                    permit_type,
+                    status,
+                    issue_date,
+                    final_date,
+                    description,
+                    source,
+                    raw
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(county, permit_number) DO UPDATE SET
+                    parcel_id=excluded.parcel_id,
+                    address=excluded.address,
+                    permit_type=excluded.permit_type,
+                    status=excluded.status,
+                    issue_date=excluded.issue_date,
+                    final_date=excluded.final_date,
+                    description=excluded.description,
+                    source=excluded.source,
+                    raw=excluded.raw
+                """,
+                (
+                    record.get("county"),
+                    record.get("parcel_id"),
+                    record.get("address"),
+                    record.get("permit_number"),
+                    record.get("permit_type"),
+                    record.get("status"),
+                    record.get("issue_date"),
+                    record.get("final_date"),
+                    record.get("description"),
+                    record.get("source"),
+                    record.get("raw"),
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
 
     def close(self) -> None:
         self.conn.close()
