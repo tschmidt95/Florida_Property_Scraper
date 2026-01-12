@@ -155,7 +155,9 @@ export async function advancedSearch(
         out.permits_last_15y_count = permitsLast15yCount;
       }
       if (Array.isArray(matchedFields)) {
-        out.matched_fields = matchedFields.filter((f) => typeof f === 'string');
+        out.matched_fields = matchedFields.filter(
+          (f) => typeof f === 'string' && f.trim().length > 0,
+        );
       }
 
       results.push(out);

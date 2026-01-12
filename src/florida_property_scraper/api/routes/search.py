@@ -291,8 +291,6 @@ if router:
         finally:
             conn.close()
 
-    from pydantic import BaseModel
-
     class AdvancedSearchFilters(BaseModel):
         """Filters for advanced search."""
 
@@ -502,9 +500,11 @@ def _advanced_search_leads(
     if sort == "score_desc":
         order_by = "score DESC"
     elif sort == "last_permit_oldest" and has_permits:
-        order_by = "pa.last_permit_date ASC NULLS FIRST"
+        # SQLite doesn't support NULLS FIRST, use CASE to put nulls first
+        order_by = "CASE WHEN pa.last_permit_date IS NULL THEN 0 ELSE 1 END, pa.last_permit_date ASC"
     elif sort == "last_permit_newest" and has_permits:
-        order_by = "pa.last_permit_date DESC NULLS LAST"
+        # SQLite doesn't support NULLS LAST, use CASE to put nulls last
+        order_by = "CASE WHEN pa.last_permit_date IS NULL THEN 1 ELSE 0 END, pa.last_permit_date DESC"
     else:
         order_by = "score DESC"
 
@@ -641,9 +641,11 @@ def _advanced_search_properties(
     if sort == "score_desc":
         order_by = "score DESC"
     elif sort == "last_permit_oldest" and has_permits:
-        order_by = "pa.last_permit_date ASC NULLS FIRST"
+        # SQLite doesn't support NULLS FIRST, use CASE to put nulls first
+        order_by = "CASE WHEN pa.last_permit_date IS NULL THEN 0 ELSE 1 END, pa.last_permit_date ASC"
     elif sort == "last_permit_newest" and has_permits:
-        order_by = "pa.last_permit_date DESC NULLS LAST"
+        # SQLite doesn't support NULLS LAST, use CASE to put nulls last
+        order_by = "CASE WHEN pa.last_permit_date IS NULL THEN 1 ELSE 0 END, pa.last_permit_date DESC"
     else:
         order_by = "score DESC"
 

@@ -65,10 +65,10 @@ def parse_permits(html: str, source_url: str) -> list[PermitRecord]:
                         status=cells[4].get_text(strip=True)
                         if len(cells) > 4
                         else None,
-                        issue_date=cells[5].get_text(strip=True)
+                        issue_date=cells[5].get_text(strip=True) or None
                         if len(cells) > 5
                         else None,
-                        final_date=cells[6].get_text(strip=True)
+                        final_date=cells[6].get_text(strip=True) or None
                         if len(cells) > 6
                         else None,
                         description=cells[7].get_text(strip=True)

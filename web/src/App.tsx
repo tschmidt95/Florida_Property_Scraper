@@ -223,7 +223,7 @@ export default function App() {
                     type="number"
                     min="0"
                     value={noPermitsYears}
-                    onChange={(e) => setNoPermitsYears(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setNoPermitsYears(parseInt(e.target.value, 10) || 0)}
                     className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm outline-none focus:border-slate-400"
                   />
                 </div>
