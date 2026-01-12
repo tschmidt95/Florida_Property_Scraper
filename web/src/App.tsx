@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
 
-import { scrape, search, type SearchResult } from './lib/api';
+import { scrape, search, searchAdvanced, type SearchResult } from './lib/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
   const [selectedCounty, setSelectedCounty] = useState('Orange');
+  const [noPermitsEnabled, setNoPermitsEnabled] = useState(false);
+  const [noPermitsYears, setNoPermitsYears] = useState('3');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +26,28 @@ export default function App() {
     setHasSearched(true);
 
     try {
+      if (noPermitsEnabled) {
+        const years = Number.parseInt(noPermitsYears, 10);
+        if (!Number.isFinite(years) || years <= 0) {
+          setError('No-permits years must be a positive integer');
+          setResults([]);
+          return;
+        }
+        const next = await searchAdvanced({
+          q: query,
+          counties: [selectedCounty],
+          filters: {
+            no_permits_in_years: years,
+          },
+          limit: 50,
+        });
+        if (activeRequestId.current !== requestId) {
+          return;
+        }
+        setResults(next);
+        return;
+      }
+
       const next = await search(query, selectedCounty);
       if (activeRequestId.current !== requestId) {
         return;
@@ -167,6 +191,38 @@ export default function App() {
               </label>
             </div>
           </div>
+
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="text-sm font-medium">Search filters</div>
+            <div className="mt-3 flex items-start gap-2">
+              <input
+                id="no-permits"
+                type="checkbox"
+                className="mt-1"
+                checked={noPermitsEnabled}
+                onChange={(e) => setNoPermitsEnabled(e.target.checked)}
+              />
+              <div className="flex-1">
+                <label htmlFor="no-permits" className="text-sm">
+                  No permits in last N years
+                </label>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    className="w-20 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm shadow-sm outline-none focus:border-slate-400"
+                    value={noPermitsYears}
+                    onChange={(e) => setNoPermitsYears(e.target.value)}
+                    inputMode="numeric"
+                    disabled={!noPermitsEnabled}
+                    aria-label="Years"
+                  />
+                  <div className="text-xs text-slate-500">years</div>
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  Uses the advanced SQLite-backed endpoint.
+                </div>
+              </div>
+            </div>
+          </div>
         </aside>
 
         <main className="flex-1 p-4">
@@ -207,6 +263,7 @@ export default function App() {
                       <th className="px-3 py-2">Address</th>
                       <th className="px-3 py-2">County</th>
                       <th className="px-3 py-2">Parcel</th>
+                      <th className="px-3 py-2">Last permit</th>
                       <th className="px-3 py-2">Source</th>
                       <th className="px-3 py-2">Score</th>
                     </tr>
@@ -214,19 +271,19 @@ export default function App() {
                   <tbody>
                     {loading ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={7}>
                           Loading…
                         </td>
                       </tr>
                     ) : error ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-red-700" colSpan={6}>
+                        <td className="px-3 py-3 text-red-700" colSpan={7}>
                           {error}
                         </td>
                       </tr>
                     ) : results.length === 0 ? (
                       <tr className="border-t">
-                        <td className="px-3 py-3 text-slate-500" colSpan={6}>
+                        <td className="px-3 py-3 text-slate-500" colSpan={7}>
                           {hasSearched ? 'No matches found.' : 'No results yet.'}
                         </td>
                       </tr>
@@ -240,6 +297,7 @@ export default function App() {
                           <td className="px-3 py-2">{r.address}</td>
                           <td className="px-3 py-2">{r.county}</td>
                           <td className="px-3 py-2">{r.parcel_id ?? ''}</td>
+                          <td className="px-3 py-2">{r.last_permit_date ?? ''}</td>
                           <td className="px-3 py-2">
                             {r.source ? (
                               <a

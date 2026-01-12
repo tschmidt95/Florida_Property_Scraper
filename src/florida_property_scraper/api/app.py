@@ -7,6 +7,10 @@ try:
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
 
+    from florida_property_scraper.api.routes.advanced_search import (
+        router as advanced_search_router,
+    )
+    from florida_property_scraper.api.routes.permits import router as permits_router
     from florida_property_scraper.api.routes.search import router as search_router
     from florida_property_scraper.api.routes.scrape import router as scrape_router
 
@@ -124,6 +128,8 @@ app = FastAPI() if FASTAPI_AVAILABLE else None
 
 
 if app:
+    app.include_router(advanced_search_router, prefix="/api")
+    app.include_router(permits_router, prefix="/api")
     app.include_router(search_router, prefix="/api")
     app.include_router(scrape_router, prefix="/api")
 
