@@ -508,8 +508,9 @@ def _advanced_search_from_leads(
         # Determine matched fields
         matched = []
         if q:
+            row_dict = dict(row)
             for field in search_fields:
-                col_val = row.get(field, "")
+                col_val = row_dict.get(field, "")
                 if col_val and q_lower in str(col_val).lower():
                     # Map back to requested field name
                     for req_field, col_name in field_map.items():
@@ -524,11 +525,11 @@ def _advanced_search_from_leads(
                 county=str(row["county"] or ""),
                 score=int(row["score"] or 0),
                 parcel_id=str(row["parcel_id"]) if row["parcel_id"] else None,
-                source=str(row["source"]) if row.get("source") else None,
+                source=str(row["source"]) if row["source"] else None,
                 last_permit_date=str(row["last_permit_date"])
-                if row.get("last_permit_date")
+                if row["last_permit_date"]
                 else None,
-                permits_last_15y_count=int(row.get("permits_last_15y_count", 0)),
+                permits_last_15y_count=int(row["permits_last_15y_count"] or 0),
                 matched_fields=matched,
             )
         )
