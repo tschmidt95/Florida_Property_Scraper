@@ -178,4 +178,63 @@ By default the CLI now saves as it goes:
 - `./leads.sqlite` for SQLite storage (dedupe + scoring)
 
 To disable either, pass `--no-output` and/or `--no-store`.
+
+---
+
+## Permits Support
+
+### Overview
+The project now includes support for fetching building permit records from county portals. Currently supported:
+
+- **Seminole County, FL**: Click2GovBP portal at https://semc-egov.aspgov.com/Click2GovBP/
+
+### Features
+- **LIVE-gated scraping**: All live HTTP requests require `LIVE=1` environment variable
+- **Rate limiting**: <= 1 request/second with exponential backoff
+- **Best-effort robots.txt check**: Respects robots.txt directives
+- **SQLite storage**: Permits are stored in the `permits` table with deduplication
+- **Advanced search**: Filter properties by permit history (e.g., "no permits in last 15 years")
+
+### API Endpoints
+
+#### Sync Permits (requires LIVE=1)
+```bash
+LIVE=1 curl -X POST http://localhost:8000/api/permits/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "seminole",
+    "query": "123 Main St",
+    "limit": 10
+  }'
+```
+
+#### Advanced Search
+```bash
+curl -X POST http://localhost:8000/api/search/advanced \
+  -H "Content-Type: application/json" \
+  -d '{
+    "county": "Orange",
+    "text": "smith",
+    "fields": ["owner_name", "situs_address", "parcel_id"],
+    "filters": {
+      "no_permits_in_years": 15
+    },
+    "sort": "relevance",
+    "limit": 50
+  }'
+```
+
+### Database Schema
+The `permits` table includes:
+- Unique index on `(county, permit_number)`
+- Indexes on `(county, parcel_id)`, `issue_date`, and `final_date`
+- Fields: county, parcel_id, address, permit_number, permit_type, status, issue_date, final_date, description, source, raw
+
+### Frontend UI
+The web UI includes:
+- Field selection checkboxes (owner, address, parcel ID, city, zip)
+- "No permits in last N years" filter (default: 15)
+- Sort options (relevance, score, last permit date)
+- Permits columns: Last Permit Date, Permits(15y)
+
 ---
