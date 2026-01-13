@@ -34,8 +34,8 @@ from florida_property_scraper.routers.registry import get_router
 from florida_property_scraper.user_meta.storage import UserMetaSQLite, empty_user_meta
 
 
-ROOT = Path(__file__).resolve().parents[2]
-WEB_DIR = ROOT / "web"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+WEB_DIST = REPO_ROOT / "web" / "dist"
 _router = get_router("fl")
 
 
@@ -547,14 +547,43 @@ if app:
 
     @app.get("/")
     def root():
-        # Serve the web UI index if available, fall back to a simple JSON health.
-        index = WEB_DIR / "index.html"
+        # Serve the built SPA (web/dist). Fall back to JSON if missing.
+        index = WEB_DIST / "index.html"
         if index.exists():
-            return FileResponse(str(index))
-        return {"status": "ok", "message": "API running"}
+            return FileResponse(str(index), media_type="text/html")
+        return {"status": "ok", "message": "API running (web/dist missing)"}
 
-    if WEB_DIR.exists():
-        app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    if (WEB_DIST / "assets").exists():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(WEB_DIST / "assets")),
+            name="assets",
+        )
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        # SPA fallback: serve index.html for any unknown, non-API, non-docs path.
+        # Keep /api/*, /docs, /openapi.json, /health intact.
+        path = (full_path or "").lstrip("/")
+        reserved_prefixes = (
+            "api/",
+            "assets/",
+        )
+        reserved_exact = {
+            "api",
+            "assets",
+            "docs",
+            "openapi.json",
+            "redoc",
+            "health",
+        }
+        if path in reserved_exact or any(path.startswith(p) for p in reserved_prefixes):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        index = WEB_DIST / "index.html"
+        if index.exists():
+            return FileResponse(str(index), media_type="text/html")
+        raise HTTPException(status_code=404, detail="web UI not built")
 
     # Ensure leads DB exists on startup
     from florida_property_scraper.db.init import init_db
