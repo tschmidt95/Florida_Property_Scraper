@@ -5,10 +5,7 @@ from florida_property_scraper.permits.seminole import parse_permits
 
 def test_parse_permits_seminole_fixture_parses_two_rows():
     fixture = (
-        Path(__file__).parent
-        / "fixtures"
-        / "permits"
-        / "seminole_search_result.html"
+        Path(__file__).parent / "fixtures" / "permits" / "seminole_search_result.html"
     )
     html = fixture.read_text(encoding="utf-8")
     records = parse_permits(html, source_url="fixture://seminole")

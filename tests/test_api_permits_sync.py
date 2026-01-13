@@ -80,7 +80,9 @@ def test_api_permits_sync_uses_registry_and_stores(tmp_path, monkeypatch):
     # Monkeypatch the registry lookup inside the route module.
     import florida_property_scraper.api.routes.permits as permits_route
 
-    monkeypatch.setattr(permits_route, "get_permits_scraper", lambda county: _FakeScraper())
+    monkeypatch.setattr(
+        permits_route, "get_permits_scraper", lambda county: _FakeScraper()
+    )
 
     client = _client()
     r = client.post(

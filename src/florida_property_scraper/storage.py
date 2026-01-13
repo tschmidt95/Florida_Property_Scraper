@@ -50,6 +50,10 @@ class SQLiteStorage:
             cur.execute("ALTER TABLE properties ADD COLUMN state TEXT")
         if "jurisdiction" not in columns:
             cur.execute("ALTER TABLE properties ADD COLUMN jurisdiction TEXT")
+        # Add index to speed up lookup by county+address
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_properties_county_address ON properties(county, address)"
+        )
         self.conn.commit()
 
     def save_items(self, items):
@@ -141,6 +145,18 @@ class SQLiteStore:
             )
             """
         )
+        # Indexes to make lookups by county+parcel and county+address fast
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(leads)")
+        lead_cols = {r[1] for r in cur.fetchall()}
+        if "parcel_id" in lead_cols:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leads_county_parcel ON leads(county, parcel_id)"
+            )
+        if "situs_address" in lead_cols:
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leads_county_situs ON leads(county, situs_address)"
+            )
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (

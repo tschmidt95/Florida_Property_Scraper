@@ -7,9 +7,6 @@ try:
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
 
-    from florida_property_scraper.api.routes.search import router as search_router
-    from florida_property_scraper.api.routes.permits import router as permits_router
-
     FASTAPI_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency
     FastAPI = None
@@ -124,8 +121,13 @@ app = FastAPI() if FASTAPI_AVAILABLE else None
 
 
 if app:
+    from florida_property_scraper.api.routes.search import router as search_router
+    from florida_property_scraper.api.routes.permits import router as permits_router
+    from florida_property_scraper.api.routes.lookup import router as lookup_router
+
     app.include_router(search_router, prefix="/api")
     app.include_router(permits_router, prefix="/api")
+    app.include_router(lookup_router, prefix="/api")
 
     @app.get("/health")
     def health_route():
@@ -545,7 +547,18 @@ if app:
 
     @app.get("/")
     def root():
+        # Serve the web UI index if available, fall back to a simple JSON health.
+        index = WEB_DIR / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
         return {"status": "ok", "message": "API running"}
 
     if WEB_DIR.exists():
         app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+    # Ensure leads DB exists on startup
+    from florida_property_scraper.db.init import init_db
+
+    @app.on_event("startup")
+    def _ensure_leads_db():
+        init_db(os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite"))

@@ -3,6 +3,18 @@ Scan properties and look up owner information in Florida
 
 ---
 
+## Address Lookup UI
+
+- Open the app (dev):
+  - Start backend: `./scripts/dev_backend.sh` (http://localhost:8000)
+  - Start frontend: `./scripts/dev_frontend.sh` (http://localhost:5173)
+- Visit the forwarded web URL (Codespaces will expose the port). Type an address, select a county, and click "Lookup" to get a Property Card.
+- Env vars:
+  - `LEADS_SQLITE_PATH` — path to the SQLite leads DB (defaults to `./leads.sqlite`)
+  - `LIVE=1` — enable live fetching (disabled by default)
+  - `CONTACT_PROVIDER` / `CONTACT_API_KEY` — enable contact enrichment (opt-in)
+
+
 ## Getting started (local)
 
 - Create and activate a virtual environment:

@@ -55,7 +55,9 @@ def parse_permits(content: str, source_url: str) -> list[PermitRecord]:
         header_text = " ".join(
             (th.get_text(" ", strip=True) for th in t.find_all(["th", "caption"]))
         ).lower()
-        if "permit" in header_text and ("address" in header_text or "location" in header_text):
+        if "permit" in header_text and (
+            "address" in header_text or "location" in header_text
+        ):
             chosen = t
             break
 
@@ -165,7 +167,9 @@ class SeminolePermitsScraper:
             _BASE_URL + "search?query={query}",
         )
         if "{query}" not in tpl:
-            raise RuntimeError("SEMINOLE_PERMITS_SEARCH_URL_TEMPLATE must include {query}")
+            raise RuntimeError(
+                "SEMINOLE_PERMITS_SEARCH_URL_TEMPLATE must include {query}"
+            )
 
         import urllib.parse
 

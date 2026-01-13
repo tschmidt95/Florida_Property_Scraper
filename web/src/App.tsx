@@ -24,7 +24,34 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupResult, setLookupResult] = useState<any | null>(null);
+
   const activeRequestId = useRef(0);
+
+  async function runLookup() {
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupResult(null);
+    try {
+      const resp = await fetch('/api/lookup/address', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ county: selectedCounty.toLowerCase(), address: query, include_contacts: false }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+      const json = await resp.json();
+      setLookupResult(json);
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLookupLoading(false);
+    }
+  }
 
   const counties = useMemo(
     () => ['Alachua', 'Broward', 'Duval', 'Hillsborough', 'Orange', 'Palm Beach'],
@@ -316,19 +343,62 @@ export default function App() {
             <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-medium">Results</div>
+                  <div className="text-sm font-medium">Property Lookup</div>
                   <div className="mt-1 text-xs text-slate-500 sm:hidden">
-                    Selected:{' '}
-                    <span className="font-medium text-slate-700">{selectedCounty}</span>
+                    County: <span className="font-medium text-slate-700">{selectedCounty}</span>
                   </div>
                 </div>
-
-                {query.trim().length === 0 ? (
-                  <div className="text-right text-xs text-slate-500">
-                    Tip: empty query may return broad results.
-                  </div>
-                ) : null}
+                <div className="flex w-full max-w-2xl items-center gap-2">
+                  <input
+                    className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-400"
+                    placeholder="Address (e.g., 105 Pineapple Lane)"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void runSearch();
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        clearSearch();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+                    onClick={() => void runLookup()}
+                    disabled={loading}
+                  >
+                    {loading ? 'Searching…' : 'Lookup'}
+                  </button>
+                </div>
               </div>
+
+              <div className="mt-4">
+                {lookupLoading ? (
+                  <div className="text-sm text-slate-500">Looking up…</div>
+                ) : lookupError ? (
+                  <div className="text-sm text-red-700">{lookupError}</div>
+                ) : lookupResult ? (
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <div className="text-sm font-medium">Property Card</div>
+                    <div className="mt-2 text-sm">
+                      <div><strong>Address:</strong> {lookupResult.address}</div>
+                      <div><strong>County:</strong> {lookupResult.county}</div>
+                      <div><strong>Owner:</strong> {lookupResult.owner_name ?? '—'}</div>
+                      <div><strong>Mailing:</strong> {lookupResult.owner_mailing_address ?? '—'}</div>
+                      <div className="mt-2 text-xs text-slate-500">Beds: {lookupResult.property_fields?.beds ?? '—'} &middot; Baths: {lookupResult.property_fields?.baths ?? '—'} &middot; SF: {lookupResult.property_fields?.sf ?? '—'}</div>
+                      <div className="mt-2 text-xs text-slate-500">Last sale: {lookupResult.last_sale?.date ?? '—'} {lookupResult.last_sale?.price ? `($${lookupResult.last_sale.price})` : ''}</div>
+                      <div className="mt-2 text-xs text-slate-500">Contacts: {lookupResult.contacts?.phones?.length ? lookupResult.contacts.phones.join(', ') : 'Contacts unavailable'}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">No lookup yet. Type an address and press Lookup.</div>
+                )}
+              </div>
+
               <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead className="bg-slate-50 text-xs text-slate-600">
