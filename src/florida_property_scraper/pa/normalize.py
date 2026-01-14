@@ -53,6 +53,10 @@ def apply_defaults(partial: Mapping[str, Any] | None) -> PAProperty:
     except Exception:
         data["zoning"] = ""
     try:
+        data["future_land_use"] = str(data.get("future_land_use") or "")
+    except Exception:
+        data["future_land_use"] = ""
+    try:
         data["use_type"] = str(data.get("use_type") or "")
     except Exception:
         data["use_type"] = ""

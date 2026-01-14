@@ -412,11 +412,51 @@ if app:
         try:
             parcel_ids = [f.parcel_id for f in intersecting]
 
+            def _norm_choice(v: object) -> str:
+                s = str(v or "").strip()
+                if not s:
+                    return "UNKNOWN"
+                return " ".join(s.upper().split())
+
             # Optional: SQL-side filtering against cached columns.
             # Only applies when the request is not asking us to enrich missing data.
             # If enrich=true, we need to consider parcels not yet cached.
             raw_filters = payload.get("filters")
             enrich_requested = bool(payload.get("enrich", False))
+
+            # Baseline (unfiltered) option lists must be computed from the polygon/radius
+            # candidates, regardless of any attribute filters.
+            baseline_parcel_ids = list(parcel_ids)
+            baseline_pa_by_id = store.get_many(county=county_key, parcel_ids=baseline_parcel_ids)
+
+            def _baseline_options(field_name: str) -> list[str]:
+                any_real = False
+                values: set[str] = set()
+                for pa in baseline_pa_by_id.values():
+                    try:
+                        raw = getattr(pa, field_name, "")
+                    except Exception:
+                        raw = ""
+
+                    # Practical fallback: many counties do not explicitly publish a
+                    # separate Future Land Use field; treat PA use_type as a proxy.
+                    if field_name == "future_land_use":
+                        if not str(raw or "").strip():
+                            raw = (pa.use_type or pa.land_use_code or "")
+
+                    s = str(raw or "").strip()
+                    if s:
+                        any_real = True
+                        values.add(_norm_choice(s))
+                    else:
+                        values.add("UNKNOWN")
+                if not any_real:
+                    return []
+                return sorted(values)
+
+            zoning_options = _baseline_options("zoning")
+            future_land_use_options = _baseline_options("future_land_use")
+
             if isinstance(raw_filters, dict) and parcel_ids and not enrich_requested:
                 where_parts: list[str] = []
                 where_params: list[object] = []
@@ -881,6 +921,18 @@ if app:
                 except Exception:
                     fields["property_type"] = None
 
+                try:
+                    fields["zoning_norm"] = _norm_choice(pa.zoning)
+                except Exception:
+                    fields["zoning_norm"] = "UNKNOWN"
+                try:
+                    flu_raw = (pa.future_land_use or "").strip() or (
+                        (pa.use_type or pa.land_use_code or "").strip()
+                    )
+                    fields["future_land_use_norm"] = _norm_choice(flu_raw)
+                except Exception:
+                    fields["future_land_use_norm"] = "UNKNOWN"
+
             # Optional safety valve: prevent sale-based filtering/triggering.
             if not flags.sale_filtering:
                 for k in sale_fields:
@@ -931,6 +983,7 @@ if app:
             situs_address = hover.get("situs_address") or ""
             zoning = ""
             land_use = ""
+            future_land_use = ""
             property_class = ""
             living_area_sqft = None
             lot_size_sqft = None
@@ -944,6 +997,9 @@ if app:
                 owner_name = "; ".join([n for n in (pa.owner_names or []) if n]) or owner_name
                 situs_address = pa.situs_address or situs_address
                 zoning = (pa.zoning or "").strip()
+                future_land_use = (pa.future_land_use or "").strip() or (
+                    (pa.use_type or pa.land_use_code or "").strip()
+                )
                 land_use = (pa.use_type or pa.land_use_code or "").strip()
                 property_class = (pa.property_class or "").strip()
                 living_area_sqft = float(pa.living_sf or 0) or None
@@ -1023,6 +1079,7 @@ if app:
                 "situs_address": situs_address,
                 "owner_name": owner_name,
                 "land_use": land_use,
+                "future_land_use": future_land_use.strip() or None,
                 "beds": beds,
                 "baths": baths,
                 "year_built": year_built,
@@ -1066,6 +1123,8 @@ if app:
                 "count": len(results),
                 "results": results,
                 # New UI payload
+                "zoning_options": zoning_options,
+                "future_land_use_options": future_land_use_options,
                 "summary": {
                     "count": len(records),
                     "source_counts": source_counts,

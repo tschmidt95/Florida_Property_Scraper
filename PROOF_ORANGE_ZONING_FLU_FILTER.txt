@@ -1,0 +1,104 @@
+== wait /health ==
+time_utc: 2026-01-14T18:47:29.895825+00:00
+
+== /api/debug/ping ==
+{
+  "ok": true,
+  "server_time": "2026-01-14T18:47:29.901425+00:00",
+  "git": {
+    "sha": "4a6d205",
+    "branch": "feature/address-lookup-ui"
+  },
+  "env": {
+    "FPS_USE_FDOR_CENTROIDS": "1",
+    "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "APP_GIT_SHA": "",
+    "APP_GIT_BRANCH": ""
+  }
+}
+
+== POST /api/parcels/search (baseline) ==
+baseline_records_count: 200
+zoning_options_count: 3
+future_land_use_options_count: 42
+zoning_options_sample: ['ORL-P/T/AN', 'ORL-R-3B/T/AN', 'UNKNOWN']
+future_land_use_options_sample: ['000', '001', '002', '003', '004', '008', '009', '010', '0100 - SINGLE FAMILY', '011', '012', '017']
+
+== POST /api/parcels/enrich (seed) ==
+enrich_count: 10
+
+== POST /api/parcels/search (baseline again, for options) ==
+baseline2_records_count: 200
+zoning_options_count: 3
+future_land_use_options_count: 42
+
+== POST /api/parcels/search (zoning_in) ==
+chosen_zoning: ORL-P/T/AN
+zoning_filtered_count: 2
+zoning_mismatch_count: 0
+
+== POST /api/parcels/search (future_land_use_in) ==
+chosen_future_land_use: 000
+flu_filtered_count: 146
+flu_mismatch_count: 0
+
+example_record (flu):
+{
+  "parcel_id": "362229470801010",
+  "county": "orange",
+  "situs_address": "1112 E SOUTH ST, Orlando 32801",
+  "owner_name": "TURCA FLIPS REAL ESTATE LLC",
+  "land_use": "000",
+  "future_land_use": "000",
+  "beds": null,
+  "baths": null,
+  "year_built": null,
+  "last_sale_date": null,
+  "last_sale_price": 0.0,
+  "source": "live",
+  "zoning": null,
+  "zoning_reason": "not_provided_by_source",
+  "sqft": [
+    {
+      "type": "lot",
+      "value": 7496.0
+    }
+  ],
+  "raw_source_url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    }
+  ],
+  "provenance": {
+    "situs_address": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "owner_name": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "land_use": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "sqft.lot": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    }
+  },
+  "field_provenance": {},
+  "land_value": null,
+  "building_value": null,
+  "total_value": null,
+  "address": "1112 E SOUTH ST, Orlando 32801",
+  "flu": "000",
+  "property_class": "",
+  "living_area_sqft": null,
+  "lot_size_sqft": 7496.0,
+  "lat": 28.53824011403353,
+  "lng": -81.36473140514703
+}

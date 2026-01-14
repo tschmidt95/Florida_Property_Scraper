@@ -605,6 +605,7 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
         "land_use": None,
         "property_type": None,
         "zoning": None,
+        "future_land_use": None,
         "beds": None,
         "baths": None,
         "year_built": None,
@@ -688,6 +689,32 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
     if not out.get("zoning"):
         v, lab = _pick(pairs, ["zoning"])
         _set("zoning", v, lab)
+
+    # Future Land Use (FLU) (best-effort; not always present on OCPA)
+    _set_from_norm(
+        "future_land_use",
+        [
+            "futurelanduse",
+            "futurelandusecode",
+            "futurelandusecategory",
+            "futurelanduseclassification",
+            "futurelanduseclass",
+            "futurelandusemap",
+            "futurelandusedesignation",
+        ],
+        lambda x: _norm_ws(x),
+    )
+    if not out.get("future_land_use"):
+        v, lab = _pick(
+            pairs,
+            [
+                "future land use",
+                "future land-use",
+                "future landuse",
+                "flu",
+            ],
+        )
+        _set("future_land_use", v, lab)
 
     # Fallback: land_use + zoning appear in the Land grid.
     land_use, zoning = _extract_land_use_and_zoning(detail_html)

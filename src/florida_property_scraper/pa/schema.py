@@ -37,6 +37,7 @@ class PAProperty:
     land_acres: float = 0
     land_use_code: str = ""
     zoning: str = ""
+    future_land_use: str = ""
     flood_zone: str = ""
     lot_dimensions: str = ""
 

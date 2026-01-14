@@ -108,6 +108,12 @@ def compile_filters(raw: Any) -> List[Condition]:
     if isinstance(raw, dict):
         out: List[Condition] = []
 
+        def _norm_choice(v: Any) -> str:
+            s = str(v or "").strip()
+            if not s:
+                return "UNKNOWN"
+            return " ".join(s.upper().split())
+
         def _num(v: Any) -> Any:
             # Keep ints/floats; attempt to parse numeric strings.
             if v is None:
@@ -151,6 +157,20 @@ def compile_filters(raw: Any) -> List[Condition]:
             items = [str(x).strip() for x in zoning if str(x).strip()]
             if items:
                 _add("zoning", "in_list", items)
+
+        zoning_in = raw.get("zoning_in")
+        if isinstance(zoning_in, (list, tuple)) and zoning_in:
+            items = [_norm_choice(x) for x in zoning_in]
+            items = [x for x in items if x]
+            if items:
+                _add("zoning_norm", "in_list", items)
+
+        flu_in = raw.get("future_land_use_in")
+        if isinstance(flu_in, (list, tuple)) and flu_in:
+            items = [_norm_choice(x) for x in flu_in]
+            items = [x for x in items if x]
+            if items:
+                _add("future_land_use_norm", "in_list", items)
 
         ptype = raw.get("property_type")
         if isinstance(ptype, str) and ptype.strip():

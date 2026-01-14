@@ -58,6 +58,8 @@ export type ParcelAttributeFilters = {
   min_baths?: number | null;
   property_type?: string | null;
   zoning?: string | string[] | null;
+  zoning_in?: string[] | null;
+  future_land_use_in?: string[] | null;
   min_value?: number | null;
   max_value?: number | null;
   min_land_value?: number | null;
@@ -100,6 +102,7 @@ export type ParcelRecord = {
   situs_address: string;
   owner_name: string;
   land_use: string;
+  future_land_use?: string | null;
   zoning: string | null;
   zoning_reason?: string | null;
   sqft?: Array<{ type: 'living' | 'lot'; value: number }>;
@@ -130,6 +133,8 @@ export type ParcelRecord = {
 
 export type ParcelSearchResponse = {
   county: string;
+  zoning_options?: string[];
+  future_land_use_options?: string[];
   summary: {
     count: number;
     source_counts: Record<string, number>;

@@ -21,6 +21,25 @@
       }
     },
     {
+      "label": "Start: Backend Only (8000)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; source .venv/bin/activate; export LEADS_SQLITE_PATH=/workspaces/Florida_Property_Scraper/leads.sqlite; export PA_DB=\"${PA_DB:-$LEADS_SQLITE_PATH}\"; export FPS_USE_FDOR_CENTROIDS=\"${FPS_USE_FDOR_CENTROIDS:-1}\"; : > .uvicorn_8000.log; nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 > .uvicorn_8000.log 2>&1 & echo $! > .uvicorn_8000.pid; sleep 0.2; kill -0 $(cat .uvicorn_8000.pid)"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": false
+      }
+    },
+    {
       "label": "Stop: Kill 8000",
       "type": "shell",
       "command": "bash",
@@ -44,7 +63,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "echo hi"
+        "bash scripts/git_commit_push_2_6.sh"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -93,6 +112,24 @@
       }
     },
     {
+      "label": "Proof: Orange Zoning+FLU Filters",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_zoning_flu_filter.sh 2>&1 | tee PROOF_ORANGE_ZONING_FLU_FILTER.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Open: PROOF Live Search",
       "type": "shell",
       "command": "bash",
@@ -129,12 +166,97 @@
       }
     },
     {
+      "label": "Open: PROOF Orange Zoning+FLU",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 160 PROOF_ORANGE_ZONING_FLU_FILTER.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Open: Debug Ping",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
         "curl -sS http://127.0.0.1:8000/api/debug/ping | head -n 60"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Status",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit (2.6 Zoning/FLU)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add \
+  .vscode/tasks.json \
+  AGENT_CODEX_PROMPT.md \
+  PROOF_ORANGE_ZONING_FLU_FILTER.txt \
+  scripts/prove_orange_zoning_flu_filter.sh \
+  src/florida_property_scraper/api/app.py \
+  src/florida_property_scraper/api/rules.py \
+  src/florida_property_scraper/pa/normalize.py \
+  src/florida_property_scraper/pa/schema.py \
+  src/florida_property_scraper/pa/providers/orange_ocpa.py \
+  web/src/lib/api.ts \
+  web/src/pages/MapSearch.tsx; \
+git commit -m 'feat: Zoning/FLU multi-select filters'"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Push",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "git push"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

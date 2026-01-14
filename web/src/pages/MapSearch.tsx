@@ -13,6 +13,107 @@ type MapStatus = 'loading' | 'loaded' | 'failed';
 
 type DrawnCircle = { center: LatLngLiteral; radius_m: number };
 
+function MultiSelectFilter({
+  title,
+  options,
+  selected,
+  query,
+  onQuery,
+  onSelected,
+}: {
+  title: string;
+  options: string[];
+  selected: string[];
+  query: string;
+  onQuery: (q: string) => void;
+  onSelected: (next: string[]) => void;
+}) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    if (!q) return options;
+    return options.filter((o) => o.toUpperCase().includes(q));
+  }, [options, query]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const toggle = (v: string) => {
+    if (selectedSet.has(v)) onSelected(selected.filter((x) => x !== v));
+    else onSelected([...selected, v]);
+  };
+
+  const selectAll = () => {
+    onSelected([...options]);
+  };
+
+  const clear = () => {
+    onSelected([]);
+  };
+
+  return (
+    <div className="rounded-xl border border-cre-border/40 bg-cre-bg p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-cre-text">{title}</div>
+          <div className="text-[11px] text-cre-muted">
+            {selected.length} selected · {options.length} options
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text"
+            onClick={selectAll}
+            disabled={!options.length}
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text"
+            onClick={clear}
+            disabled={!selected.length}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <input
+        className="mt-2 w-full rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-sm text-cre-text"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        placeholder="Search..."
+      />
+
+      <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-cre-border/40 bg-cre-surface p-2">
+        {!options.length ? (
+          <div className="text-xs text-cre-muted">No options (field not available).</div>
+        ) : filtered.length ? (
+          <div className="space-y-1">
+            {filtered.slice(0, 250).map((o) => (
+              <label key={o} className="flex items-center gap-2 text-xs text-cre-text">
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(o)}
+                  onChange={() => toggle(o)}
+                />
+                <span className="truncate">{o}</span>
+              </label>
+            ))}
+            {filtered.length > 250 ? (
+              <div className="pt-1 text-[11px] text-cre-muted">
+                Showing first 250 matches. Refine your search.
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="text-xs text-cre-muted">No matches.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function patchLeafletDrawPolygonBehavior(): void {
   // Leaflet.draw default UX finishes a polygon by clicking the first vertex.
   // For acquisition search we only want explicit finish (toolbar) or double-click.
@@ -96,6 +197,13 @@ export default function MapSearch({
   });
   const [autoEnrichMissing, setAutoEnrichMissing] = useState(false);
 
+  const [zoningOptions, setZoningOptions] = useState<string[]>([]);
+  const [futureLandUseOptions, setFutureLandUseOptions] = useState<string[]>([]);
+  const [zoningQuery, setZoningQuery] = useState('');
+  const [futureLandUseQuery, setFutureLandUseQuery] = useState('');
+  const [selectedZoning, setSelectedZoning] = useState<string[]>([]);
+  const [selectedFutureLandUse, setSelectedFutureLandUse] = useState<string[]>([]);
+
   const [sourceCounts, setSourceCounts] = useState<{ live: number; cache: number }>({
     live: 0,
     cache: 0,
@@ -152,6 +260,12 @@ export default function MapSearch({
     setDrawnPolygon(null);
     setDrawnCircle(null);
     setSelectedParcelId(null);
+    setZoningOptions([]);
+    setFutureLandUseOptions([]);
+    setZoningQuery('');
+    setFutureLandUseQuery('');
+    setSelectedZoning([]);
+    setSelectedFutureLandUse([]);
   }
 
   useEffect(() => {
@@ -233,7 +347,9 @@ export default function MapSearch({
       min_year_built: toIntOrNull(filterForm.minYearBuilt),
       max_year_built: toIntOrNull(filterForm.maxYearBuilt),
       property_type: filterForm.propertyType.trim() || null,
-      zoning: filterForm.zoning.trim() || null,
+      zoning: selectedZoning.length ? null : filterForm.zoning.trim() || null,
+      zoning_in: selectedZoning.length ? selectedZoning : null,
+      future_land_use_in: selectedFutureLandUse.length ? selectedFutureLandUse : null,
       min_value: toIntOrNull(filterForm.minValue),
       max_value: toIntOrNull(filterForm.maxValue),
       min_land_value: toIntOrNull(filterForm.minLandValue),
@@ -269,6 +385,11 @@ export default function MapSearch({
     try {
       const resp = await parcelsSearch(payload);
       if (reqId !== activeReq.current) return;
+
+      const zo = (resp as any).zoning_options;
+      setZoningOptions(Array.isArray(zo) ? (zo as string[]) : []);
+      const fu = (resp as any).future_land_use_options;
+      setFutureLandUseOptions(Array.isArray(fu) ? (fu as string[]) : []);
 
       const recs = resp.records || [];
       const warnings = (resp as any).warnings as string[] | undefined;
@@ -325,6 +446,12 @@ export default function MapSearch({
               setRecords([]);
               setSourceCounts({ live: 0, cache: 0 });
               setSelectedParcelId(null);
+              setZoningOptions([]);
+              setFutureLandUseOptions([]);
+              setZoningQuery('');
+              setFutureLandUseQuery('');
+              setSelectedZoning([]);
+              setSelectedFutureLandUse([]);
             }}
           >
             <option value="orange">Orange</option>
@@ -428,6 +555,28 @@ export default function MapSearch({
                 placeholder="e.g. R-1"
               />
             </label>
+
+          <div className="mt-3 space-y-3">
+            <MultiSelectFilter
+              title="Current Zoning (multi-select)"
+              options={zoningOptions}
+              selected={selectedZoning}
+              query={zoningQuery}
+              onQuery={setZoningQuery}
+              onSelected={setSelectedZoning}
+            />
+            <MultiSelectFilter
+              title="Future Land Use (multi-select)"
+              options={futureLandUseOptions}
+              selected={selectedFutureLandUse}
+              query={futureLandUseQuery}
+              onQuery={setFutureLandUseQuery}
+              onSelected={setSelectedFutureLandUse}
+            />
+            <div className="text-[11px] text-cre-muted">
+              Note: selecting multi-select values overrides the Zoning “contains” input.
+            </div>
+          </div>
 
             <label className="space-y-1">
               <div className="text-cre-muted">Min Total Value</div>
