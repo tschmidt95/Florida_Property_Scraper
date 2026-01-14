@@ -122,6 +122,16 @@ function patchLeafletDrawPolygonBehavior(): void {
   if (!proto || proto.__fpsPatched) return;
   proto.__fpsPatched = true;
 
+  const originalFinishShape = proto._finishShape;
+  if (typeof originalFinishShape === 'function') {
+    proto._finishShape = function patchedFinishShape(this: any, e: any) {
+      // Prevent accidental single-click finishes (typically clicking the first vertex).
+      // Allow explicit finish actions (toolbar) and double-click.
+      if (e?.type === 'click') return;
+      return originalFinishShape.call(this, e);
+    };
+  }
+
   const originalUpdateFinishHandler = proto._updateFinishHandler;
   proto._updateFinishHandler = function patchedUpdateFinishHandler(this: any) {
     if (typeof originalUpdateFinishHandler === 'function') {
@@ -132,6 +142,8 @@ function patchLeafletDrawPolygonBehavior(): void {
       const first = Array.isArray(this._markers) ? this._markers[0] : null;
       if (first && typeof first.off === 'function' && this._finishShape) {
         first.off('click', this._finishShape, this);
+        first.off('mousedown', this._finishShape, this);
+        first.off('touchstart', this._finishShape, this);
       }
     } catch {
       // ignore
@@ -234,6 +246,8 @@ export default function MapSearch({
         // Explicitly ensure unlimited vertices.
         // Leaflet.draw treats 0/undefined as "no cap".
         maxPoints: 0,
+        // Avoid the tool "dying" on self-intersections; acquisition polygons can be messy.
+        allowIntersection: true,
         repeatMode: false,
       },
       circle: true,

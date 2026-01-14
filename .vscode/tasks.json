@@ -130,6 +130,24 @@
       }
     },
     {
+      "label": "Proof: Orange Parcel Size Filter",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_lot_size_filter.sh 2>&1 | tee PROOF_ORANGE_LOT_SIZE_FILTER.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Open: PROOF Live Search",
       "type": "shell",
       "command": "bash",
@@ -275,6 +293,30 @@ git commit -m 'feat: Zoning/FLU multi-select filters'"
       "args": [
         "-lc",
         "git push"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit (Polygon + proofs)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add \
+  .vscode/tasks.json \
+  web/src/pages/MapSearch.tsx \
+  PROOF_ORANGE_ENRICH.txt \
+  PROOF_ORANGE_LOT_SIZE_FILTER.txt; \
+git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

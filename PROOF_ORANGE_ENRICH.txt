@@ -1,19 +1,19 @@
 == wait /health ==
-time_utc: 2026-01-14T19:46:14.523982+00:00
+time_utc: 2026-01-14T20:41:44.001797+00:00
 
 == /api/debug/ping ==
 {
   "ok": true,
-  "server_time": "2026-01-14T19:46:14.524896+00:00",
+  "server_time": "2026-01-14T20:41:44.002622+00:00",
   "git": {
-    "sha": "0af0232",
+    "sha": "85c514a",
     "branch": "feature/address-lookup-ui"
   },
   "env": {
     "FPS_USE_FDOR_CENTROIDS": "1",
     "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
     "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
-    "APP_GIT_SHA": "0af0232",
+    "APP_GIT_SHA": "85c514a",
     "APP_GIT_BRANCH": "feature/address-lookup-ui"
   }
 }
