@@ -303,6 +303,46 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    def list_permits_for_parcel(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        county_key = (county or "").strip().lower()
+        pid = (parcel_id or "").strip()
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 200
+        lim = max(1, min(lim, 500))
+
+        if not county_key or not pid:
+            return []
+
+        rows = self.conn.execute(
+            """
+            SELECT
+                county,
+                parcel_id,
+                address,
+                permit_number,
+                permit_type,
+                status,
+                issue_date,
+                final_date,
+                description,
+                source
+            FROM permits
+            WHERE county=? AND parcel_id=?
+            ORDER BY COALESCE(issue_date, final_date) DESC
+            LIMIT ?
+            """,
+            (county_key, pid, lim),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def record_run_start(
         self,
         run_id: str,

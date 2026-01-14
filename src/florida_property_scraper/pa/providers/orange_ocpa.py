@@ -239,6 +239,46 @@ def _is_blocked(status: int, html: str) -> Tuple[bool, str]:
     return False, ""
 
 
+def _extract_photo_url(detail_html: str, base_url: str) -> Optional[str]:
+    """Best-effort extraction of a parcel photo URL from OCPA detail HTML."""
+
+    candidates: List[str] = []
+    for m in re.finditer(r"<img[^>]+src=(['\"])([^'\"]+)\1", detail_html or "", flags=re.I):
+        src = (m.group(2) or "").strip()
+        if not src:
+            continue
+        if src.startswith("data:"):
+            continue
+        lower = src.lower()
+        if any(x in lower for x in ("logo", "icon", "sprite", "spacer", "captcha")):
+            continue
+        candidates.append(src)
+
+    if not candidates:
+        return None
+
+    def score(src: str) -> int:
+        s = src.lower()
+        sc = 0
+        if any(x in s for x in ("photo", "picture", "image")):
+            sc += 4
+        if any(x in s for x in ("parcel", "property", "recordcard", "record", "card")):
+            sc += 2
+        if any(s.endswith(ext) for ext in (".jpg", ".jpeg", ".png")):
+            sc += 2
+        if any(x in s for x in ("transparent", "blank", "pixel")):
+            sc -= 5
+        return sc
+
+    best = max(candidates, key=score)
+    if score(best) <= 0:
+        return None
+    try:
+        return urljoin(base_url or OCPA_LANDING_URL, best)
+    except Exception:
+        return None
+
+
 def _extract_ocpa_result_links(html: str) -> List[Tuple[str, str]]:
     """Return a list of (href, row_text) for OCPA detail candidates.
 
@@ -615,6 +655,10 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
         "total_value": None,
         "last_sale_date": None,
         "last_sale_price": None,
+        "photo_url": None,
+        "mortgage_lender": None,
+        "mortgage_amount": None,
+        "mortgage_date": None,
         "source_url": source_url,
         "field_provenance": {},
     }
@@ -811,6 +855,32 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
     if not out.get("last_sale_price"):
         v, lab = _pick(pairs, ["last sale price", "sale price", "price"])
         _set("last_sale_price", _as_float(v) if v is not None else None, lab)
+
+    # Photo (if present)
+    photo = _extract_photo_url(detail_html, source_url)
+    if photo:
+        _set("photo_url", photo, "Property Photo")
+
+    # Mortgage (best-effort; not always present in OCPA HTML)
+    def _pick_mortgage(tokens: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        toks = [t.lower() for t in tokens if t]
+        for label, value in pairs:
+            lower = (label or "").lower()
+            if all(t in lower for t in toks):
+                return value, label
+        return None, None
+
+    v, lab = _pick_mortgage(["mortg", "lend"])  # mortgage lender
+    if v:
+        _set("mortgage_lender", _norm_ws(v), lab)
+
+    v, lab = _pick_mortgage(["mortg", "amount"])  # mortgage amount
+    if v:
+        _set("mortgage_amount", _as_float(v), lab)
+
+    v, lab = _pick_mortgage(["mortg", "date"])  # mortgage date
+    if v:
+        _set("mortgage_date", _as_date_iso(v) or _norm_ws(v), lab)
 
     # Emit provenance in required shape
     out["field_provenance"] = {

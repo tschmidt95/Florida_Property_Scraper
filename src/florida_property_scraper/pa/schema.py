@@ -78,6 +78,14 @@ class PAProperty:
     prior_sale_date: Optional[str] = None
     prior_sale_price: float = 0
 
+    # media
+    photo_url: str = ""
+
+    # mortgage (best-effort; may be unavailable)
+    mortgage_lender: str = ""
+    mortgage_amount: float = 0
+    mortgage_date: str = ""
+
     # ownership
     owner_names: List[str] = field(default_factory=list)
     owner_type: str = ""

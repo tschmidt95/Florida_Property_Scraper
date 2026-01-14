@@ -55,6 +55,10 @@ export type ParcelAttributeFilters = {
   lot_size_unit?: 'sqft' | 'acres' | null;
   min_lot_size?: number | null;
   max_lot_size?: number | null;
+  // Preferred contract: normalized square-feet values.
+  // If provided, backend should treat these as authoritative.
+  min_lot_size_sqft?: number | null;
+  max_lot_size_sqft?: number | null;
   min_year_built?: number | null;
   max_year_built?: number | null;
   min_beds?: number | null;
@@ -133,6 +137,25 @@ export type ParcelRecord = {
   lat: number;
   lng: number;
   geometry?: GeoJSON.Geometry;
+
+  // Optional detail fields (available after enrichment / supporting endpoints).
+  photo_url?: string | null;
+  mortgage_lender?: string | null;
+  mortgage_amount?: number | null;
+  mortgage_date?: string | null;
+};
+
+export type PermitRecord = {
+  county: string;
+  parcel_id?: string | null;
+  address?: string | null;
+  permit_number: string;
+  permit_type?: string | null;
+  status?: string | null;
+  issue_date?: string | null;
+  final_date?: string | null;
+  description?: string | null;
+  source?: string | null;
 };
 
 export type ParcelSearchResponse = {
@@ -178,6 +201,30 @@ export async function debugPing(): Promise<DebugPingResponse> {
     throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
   }
   return (await resp.json()) as DebugPingResponse;
+}
+
+export async function permitsByParcel(params: {
+  county: string;
+  parcel_id: string;
+  limit?: number;
+}): Promise<PermitRecord[]> {
+  const qs = new URLSearchParams({
+    county: params.county,
+    parcel_id: params.parcel_id,
+  });
+  if (typeof params.limit === 'number') qs.set('limit', String(params.limit));
+  const resp = await fetch(`/api/permits/by_parcel?${qs.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!Array.isArray(data)) throw new Error('Unexpected response: expected an array');
+  return data as PermitRecord[];
 }
 
 export type AdvancedSearchFilters = {

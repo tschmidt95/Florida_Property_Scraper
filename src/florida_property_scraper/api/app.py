@@ -1092,10 +1092,30 @@ if app:
             data_sources = []
             field_provenance = {}
             raw_source_url = ""
+            photo_url = None
+            mortgage_lender = None
+            mortgage_amount = None
+            mortgage_date = None
             if pa is not None:
                 raw_source_url = str(pa.source_url or "")
                 data_sources = getattr(pa, "sources", None) or []
                 field_provenance = getattr(pa, "field_provenance", None) or {}
+                try:
+                    photo_url = str(getattr(pa, "photo_url", "") or "").strip() or None
+                except Exception:
+                    photo_url = None
+                try:
+                    mortgage_lender = str(getattr(pa, "mortgage_lender", "") or "").strip() or None
+                except Exception:
+                    mortgage_lender = None
+                try:
+                    mortgage_amount = float(getattr(pa, "mortgage_amount", 0) or 0) or None
+                except Exception:
+                    mortgage_amount = None
+                try:
+                    mortgage_date = str(getattr(pa, "mortgage_date", "") or "").strip() or None
+                except Exception:
+                    mortgage_date = None
 
             rec = {
                 "parcel_id": feat.parcel_id,
@@ -1117,6 +1137,10 @@ if app:
                 "data_sources": data_sources,
                 "provenance": provenance,
                 "field_provenance": field_provenance,
+                "photo_url": photo_url,
+                "mortgage_lender": mortgage_lender,
+                "mortgage_amount": mortgage_amount,
+                "mortgage_date": mortgage_date,
                 "land_value": land_value,
                 "building_value": building_value,
                 "total_value": total_value,
@@ -1300,6 +1324,11 @@ if app:
                         last_sale_date = ocpa.get("last_sale_date")
                         last_sale_price = float(ocpa.get("last_sale_price") or 0)
 
+                        photo_url = str(ocpa.get("photo_url") or "").strip()
+                        mortgage_lender = str(ocpa.get("mortgage_lender") or "").strip()
+                        mortgage_amount = float(ocpa.get("mortgage_amount") or 0)
+                        mortgage_date = str(ocpa.get("mortgage_date") or "").strip()
+
                         pa_rec = PAProperty(
                             county=county_key,
                             parcel_id=str(pid),
@@ -1320,6 +1349,10 @@ if app:
                             assessed_value=total_value,
                             last_sale_date=last_sale_date,
                             last_sale_price=last_sale_price,
+                            photo_url=photo_url,
+                            mortgage_lender=mortgage_lender,
+                            mortgage_amount=mortgage_amount,
+                            mortgage_date=mortgage_date,
                             zip=(row.situs_zip if row is not None else "") or "",
                             latitude=(row.lat if row is not None else None),
                             longitude=(row.lon if row is not None else None),
@@ -1462,6 +1495,27 @@ if app:
             data_sources = getattr(pa, "sources", None) or []
             field_provenance = getattr(pa, "field_provenance", None) or {}
 
+            photo_url = None
+            mortgage_lender = None
+            mortgage_amount = None
+            mortgage_date = None
+            try:
+                photo_url = str(getattr(pa, "photo_url", "") or "").strip() or None
+            except Exception:
+                photo_url = None
+            try:
+                mortgage_lender = str(getattr(pa, "mortgage_lender", "") or "").strip() or None
+            except Exception:
+                mortgage_lender = None
+            try:
+                mortgage_amount = float(getattr(pa, "mortgage_amount", 0) or 0) or None
+            except Exception:
+                mortgage_amount = None
+            try:
+                mortgage_date = str(getattr(pa, "mortgage_date", "") or "").strip() or None
+            except Exception:
+                mortgage_date = None
+
             zoning_out = (pa.zoning or "").strip() or None
             zoning_reason = None if zoning_out else "not_provided_by_source"
 
@@ -1485,6 +1539,10 @@ if app:
                     "land_value": land_value,
                     "building_value": building_value,
                     "total_value": total_value,
+                    "photo_url": photo_url,
+                    "mortgage_lender": mortgage_lender,
+                    "mortgage_amount": mortgage_amount,
+                    "mortgage_date": mortgage_date,
                     "source": "cache",
                     "raw_source_url": purl,
                     "data_sources": data_sources,

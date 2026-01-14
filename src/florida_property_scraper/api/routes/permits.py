@@ -54,6 +54,19 @@ class PermitsSyncResponseItem(BaseModel):
     source: str
 
 
+class PermitsByParcelResponseItem(BaseModel):
+    county: str
+    parcel_id: str | None = None
+    address: str | None = None
+    permit_number: str
+    permit_type: str | None = None
+    status: str | None = None
+    issue_date: str | None = None
+    final_date: str | None = None
+    description: str | None = None
+    source: str | None = None
+
+
 if router:
 
     @router.post("/permits/sync", response_model=list[PermitsSyncResponseItem])
@@ -97,3 +110,28 @@ if router:
             )
             for r in records
         ]
+
+    @router.get(
+        "/permits/by_parcel",
+        response_model=list[PermitsByParcelResponseItem],
+    )
+    def permits_by_parcel(
+        county: str,
+        parcel_id: str,
+        limit: int = 200,
+    ) -> list[PermitsByParcelResponseItem]:
+        county_key = (county or "").strip().lower()
+        pid = (parcel_id or "").strip()
+        if not county_key:
+            raise HTTPException(status_code=400, detail="county is required")
+        if not pid:
+            raise HTTPException(status_code=400, detail="parcel_id is required")
+
+        db_path = _get_db_path()
+        store = SQLiteStore(str(db_path))
+        try:
+            rows = store.list_permits_for_parcel(county=county_key, parcel_id=pid, limit=limit)
+        finally:
+            store.close()
+
+        return [PermitsByParcelResponseItem(**r) for r in rows]

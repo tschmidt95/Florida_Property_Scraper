@@ -136,16 +136,25 @@ def compile_filters(raw: Any) -> List[Condition]:
         _add("living_area_sqft", ">=", _num(raw.get("min_sqft")))
         _add("living_area_sqft", "<=", _num(raw.get("max_sqft")))
 
-        lot_unit = str(raw.get("lot_size_unit") or "sqft").strip().lower()
-        min_lot = _num(raw.get("min_lot_size"))
-        max_lot = _num(raw.get("max_lot_size"))
-        if lot_unit == "acres":
-            _add("lot_size_acres", ">=", min_lot)
-            _add("lot_size_acres", "<=", max_lot)
+        # Lot size filters.
+        # Preferred: explicit sqft keys.
+        min_lot_sqft = _num(raw.get("min_lot_size_sqft"))
+        max_lot_sqft = _num(raw.get("max_lot_size_sqft"))
+        if min_lot_sqft is not None or max_lot_sqft is not None:
+            _add("lot_size_sqft", ">=", min_lot_sqft)
+            _add("lot_size_sqft", "<=", max_lot_sqft)
         else:
-            # Default to sqft for unknown/missing unit.
-            _add("lot_size_sqft", ">=", min_lot)
-            _add("lot_size_sqft", "<=", max_lot)
+            # Legacy: unit + value.
+            lot_unit = str(raw.get("lot_size_unit") or "sqft").strip().lower()
+            min_lot = _num(raw.get("min_lot_size"))
+            max_lot = _num(raw.get("max_lot_size"))
+            if lot_unit == "acres":
+                _add("lot_size_acres", ">=", min_lot)
+                _add("lot_size_acres", "<=", max_lot)
+            else:
+                # Default to sqft for unknown/missing unit.
+                _add("lot_size_sqft", ">=", min_lot)
+                _add("lot_size_sqft", "<=", max_lot)
 
         _add("year_built", ">=", _num(raw.get("min_year_built")))
         _add("year_built", "<=", _num(raw.get("max_year_built")))
