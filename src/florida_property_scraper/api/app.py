@@ -1,22 +1,8 @@
 from pathlib import Path
 
-try:
-    from fastapi import FastAPI
-    from fastapi import Body
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-    from fastapi.staticfiles import StaticFiles
-
-    FASTAPI_AVAILABLE = True
-except Exception:  # pragma: no cover - optional dependency
-    FastAPI = None
-    Body = None
-    HTTPException = None
-    FileResponse = None
-    JSONResponse = None
-    StreamingResponse = None
-    StaticFiles = None
-    FASTAPI_AVAILABLE = False
+from fastapi import Body, FastAPI, HTTPException, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import json
 import os
@@ -37,6 +23,7 @@ from florida_property_scraper.user_meta.storage import UserMetaSQLite, empty_use
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WEB_DIST = REPO_ROOT / "web" / "dist"
 _router = get_router("fl")
+assert _router is not None
 
 
 def health():
@@ -44,6 +31,7 @@ def health():
 
 
 def counties():
+    assert _router is not None
     return {"counties": list(_router.enabled_counties())}
 
 
@@ -117,13 +105,17 @@ def stream_search(
     yield json.dumps({"summary": summary}) + "\n"
 
 
-app = FastAPI() if FASTAPI_AVAILABLE else None
+app = FastAPI()
 
 
 if app:
     from florida_property_scraper.api.routes.search import router as search_router
     from florida_property_scraper.api.routes.permits import router as permits_router
     from florida_property_scraper.api.routes.lookup import router as lookup_router
+
+    assert search_router is not None
+    assert permits_router is not None
+    assert lookup_router is not None
 
     app.include_router(search_router, prefix="/api")
     app.include_router(permits_router, prefix="/api")
@@ -288,19 +280,48 @@ if app:
         from florida_property_scraper.pa.ui_computed import compute_ui_fields
 
         county_key = (payload.get("county") or "").strip().lower() or "seminole"
+        live = bool(payload.get("live", False))
         include_geometry = bool(payload.get("include_geometry", False))
         limit = int(payload.get("limit", 200))
         if limit <= 0:
             limit = 200
 
+        # Guardrail: live mode can be expensive if/when implemented.
+        if live and limit > 250:
+            limit = 250
+
         geometry = payload.get("geometry")
         radius = payload.get("radius")
+        radius_m = payload.get("radius_m")
+        center_obj = payload.get("center")
         if geometry and radius:
             raise HTTPException(
                 status_code=400, detail="Provide either geometry or radius, not both"
             )
 
-        if radius is not None:
+        if geometry and (radius_m is not None or center_obj is not None):
+            raise HTTPException(
+                status_code=400, detail="Provide either geometry or radius, not both"
+            )
+
+        if radius_m is not None or center_obj is not None:
+            # Newer shape: {center:{lat,lng}, radius_m:number}
+            if not isinstance(center_obj, dict) or not isinstance(radius_m, (int, float)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="radius search must be {center:{lat,lng}, radius_m:number}",
+                )
+            lat = center_obj.get("lat")
+            lng = center_obj.get("lng")
+            if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="center must be {lat:number, lng:number}",
+                )
+            miles = float(radius_m) / 1609.344
+            geometry = circle_polygon(center_lon=float(lng), center_lat=float(lat), miles=miles)
+
+        elif radius is not None:
             if not isinstance(radius, dict):
                 raise HTTPException(status_code=400, detail="radius must be an object")
             center = radius.get("center")
@@ -337,14 +358,98 @@ if app:
         intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
 
         # Batch-load PA records + hover fields for evaluation.
+        # If live=true, best-effort enrich missing parcel_ids into PA before continuing.
         db_path = os.getenv("PA_DB", "./leads.sqlite")
         store = PASQLite(db_path)
         try:
             parcel_ids = [f.parcel_id for f in intersecting]
             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
-            hover_by_id = store.get_hover_fields_many(
-                county=county_key, parcel_ids=parcel_ids
-            )
+
+            if live:
+                import re
+
+                from florida_property_scraper.backend.native_adapter import NativeAdapter
+                from florida_property_scraper.pa.schema import PAProperty
+
+                def _as_float(v: object) -> float:
+                    if v is None:
+                        return 0.0
+                    if isinstance(v, (int, float)):
+                        return float(v)
+                    if not isinstance(v, str):
+                        return 0.0
+                    s = v.strip()
+                    if not s:
+                        return 0.0
+                    s = s.replace(",", "")
+                    m = re.search(r"[-+]?\d*\.?\d+", s)
+                    if not m:
+                        return 0.0
+                    try:
+                        return float(m.group(0))
+                    except Exception:
+                        return 0.0
+
+                def _as_int(v: object) -> int:
+                    return int(round(_as_float(v)))
+
+                missing_ids = [pid for pid in parcel_ids if pid not in pa_by_id]
+                live_cap = int(os.getenv("LIVE_PARCEL_ENRICH_LIMIT", "40"))
+                if live_cap < 0:
+                    live_cap = 0
+                enrich_ids = missing_ids[: min(live_cap, limit)]
+                if enrich_ids:
+                    adapter = NativeAdapter()
+                    for pid in enrich_ids:
+                        try:
+                            items = adapter.search(
+                                pid,
+                                live=True,
+                                county_slug=county_key,
+                                state="fl",
+                                max_items=1,
+                            )
+                        except Exception:
+                            continue
+
+                        if not items:
+                            continue
+
+                        item = items[0] if isinstance(items[0], dict) else {}
+                        owner = str(item.get("owner") or "").strip()
+                        address = str(item.get("address") or "").strip()
+                        zoning_v = str(item.get("zoning") or "").strip()
+                        property_class_v = str(item.get("property_class") or "").strip()
+
+                        pa_rec = PAProperty(
+                            county=county_key,
+                            parcel_id=str(pid),
+                            situs_address=address,
+                            owner_names=[owner] if owner else [],
+                            zoning=zoning_v,
+                            property_class=property_class_v,
+                            land_sf=_as_float(item.get("land_size")),
+                            building_sf=_as_float(item.get("building_size")),
+                            living_sf=_as_float(item.get("building_size")),
+                            bedrooms=_as_int(item.get("bedrooms")),
+                            bathrooms=_as_float(item.get("bathrooms")),
+                            land_use_code=str(item.get("land_use_code") or "").strip(),
+                            use_type=str(item.get("use_type") or "").strip(),
+                            zip=str(item.get("zip") or "").strip(),
+                            year_built=_as_int(item.get("year_built")),
+                            source_url=str(item.get("source_url") or "").strip(),
+                            extracted_at=str(item.get("extracted_at") or "").strip(),
+                            parser_version=str(item.get("parser_version") or "").strip(),
+                        )
+                        try:
+                            store.upsert(pa_rec)
+                        except Exception:
+                            continue
+
+                    # Refresh after best-effort enrichment.
+                    pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
+
+            hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
         finally:
             store.close()
 
@@ -364,6 +469,8 @@ if app:
         }
 
         results = []
+        records = []
+        source_counts: dict[str, int] = {"local": 0, "live": 0, "geojson": 0, "missing": 0}
         for feat in intersecting:
             pa = pa_by_id.get(feat.parcel_id)
             pa_dict = pa.to_dict() if pa is not None else None
@@ -403,11 +510,96 @@ if app:
             if include_geometry:
                 row["geometry"] = feat.geometry
             results.append(row)
+
+            # Enriched record payload for the modern UI.
+            source = "local" if pa_dict else ("live" if live else "missing")
+
+            # Best-effort: Orange geojson includes a lightweight meta cache we can use
+            # when PA DB doesn't have a record (still not full PA).
+            if source == "missing" and getattr(provider, "county", "") == "orange":
+                meta = getattr(provider, "_meta", {}).get(feat.parcel_id) if hasattr(provider, "_meta") else None
+                if isinstance(meta, dict):
+                    source = "geojson"
+                    if not hover.get("situs_address"):
+                        hover["situs_address"] = meta.get("situs") or ""
+                    if not hover.get("owner_name"):
+                        hover["owner_name"] = meta.get("owner") or ""
+                    if not hover.get("last_sale_date"):
+                        hover["last_sale_date"] = meta.get("sale_date")
+                    if not hover.get("last_sale_price"):
+                        try:
+                            hover["last_sale_price"] = float(meta.get("sale_price") or 0)
+                        except Exception:
+                            pass
+
+            source_counts[source] = int(source_counts.get(source, 0)) + 1
+
+            owner_name = hover.get("owner_name") or ""
+            situs_address = hover.get("situs_address") or ""
+            zoning = ""
+            land_use = ""
+            property_class = ""
+            living_area_sqft = None
+            lot_size_sqft = None
+            beds = None
+            baths = None
+            year_built = None
+            last_sale_date = hover.get("last_sale_date")
+            last_sale_price = hover.get("last_sale_price")
+
+            if pa is not None:
+                owner_name = "; ".join([n for n in (pa.owner_names or []) if n]) or owner_name
+                situs_address = pa.situs_address or situs_address
+                zoning = (pa.zoning or "").strip()
+                land_use = (pa.use_type or pa.land_use_code or "").strip()
+                property_class = (pa.property_class or "").strip()
+                living_area_sqft = float(pa.living_sf or 0) or None
+                if living_area_sqft is None:
+                    living_area_sqft = float(pa.building_sf or 0) or None
+                lot_size_sqft = float(pa.land_sf or 0) or None
+                beds = int(pa.bedrooms) if int(pa.bedrooms or 0) > 0 else None
+                baths = float(pa.bathrooms) if float(pa.bathrooms or 0) > 0 else None
+                year_built = int(pa.year_built) if int(pa.year_built or 0) > 0 else None
+                last_sale_date = pa.last_sale_date or last_sale_date
+                last_sale_price = float(pa.last_sale_price or 0) or last_sale_price
+
+            rec = {
+                "parcel_id": feat.parcel_id,
+                "county": county_key,
+                "situs_address": situs_address,
+                "owner_name": owner_name,
+                "property_class": property_class,
+                "land_use": land_use,
+                "zoning": zoning,
+                "living_area_sqft": living_area_sqft,
+                "lot_size_sqft": lot_size_sqft,
+                "beds": beds,
+                "baths": baths,
+                "year_built": year_built,
+                "last_sale_date": last_sale_date,
+                "last_sale_price": last_sale_price,
+                "source": source,
+            }
+            if include_geometry:
+                rec["geometry"] = feat.geometry
+            records.append(rec)
+
             if len(results) >= limit:
                 break
 
         return JSONResponse(
-            {"county": county_key, "count": len(results), "results": results}
+            {
+                # Backwards-compatible keys
+                "county": county_key,
+                "count": len(results),
+                "results": results,
+                # New UI payload
+                "summary": {
+                    "count": len(records),
+                    "source_counts": source_counts,
+                },
+                "records": records,
+            }
         )
 
     @app.get("/api/parcels/{parcel_id}")
@@ -545,13 +737,25 @@ if app:
         cache_set(cache_key, payload, ttl=30)
         return JSONResponse(payload)
 
-    @app.get("/")
-    def root():
-        # Serve the built SPA (web/dist). Fall back to JSON if missing.
+    def _spa_index_response():
         index = WEB_DIST / "index.html"
         if index.exists():
             return FileResponse(str(index), media_type="text/html")
         return {"status": "ok", "message": "API running (web/dist missing)"}
+
+    @app.get("/")
+    def root():
+        # Serve the built SPA (web/dist). Fall back to JSON if missing.
+        return _spa_index_response()
+
+    @app.head("/", include_in_schema=False)
+    def root_head():
+        # Ensure HEAD / works for curl -I / (avoid 405 Method Not Allowed).
+        # Return an empty 200 response; GET / serves the actual index.html.
+        index = WEB_DIST / "index.html"
+        if index.exists():
+            return Response(status_code=200, media_type="text/html")
+        return Response(status_code=200)
 
     if (WEB_DIST / "assets").exists():
         app.mount(

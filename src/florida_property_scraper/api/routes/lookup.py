@@ -30,6 +30,7 @@ def lookup_address(payload: dict = Body(...)):
     county = _normalize_county(payload.get("county"))
     address = _normalize_addr(payload.get("address"))
     include_contacts = bool(payload.get("include_contacts", False))
+    live = bool(payload.get("live", False))
 
     if not address:
         raise HTTPException(status_code=400, detail="address is required")
@@ -64,6 +65,8 @@ def lookup_address(payload: dict = Body(...)):
             continue
         try:
             like = f"%{address.lower()}%"
+            if pa_store.conn is None:
+                continue
             row = pa_store.conn.execute(
                 "SELECT record_json FROM pa_properties WHERE LOWER(record_json) LIKE ? AND LOWER(county)=? LIMIT 1",
                 (like, county),
@@ -144,45 +147,47 @@ def lookup_address(payload: dict = Body(...)):
 
         if address_col is None:
             # No suitable address column in leads table; skip DB search.
-            return
-
-        q = f"%{address.lower()}%"
-        select_cols = [f"{address_col} AS situs_address"]
-        if "mailing_address" in cols:
-            select_cols.append("mailing_address")
-        if "owner_name" in cols:
-            select_cols.append("owner_name")
-        if "parcel_id" in cols:
-            select_cols.append("parcel_id")
-        if "raw_json" in cols:
-            select_cols.append("raw_json")
-        select_sql = ", ".join(["county"] + select_cols)
-        sql = f"SELECT {select_sql} FROM leads WHERE LOWER({address_col}) LIKE ? AND LOWER(county)=? LIMIT 1"
-        row = store.conn.execute(sql, (q, county)).fetchone()
-        if row:
-            raw = json.loads(row["raw_json"]) if ("raw_json" in row.keys() and row["raw_json"]) else {}
-            pf = PropertyFields()
-            last = LastSale()
-            card = PropertyCard(
-                county=row["county"],
-                address=row["situs_address"] or address,
-                owner_name=row.get("owner_name"),
-                owner_mailing_address=row.get("mailing_address"),
-                parcel_id=row.get("parcel_id"),
-                property_fields=pf,
-                last_sale=last,
-            )
-            # contacts are stored in contact_phones/contact_emails inside raw_json when present
-            phones = raw.get("contact_phones", [])
-            emails = raw.get("contact_emails", [])
-            card.contacts.phones = phones or []
-            card.contacts.emails = emails or []
-            return card.dict()
+            address_col = None
+        else:
+            q = f"%{address.lower()}%"
+            select_cols = [f"{address_col} AS situs_address"]
+            if "mailing_address" in cols:
+                select_cols.append("mailing_address")
+            if "owner_name" in cols:
+                select_cols.append("owner_name")
+            if "parcel_id" in cols:
+                select_cols.append("parcel_id")
+            if "raw_json" in cols:
+                select_cols.append("raw_json")
+            select_sql = ", ".join(["county"] + select_cols)
+            sql = f"SELECT {select_sql} FROM leads WHERE LOWER({address_col}) LIKE ? AND LOWER(county)=? LIMIT 1"
+            row = store.conn.execute(sql, (q, county)).fetchone()
+            if row:
+                raw = (
+                    json.loads(row["raw_json"]) if ("raw_json" in row.keys() and row["raw_json"]) else {}
+                )
+                pf = PropertyFields()
+                last = LastSale()
+                card = PropertyCard(
+                    county=row["county"],
+                    address=row["situs_address"] or address,
+                    owner_name=row.get("owner_name"),
+                    owner_mailing_address=row.get("mailing_address"),
+                    parcel_id=row.get("parcel_id"),
+                    property_fields=pf,
+                    last_sale=last,
+                )
+                # contacts are stored in contact_phones/contact_emails inside raw_json when present
+                phones = raw.get("contact_phones", [])
+                emails = raw.get("contact_emails", [])
+                card.contacts.phones = phones or []
+                card.contacts.emails = emails or []
+                return card.model_dump()
     finally:
         store.close()
 
     # Not found locally
-    if os.getenv("LIVE", "0") != "1":
+    if not live and os.getenv("LIVE", "0") != "1":
         raise HTTPException(
             status_code=404,
             detail={
@@ -191,13 +196,50 @@ def lookup_address(payload: dict = Body(...)):
             },
         )
 
-    # Attempt to use a county-specific PA provider when LIVE=1
-    from florida_property_scraper.pa.registry import get_pa_provider
-
+    # Live fetch (best-effort): use the existing native adapter live search.
+    # This returns basic owner/address/class/zoning fields (not full PA detail).
     try:
-        provider = get_pa_provider(county)
-    except KeyError:
-        raise HTTPException(status_code=501, detail="LIVE fetch not implemented for this county")
+        from florida_property_scraper.backend.native_adapter import NativeAdapter
 
-    # Provider present but not implemented yet: return 501
-    raise HTTPException(status_code=501, detail="LIVE provider present but fetch logic not yet implemented")
+        adapter = NativeAdapter()
+        items = adapter.search(
+            query=address,
+            live=True,
+            county_slug=county,
+            state="fl",
+            max_items=1,
+            per_county_limit=1,
+            dry_run=False,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LIVE fetch failed: {e}")
+
+    if not items:
+        raise HTTPException(status_code=404, detail="No results found (LIVE)")
+
+    item = items[0] if isinstance(items, list) else None
+    if not isinstance(item, dict):
+        raise HTTPException(status_code=502, detail="LIVE fetch returned unexpected payload")
+
+    pf = PropertyFields(
+        beds=None,
+        baths=None,
+        sf=None,
+        year_built=None,
+        zoning=(item.get("zoning") or None),
+        land_size=None,
+    )
+    owner_name = (item.get("owner") or "")
+    card = PropertyCard(
+        county=county,
+        address=(item.get("address") or address),
+        parcel_id=(item.get("parcel_id") or None),
+        owner_name=owner_name,
+        owner_mailing_address=None,
+        property_fields=pf,
+        last_sale=LastSale(date=None, price=None),
+    )
+    # Minimal source hint for the UI.
+    out = card.model_dump()
+    out["source"] = "live"
+    return out

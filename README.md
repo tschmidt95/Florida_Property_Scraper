@@ -15,6 +15,31 @@ Scan properties and look up owner information in Florida
   - `CONTACT_PROVIDER` / `CONTACT_API_KEY` — enable contact enrichment (opt-in)
 
 
+## Daily workflow
+
+### Start
+
+- No-terminal path (VS Code):
+  - Terminal → Run Task… → **Start: Fullstack (8000)**
+  - This starts single-port FastAPI serving the built UI on `:8000`.
+
+### View
+
+- Codespaces forwarded URL format: `https://<CODESPACE_NAME>-8000.app.github.dev/`
+- VS Code: open the **Ports** tab → find port `8000` → **Open in Browser**.
+
+### Stop
+
+- Terminal → Run Task… → **Stop: Kill 8000** (safe even if nothing is running).
+- Or: Terminal → Terminate Task… → select **Start: Fullstack (8000)**.
+
+### Resume
+
+- Reopen the Codespace.
+- Terminal → Run Task… → **Start: Fullstack (8000)**.
+- Open the forwarded URL via the **Ports** tab (port `8000`).
+
+
 ## Getting started (local)
 
 - Create and activate a virtual environment:

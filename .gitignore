@@ -15,8 +15,15 @@ dist/
 build/
 *.egg-info/
 repo_old/
-.vscode/
+
+.vscode/*
+!.vscode/
 !.vscode/settings.json
+!.vscode/tasks.json
+
+web/.vscode/*
+!web/.vscode/
+!web/.vscode/settings.json
 
 # Node
 node_modules/
@@ -44,3 +51,8 @@ junit.xml
 # local artifacts
 payload.json
 requirements.txt.bak
+
+# startup script artifacts
+.uvicorn_*.pid
+.pids_*.txt
+.tmp_*.sh

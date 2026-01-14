@@ -10,6 +10,67 @@ export type SearchResult = {
   matched_fields?: string[];
 };
 
+export type ParcelSearchRequest =
+  | {
+      county: string;
+      geometry: GeoJSON.Geometry;
+      radius?: never;
+      center?: never;
+      radius_m?: never;
+      live?: boolean;
+      limit?: number;
+      include_geometry?: boolean;
+    }
+  | {
+      county: string;
+      geometry?: never;
+      radius: { center: [number, number]; miles: number };
+      center?: never;
+      radius_m?: never;
+      live?: boolean;
+      limit?: number;
+      include_geometry?: boolean;
+    };
+
+export type ParcelSearchRequestV2 = {
+  county: string;
+  geometry?: never;
+  radius?: never;
+  center: { lat: number; lng: number };
+  radius_m: number;
+  live?: boolean;
+  limit?: number;
+  include_geometry?: boolean;
+};
+
+export type ParcelRecord = {
+  parcel_id: string;
+  county: string;
+  situs_address: string;
+  owner_name: string;
+  property_class: string;
+  land_use: string;
+  zoning: string;
+  living_area_sqft: number | null;
+  lot_size_sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  year_built: number | null;
+  last_sale_date: string | null;
+  last_sale_price: number | null;
+  source: 'local' | 'live' | 'geojson' | 'missing';
+  geometry?: GeoJSON.Geometry;
+};
+
+export type ParcelSearchResponse = {
+  county: string;
+  summary: { count: number; source_counts: Record<string, number> };
+  records: ParcelRecord[];
+  // Back-compat keys from the existing API
+  count?: number;
+  results?: unknown[];
+};
+
 export type AdvancedSearchFilters = {
   no_permits_in_years?: number | null;
   permit_status?: string[] | null;
@@ -165,4 +226,29 @@ export async function advancedSearch(payload: AdvancedSearchRequest): Promise<Se
   }
 
   return results;
+}
+
+export async function parcelsSearch(
+  payload: ParcelSearchRequest | ParcelSearchRequestV2,
+): Promise<ParcelSearchResponse> {
+  const resp = await fetch('/api/parcels/search', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...payload, include_geometry: payload.include_geometry ?? true }),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    const detail = text ? `: ${text}` : ''
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`)
+  }
+
+  const data = (await resp.json()) as ParcelSearchResponse
+  if (!data || typeof data !== 'object' || !Array.isArray((data as any).records)) {
+    throw new Error('Unexpected response: expected {records: [...]}' )
+  }
+  return data
 }
