@@ -184,8 +184,6 @@
       }
     },
     {
-<<<<<<< HEAD
-=======
       "label": "Open: PROOF Orange Parcel Size",
       "type": "shell",
       "command": "bash",
@@ -204,7 +202,6 @@
       }
     },
     {
->>>>>>> 363442b (feat: Parcel size filter)
       "label": "Open: Debug Ping",
       "type": "shell",
       "command": "bash",
