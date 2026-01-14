@@ -4,6 +4,10 @@ __pycache__/
 *.sqlite
 tmp_*.jsonl
 *.log
+.env
+.env.*
+.secrets
+*_token*
 # local virtualenvs
 .venv/
 venv/

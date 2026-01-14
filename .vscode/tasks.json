@@ -63,7 +63,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "bash scripts/git_commit_push_2_6.sh"
+        "echo hi"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
