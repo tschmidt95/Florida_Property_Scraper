@@ -161,6 +161,9 @@ export default function MapSearch({
   type FilterForm = {
     minSqft: string;
     maxSqft: string;
+    lotSizeUnit: 'sqft' | 'acres';
+    minLotSize: string;
+    maxLotSize: string;
     minBeds: string;
     minBaths: string;
     minYearBuilt: string;
@@ -180,6 +183,9 @@ export default function MapSearch({
   const [filterForm, setFilterForm] = useState<FilterForm>({
     minSqft: '',
     maxSqft: '',
+    lotSizeUnit: 'sqft',
+    minLotSize: '',
+    maxLotSize: '',
     minBeds: '',
     minBaths: '',
     minYearBuilt: '',
@@ -339,9 +345,17 @@ export default function MapSearch({
       return n;
     };
 
+    const minLotSize = toFloatOrNull(filterForm.minLotSize);
+    const maxLotSize = toFloatOrNull(filterForm.maxLotSize);
+    const hasLotSize = minLotSize !== null || maxLotSize !== null;
+    const lotSizeUnit = filterForm.lotSizeUnit === 'acres' ? 'acres' : 'sqft';
+
     const filters: ParcelAttributeFilters = {
       min_sqft: toIntOrNull(filterForm.minSqft),
       max_sqft: toIntOrNull(filterForm.maxSqft),
+      lot_size_unit: hasLotSize ? lotSizeUnit : null,
+      min_lot_size: minLotSize,
+      max_lot_size: maxLotSize,
       min_beds: toIntOrNull(filterForm.minBeds),
       min_baths: toFloatOrNull(filterForm.minBaths),
       min_year_built: toIntOrNull(filterForm.minYearBuilt),
@@ -489,6 +503,43 @@ export default function MapSearch({
                 value={filterForm.maxSqft}
                 onChange={(e) => setFilterForm((p) => ({ ...p, maxSqft: e.target.value }))}
                 placeholder=""
+              />
+            </label>
+
+            <label className="space-y-1">
+              <div className="text-cre-muted">Parcel Size Unit</div>
+              <select
+                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
+                value={filterForm.lotSizeUnit}
+                onChange={(e) =>
+                  setFilterForm((p) => ({
+                    ...p,
+                    lotSizeUnit: (e.target.value === 'acres' ? 'acres' : 'sqft') as any,
+                  }))
+                }
+              >
+                <option value="sqft">Sqft</option>
+                <option value="acres">Acres</option>
+              </select>
+            </label>
+            <label className="space-y-1">
+              <div className="text-cre-muted">Min Parcel Size</div>
+              <input
+                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
+                inputMode="decimal"
+                value={filterForm.minLotSize}
+                onChange={(e) => setFilterForm((p) => ({ ...p, minLotSize: e.target.value }))}
+                placeholder={filterForm.lotSizeUnit === 'acres' ? 'e.g. 0.25' : 'e.g. 8000'}
+              />
+            </label>
+            <label className="space-y-1">
+              <div className="text-cre-muted">Max Parcel Size</div>
+              <input
+                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
+                inputMode="decimal"
+                value={filterForm.maxLotSize}
+                onChange={(e) => setFilterForm((p) => ({ ...p, maxLotSize: e.target.value }))}
+                placeholder={filterForm.lotSizeUnit === 'acres' ? '' : ''}
               />
             </label>
 

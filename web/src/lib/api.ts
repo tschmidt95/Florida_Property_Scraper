@@ -52,6 +52,9 @@ export type ParcelSearchRequestV2 = {
 export type ParcelAttributeFilters = {
   min_sqft?: number | null;
   max_sqft?: number | null;
+  lot_size_unit?: 'sqft' | 'acres' | null;
+  min_lot_size?: number | null;
+  max_lot_size?: number | null;
   min_year_built?: number | null;
   max_year_built?: number | null;
   min_beds?: number | null;
@@ -126,6 +129,7 @@ export type ParcelRecord = {
   flu?: string;
   living_area_sqft?: number | null;
   lot_size_sqft?: number | null;
+  lot_size_acres?: number | null;
   lat: number;
   lng: number;
   geometry?: GeoJSON.Geometry;

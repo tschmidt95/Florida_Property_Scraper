@@ -184,6 +184,27 @@
       }
     },
     {
+<<<<<<< HEAD
+=======
+      "label": "Open: PROOF Orange Parcel Size",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 200 PROOF_ORANGE_LOT_SIZE_FILTER.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+>>>>>>> 363442b (feat: Parcel size filter)
       "label": "Open: Debug Ping",
       "type": "shell",
       "command": "bash",

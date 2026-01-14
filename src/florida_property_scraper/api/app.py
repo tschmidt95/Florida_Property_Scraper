@@ -890,6 +890,23 @@ if app:
                 except Exception:
                     fields["living_area_sqft"] = None
                 try:
+                    lot_sqft = float(pa.land_sf or 0) or 0.0
+                    fields["lot_size_sqft"] = lot_sqft if lot_sqft > 0 else None
+                except Exception:
+                    fields["lot_size_sqft"] = None
+                try:
+                    lot_acres = float(pa.land_acres or 0) or 0.0
+                    if lot_acres <= 0:
+                        lot_sqft_any = fields.get("lot_size_sqft")
+                        if isinstance(lot_sqft_any, (int, float, str)):
+                            lot_sqft = float(lot_sqft_any) or 0.0
+                        else:
+                            lot_sqft = 0.0
+                        lot_acres = (lot_sqft / 43560.0) if lot_sqft > 0 else 0.0
+                    fields["lot_size_acres"] = lot_acres if lot_acres > 0 else None
+                except Exception:
+                    fields["lot_size_acres"] = None
+                try:
                     b = int(pa.bedrooms or 0)
                     fields["beds"] = b if b > 0 else None
                 except Exception:
@@ -987,6 +1004,7 @@ if app:
             property_class = ""
             living_area_sqft = None
             lot_size_sqft = None
+            lot_size_acres = None
             beds = None
             baths = None
             year_built = None
@@ -1006,6 +1024,12 @@ if app:
                 if living_area_sqft is None:
                     living_area_sqft = float(pa.building_sf or 0) or None
                 lot_size_sqft = float(pa.land_sf or 0) or None
+                lot_size_acres = float(pa.land_acres or 0) or None
+                if lot_size_acres is None and lot_size_sqft is not None:
+                    try:
+                        lot_size_acres = float(lot_size_sqft) / 43560.0
+                    except Exception:
+                        lot_size_acres = None
                 beds = int(pa.bedrooms) if int(pa.bedrooms or 0) > 0 else None
                 baths = float(pa.bathrooms) if float(pa.bathrooms or 0) > 0 else None
                 year_built = int(pa.year_built) if int(pa.year_built or 0) > 0 else None
@@ -1102,6 +1126,7 @@ if app:
                 "property_class": property_class,
                 "living_area_sqft": living_area_sqft,
                 "lot_size_sqft": lot_size_sqft,
+                "lot_size_acres": lot_size_acres,
             }
             lat, lng = _centroid_lat_lng(feat.geometry)
             rec["lat"] = lat
@@ -1399,6 +1424,12 @@ if app:
             if living is None:
                 living = float(pa.building_sf or 0) or None
             lot = float(pa.land_sf or 0) or None
+            lot_acres = float(pa.land_acres or 0) or None
+            if lot_acres is None and lot is not None:
+                try:
+                    lot_acres = float(lot) / 43560.0
+                except Exception:
+                    lot_acres = None
             if living is not None:
                 sqft.append({"type": "living", "value": float(living)})
             if lot is not None:
@@ -1444,6 +1475,8 @@ if app:
                     "zoning": zoning_out,
                     "zoning_reason": zoning_reason,
                     "sqft": sqft,
+                    "lot_size_sqft": lot,
+                    "lot_size_acres": lot_acres,
                     "beds": int(pa.bedrooms) if int(pa.bedrooms or 0) > 0 else None,
                     "baths": float(pa.bathrooms) if float(pa.bathrooms or 0) > 0 else None,
                     "year_built": int(pa.year_built) if int(pa.year_built or 0) > 0 else None,

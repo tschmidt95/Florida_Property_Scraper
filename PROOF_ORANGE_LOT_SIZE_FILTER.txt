@@ -1,0 +1,98 @@
+== wait /health ==
+time_utc: 2026-01-14T19:16:22.444027+00:00
+
+== /api/debug/ping ==
+{
+  "ok": true,
+  "server_time": "2026-01-14T19:16:22.458847+00:00",
+  "git": {
+    "sha": "6425f1d",
+    "branch": "feature/address-lookup-ui"
+  },
+  "env": {
+    "FPS_USE_FDOR_CENTROIDS": "1",
+    "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "APP_GIT_SHA": "",
+    "APP_GIT_BRANCH": ""
+  }
+}
+
+== POST /api/parcels/search (baseline) ==
+baseline_records_count: 200
+sample_parcel_id: 362229470801010
+sample_lot_size_sqft: 7496.0
+sample_lot_size_acres: 0.17208448117539027
+
+== POST /api/parcels/search (lot size filter: sqft) ==
+min_lot_size_sqft: 3748.0
+max_lot_size_sqft: 11244.0
+filtered_count_sqft: 200
+mismatch_count_sqft: 0
+
+== POST /api/parcels/search (lot size filter: acres) ==
+min_lot_size_acres: 0.086042
+max_lot_size_acres: 0.258127
+filtered_count_acres: 200
+mismatch_count_acres: 0
+
+example_record:
+{
+  "parcel_id": "362229470801010",
+  "county": "orange",
+  "situs_address": "1112 E SOUTH ST, Orlando 32801",
+  "owner_name": "TURCA FLIPS REAL ESTATE LLC",
+  "land_use": "000",
+  "future_land_use": "000",
+  "beds": null,
+  "baths": null,
+  "year_built": null,
+  "last_sale_date": null,
+  "last_sale_price": 0.0,
+  "source": "live",
+  "zoning": null,
+  "zoning_reason": "not_provided_by_source",
+  "sqft": [
+    {
+      "type": "lot",
+      "value": 7496.0
+    }
+  ],
+  "raw_source_url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    }
+  ],
+  "provenance": {
+    "situs_address": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "owner_name": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "land_use": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    "sqft.lot": {
+      "source": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    }
+  },
+  "field_provenance": {},
+  "land_value": null,
+  "building_value": null,
+  "total_value": null,
+  "address": "1112 E SOUTH ST, Orlando 32801",
+  "flu": "000",
+  "property_class": "",
+  "living_area_sqft": null,
+  "lot_size_sqft": 7496.0,
+  "lot_size_acres": 0.17208448117539027,
+  "lat": 28.53824011403353,
+  "lng": -81.36473140514703
+}
