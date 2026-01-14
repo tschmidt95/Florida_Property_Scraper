@@ -32,6 +32,21 @@ function DrawControls({
 }) {
   const map = useMap();
   const wasDraggingEnabledRef = useRef<boolean>(false);
+  const onPolygonRef = useRef(onPolygon);
+  const onDeletedRef = useRef(onDeleted);
+  const onDrawingChangeRef = useRef(onDrawingChange);
+
+  useEffect(() => {
+    onPolygonRef.current = onPolygon;
+  }, [onPolygon]);
+
+  useEffect(() => {
+    onDeletedRef.current = onDeleted;
+  }, [onDeleted]);
+
+  useEffect(() => {
+    onDrawingChangeRef.current = onDrawingChange;
+  }, [onDrawingChange]);
 
   useEffect(() => {
     const drawnItems = new L.FeatureGroup();
@@ -61,28 +76,26 @@ function DrawControls({
     map.addControl(control);
 
     const handleDrawStart = (e: any) => {
-      console.debug('[draw] start', { type: e?.layerType });
       wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
       if (wasDraggingEnabledRef.current) map.dragging.disable();
-      onDrawingChange(true);
+      onDrawingChangeRef.current(true);
     };
 
     const handleDrawStop = () => {
-      console.debug('[draw] stop');
       if (wasDraggingEnabledRef.current) map.dragging.enable();
       wasDraggingEnabledRef.current = false;
-      onDrawingChange(false);
+      onDrawingChangeRef.current(false);
     };
 
     const handleDrawVertex = (e: any) => {
-      // Supported Leaflet.Draw event. We use it to disable click-to-finish on the first vertex
-      // without patching Leaflet.Draw prototypes.
+      // Supported Leaflet.Draw event.
+      // Prevent the default Leaflet.Draw behavior of finishing a polygon by clicking
+      // the first vertex; we only want dblclick or the toolbar Finish action.
       try {
         const layers = e?.layers;
         const markers: any[] = layers?.getLayers?.() || [];
         const first = markers?.[0];
         if (first?.off) {
-          // Remove click handler(s) so finish is explicit (dblclick/toolbar).
           first.off('click');
         }
       } catch {
@@ -91,7 +104,6 @@ function DrawControls({
     };
 
     const handleCreated = (e: any) => {
-      console.debug('[draw] created', { type: e?.layerType });
       try {
         drawnItems.clearLayers();
         if (e?.layer) drawnItems.addLayer(e.layer);
@@ -103,7 +115,7 @@ function DrawControls({
         try {
           const gj = e.layer?.toGeoJSON?.();
           const geom = gj?.geometry;
-          if (geom?.type === 'Polygon') onPolygon(geom as GeoJSON.Polygon);
+          if (geom?.type === 'Polygon') onPolygonRef.current(geom as GeoJSON.Polygon);
         } catch {
           // ignore
         }
@@ -111,8 +123,7 @@ function DrawControls({
     };
 
     const handleDeleted = () => {
-      console.debug('[draw] deleted');
-      onDeleted();
+      onDeletedRef.current();
     };
 
     map.on(L.Draw.Event.DRAWSTART, handleDrawStart);
@@ -139,7 +150,7 @@ function DrawControls({
       }
       if (drawnItemsRef.current === drawnItems) drawnItemsRef.current = null;
     };
-  }, [drawnItemsRef, map, onDeleted, onDrawingChange, onPolygon]);
+  }, [drawnItemsRef, map]);
 
   return null;
 }
