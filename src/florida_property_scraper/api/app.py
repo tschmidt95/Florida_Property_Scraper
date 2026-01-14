@@ -7,6 +7,8 @@ from fastapi.staticfiles import StaticFiles
 import json
 import os
 import time
+from datetime import datetime, timezone
+from typing import Any
 
 from florida_property_scraper.api.geojson import to_featurecollection
 from florida_property_scraper.cache import cache_get, cache_set
@@ -290,10 +292,19 @@ if app:
         if live and limit > 250:
             limit = 250
 
+        # Accept multiple input shapes.
+        # - geometry: GeoJSON geometry
+        # - polygon_geojson: GeoJSON Polygon geometry
+        # - polygon: legacy alias
         geometry = payload.get("geometry")
+        if geometry is None:
+            geometry = payload.get("polygon_geojson")
+        if geometry is None:
+            geometry = payload.get("polygon")
         radius = payload.get("radius")
         radius_m = payload.get("radius_m")
         center_obj = payload.get("center")
+
         if geometry and radius:
             raise HTTPException(
                 status_code=400, detail="Provide either geometry or radius, not both"
@@ -343,6 +354,9 @@ if app:
                 miles=float(miles),
             )
 
+        if geometry is None:
+            raise HTTPException(status_code=400, detail="Draw polygon or radius first")
+
         if not isinstance(geometry, dict):
             raise HTTPException(
                 status_code=400, detail="geometry must be a GeoJSON geometry object"
@@ -356,6 +370,25 @@ if app:
 
         # Filter to true intersections when possible.
         intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
+
+        warnings: list[str] = []
+        if not candidates:
+            warnings.append("No parcel candidates returned for bbox")
+        if candidates and not intersecting:
+            warnings.append("No parcels intersected the drawn geometry")
+
+        def _centroid_lat_lng(geom: Any) -> tuple[float, float]:
+            # Best-effort centroid using bbox center; avoids heavy deps.
+            try:
+                bbox = geometry_bbox(geom)
+                if bbox is not None:
+                    minx, miny, maxx, maxy = bbox
+                    lng = (float(minx) + float(maxx)) / 2.0
+                    lat = (float(miny) + float(maxy)) / 2.0
+                    return lat, lng
+            except Exception:
+                pass
+            return 0.0, 0.0
 
         # Batch-load PA records + hover fields for evaluation.
         # If live=true, best-effort enrich missing parcel_ids into PA before continuing.
@@ -566,10 +599,12 @@ if app:
             rec = {
                 "parcel_id": feat.parcel_id,
                 "county": county_key,
+                "address": situs_address,
                 "situs_address": situs_address,
                 "owner_name": owner_name,
                 "property_class": property_class,
                 "land_use": land_use,
+                "flu": land_use,
                 "zoning": zoning,
                 "living_area_sqft": living_area_sqft,
                 "lot_size_sqft": lot_size_sqft,
@@ -580,6 +615,9 @@ if app:
                 "last_sale_price": last_sale_price,
                 "source": source,
             }
+            lat, lng = _centroid_lat_lng(feat.geometry)
+            rec["lat"] = lat
+            rec["lng"] = lng
             if include_geometry:
                 rec["geometry"] = feat.geometry
             records.append(rec)
@@ -599,8 +637,43 @@ if app:
                     "source_counts": source_counts,
                 },
                 "records": records,
+                "warnings": warnings,
             }
         )
+
+    @app.get("/api/debug/ping")
+    def debug_ping():
+        sha = os.getenv("APP_GIT_SHA") or ""
+        branch = os.getenv("APP_GIT_BRANCH") or ""
+        if not sha or not branch:
+            try:
+                import subprocess
+
+                if not sha:
+                    p = subprocess.run(
+                        ["git", "rev-parse", "--short", "HEAD"],
+                        cwd=str(REPO_ROOT),
+                        text=True,
+                        capture_output=True,
+                    )
+                    if p.returncode == 0:
+                        sha = (p.stdout or "").strip()
+                if not branch:
+                    p = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=str(REPO_ROOT),
+                        text=True,
+                        capture_output=True,
+                    )
+                    if p.returncode == 0:
+                        branch = (p.stdout or "").strip()
+            except Exception:
+                pass
+        return {
+            "ok": True,
+            "server_time": datetime.now(timezone.utc).isoformat(),
+            "git": {"sha": sha or "dev", "branch": branch or "unknown"},
+        }
 
     @app.get("/api/parcels/{parcel_id}")
     def api_parcel_detail(parcel_id: str, county: str = ""):
@@ -740,7 +813,11 @@ if app:
     def _spa_index_response():
         index = WEB_DIST / "index.html"
         if index.exists():
-            return FileResponse(str(index), media_type="text/html")
+            return FileResponse(
+                str(index),
+                media_type="text/html",
+                headers={"Cache-Control": "no-store"},
+            )
         return {"status": "ok", "message": "API running (web/dist missing)"}
 
     @app.get("/")
@@ -786,7 +863,11 @@ if app:
 
         index = WEB_DIST / "index.html"
         if index.exists():
-            return FileResponse(str(index), media_type="text/html")
+            return FileResponse(
+                str(index),
+                media_type="text/html",
+                headers={"Cache-Control": "no-store"},
+            )
         raise HTTPException(status_code=404, detail="web UI not built")
 
     # Ensure leads DB exists on startup

@@ -5,6 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$ROOT_DIR/.uvicorn_8000.log"
 PID_FILE="$ROOT_DIR/.uvicorn_8000.pid"
 
+get_git_sha() {
+  (cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null) || echo "unknown"
+}
+
+get_git_branch() {
+  (cd "$ROOT_DIR" && git rev-parse --abbrev-ref HEAD 2>/dev/null) || echo "unknown"
+}
+
 kill_port() {
   local port="$1"
   echo "$ lsof -t -iTCP:${port} -sTCP:LISTEN | xargs -r kill -9"
@@ -22,20 +30,40 @@ build_frontend_if_needed() {
   if [[ "${FORCE_BUILD:-0}" == "1" ]]; then
     return 0
   fi
-  [[ ! -f "$ROOT_DIR/web/dist/index.html" ]]
+  if [[ ! -f "$ROOT_DIR/web/dist/index.html" ]]; then
+    return 0
+  fi
+
+  # Rebuild if any source file is newer than the built index.
+  if find "$ROOT_DIR/web/src" "$ROOT_DIR/web/public" -type f -newer "$ROOT_DIR/web/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if [[ -f "$ROOT_DIR/web/package.json" ]] && [[ "$ROOT_DIR/web/package.json" -nt "$ROOT_DIR/web/dist/index.html" ]]; then
+    return 0
+  fi
+  if [[ -f "$ROOT_DIR/web/package-lock.json" ]] && [[ "$ROOT_DIR/web/package-lock.json" -nt "$ROOT_DIR/web/dist/index.html" ]]; then
+    return 0
+  fi
+
+  return 1
 }
 
-if build_frontend_if_needed; then
-  echo "$ (cd web && npm ci && npm run build)"
-  cd "$ROOT_DIR/web"
-  if [[ -f package-lock.json ]]; then
-    npm ci
-  else
-    npm install
-  fi
-  npm run build
-  cd "$ROOT_DIR"
+echo "$ (cd web && npm ci && npm run build)"
+set +e
+web_out="$(cd "$ROOT_DIR/web" && npm ci 2>&1 && npm run build 2>&1)"
+web_rc=$?
+set -e
+if [[ "$web_rc" -ne 0 ]]; then
+  echo "$web_out" | head -n 50 > "$ROOT_DIR/web/BUILD_ERRORS.txt" || true
+  echo "WEB BUILD FAILED — see web/BUILD_ERRORS.txt"
+  exit 1
 fi
+
+APP_GIT_SHA="$(get_git_sha)"
+APP_GIT_BRANCH="$(get_git_branch)"
+export APP_GIT_SHA
+export APP_GIT_BRANCH
+echo "SERVING UI BUILD SHA: ${APP_GIT_SHA} (${APP_GIT_BRANCH})"
 
 port_is_listening() {
   # Prefer lsof; fallback to ss.
@@ -70,8 +98,8 @@ fi
 echo "$ : > .uvicorn_8000.log"
 : > "$LOG_FILE"
 
-echo "$ nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 --reload > .uvicorn_8000.log 2>&1 &"
-nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 --reload > "$LOG_FILE" 2>&1 &
+echo "$ nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 > .uvicorn_8000.log 2>&1 &"
+nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
 UVICORN_PID=$!
 echo "$ echo UVICORN_PID=$UVICORN_PID"
 echo "UVICORN_PID=$UVICORN_PID"
@@ -166,9 +194,14 @@ lookup_out="$(curl -sS -X POST http://127.0.0.1:8000/api/lookup/address -H "Cont
 rc3=$?
 echo "$lookup_out"
 
+echo "$ curl -sS http://127.0.0.1:8000/api/debug/ping | python -c \"import json,sys; d=json.load(sys.stdin); print(d.get('ok')==True)\""
+ping_ok="$(curl -sS http://127.0.0.1:8000/api/debug/ping | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('ok')==True)")"
+rc4=$?
+echo "$ping_ok"
+
 set -e
 
-if [[ "$rc1" -ne 0 || "$rc2" -ne 0 || "$rc3" -ne 0 || "$openapi_ok" != "True" ]]; then
+if [[ "$rc1" -ne 0 || "$rc2" -ne 0 || "$rc3" -ne 0 || "$rc4" -ne 0 || "$openapi_ok" != "True" || "$ping_ok" != "True" ]]; then
   echo "verification failed"
   echo "$ ps -p $UVICORN_PID -o pid,ppid,etime,cmd || true"
   ps -p "$UVICORN_PID" -o pid,ppid,etime,cmd || true

@@ -1,10 +1,52 @@
-import { useMemo, useRef, useState } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import type { LatLngLiteral } from 'leaflet';
 import { FeatureGroup, MapContainer, TileLayer, GeoJSON, Circle, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 
-import { advancedSearch, parcelsSearch, type ParcelRecord, type SearchResult } from './lib/api';
+import { advancedSearch, debugPing, parcelsSearch, type ParcelRecord, type SearchResult } from './lib/api';
+
+const LazyMapSearch = lazy(() => import('./pages/MapSearch'));
+
+class MapErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state: { hasError: boolean } = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {
+    // show banner; error details are in console
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="m-4 rounded-xl border border-cre-accent/40 bg-cre-surface p-4">
+          <div className="text-sm font-semibold text-cre-accent">
+            MapSearch disabled — check console + web/BUILD_ERRORS.txt
+          </div>
+          <div className="mt-1 text-xs text-cre-muted">
+            Falling back to the legacy UI below.
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function FitToFeatures({ fc }: { fc: GeoJSON.FeatureCollection | null }) {
   const map = useMap();
@@ -70,6 +112,9 @@ function RadiusClickHandler({
 }
 
 export default function App() {
+  const [apiOk, setApiOk] = useState(false);
+  const [apiGit, setApiGit] = useState<{ sha: string; branch: string } | null>(null);
+
   const [mode, setMode] = useState<'search' | 'map'>('map');
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
@@ -120,6 +165,28 @@ export default function App() {
     const sha = typeof shaRaw === 'string' && shaRaw.length > 7 ? shaRaw.slice(0, 7) : shaRaw;
     const ts = anyEnv.VITE_BUILD_TIME || new Date().toISOString();
     return `Progress / Build: ${branch} • ${sha} • ${ts}`;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const ping = await debugPing();
+        if (cancelled) return;
+        setApiOk(!!ping.ok);
+        setApiGit(ping.git);
+      } catch {
+        if (cancelled) return;
+        setApiOk(false);
+        setApiGit(null);
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
 
   function runPrimaryAction() {
@@ -295,6 +362,17 @@ export default function App() {
           Florida Property Scraper
         </div>
 
+        <div className="ml-2 text-xs">
+          <span className={apiOk ? 'text-emerald-300' : 'text-red-300'}>
+            {apiOk ? 'API OK' : 'API DOWN'}
+          </span>
+          {apiGit ? (
+            <span className="ml-2 text-cre-muted">
+              ({apiGit.branch} • {apiGit.sha})
+            </span>
+          ) : null}
+        </div>
+
         <div className="ml-6 flex items-center gap-2">
           <button
             type="button"
@@ -355,6 +433,12 @@ export default function App() {
       <div className="border-b border-cre-border/20 bg-cre-surface px-4 py-2 text-xs text-cre-muted">
         {buildBanner}
       </div>
+
+      <MapErrorBoundary>
+        <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
+          <LazyMapSearch />
+        </Suspense>
+      </MapErrorBoundary>
 
       <div className="flex">
         <aside className="w-80 border-r border-cre-border/30 bg-cre-surface p-4">

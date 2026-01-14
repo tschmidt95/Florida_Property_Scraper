@@ -111,7 +111,21 @@ Notes:
 
 ---
 
-## Map Mode (planned)
+## Map Mode (Map Search)
+
+- Start the single-port app (serves API + built UI on `:8000`):
+  - VS Code: Terminal → Run Task… → **Start: Fullstack (8000)**
+  - Or CLI: `bash scripts/up.sh`
+- Open the UI:
+  - Local: http://127.0.0.1:8000/
+  - Codespaces: open the forwarded URL from the **Ports** tab (port `8000`).
+- Use the Map Search:
+  - Pick a county.
+  - Draw either a polygon (lasso) or a circle (radius).
+  - Click **Run** to POST your geometry to `/api/parcels/search`.
+  - Results render as markers on the map and in the results panel.
+- If the backend returns an error or zero results, the UI shows a banner and loads a deterministic DEMO dataset (so it’s never “silent”).
+- Debug: expand the debug section to see the last request/response and API `/api/debug/ping` status.
 
 ## Native backend
 

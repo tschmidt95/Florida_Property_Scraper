@@ -46,10 +46,12 @@ export type ParcelSearchRequestV2 = {
 export type ParcelRecord = {
   parcel_id: string;
   county: string;
+  address?: string;
   situs_address: string;
   owner_name: string;
   property_class: string;
   land_use: string;
+  flu?: string;
   zoning: string;
   living_area_sqft: number | null;
   lot_size_sqft: number | null;
@@ -59,6 +61,8 @@ export type ParcelRecord = {
   last_sale_date: string | null;
   last_sale_price: number | null;
   source: 'local' | 'live' | 'geojson' | 'missing';
+  lat: number;
+  lng: number;
   geometry?: GeoJSON.Geometry;
 };
 
@@ -66,10 +70,27 @@ export type ParcelSearchResponse = {
   county: string;
   summary: { count: number; source_counts: Record<string, number> };
   records: ParcelRecord[];
+  warnings?: string[];
   // Back-compat keys from the existing API
   count?: number;
   results?: unknown[];
 };
+
+export type DebugPingResponse = {
+  ok: boolean;
+  server_time: string;
+  git: { sha: string; branch: string };
+};
+
+export async function debugPing(): Promise<DebugPingResponse> {
+  const resp = await fetch('/api/debug/ping', { headers: { Accept: 'application/json' } });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  return (await resp.json()) as DebugPingResponse;
+}
 
 export type AdvancedSearchFilters = {
   no_permits_in_years?: number | null;

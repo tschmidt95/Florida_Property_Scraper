@@ -4,13 +4,13 @@
 
 :root {
   /* sitecre.com-derived tokens (Elementor globals) */
-  --cre-primary: 5 7 6; /* #050706 */
-  --cre-accent: 208 142 2; /* #D08E02 */
-  --cre-text: 34 34 34; /* #222222 */
-  --cre-muted: 122 122 122; /* #7A7A7A */
-  --cre-bg: 244 244 244; /* #F4F4F4 */
-  --cre-surface: 255 255 255; /* #FFFFFF */
-  --cre-border: 120 120 120; /* #7878782B approx -> rgb(120,120,120) w/ alpha via Tailwind */
+  --cre-primary: 11 27 43; /* #0B1B2B (navy) */
+  --cre-accent: 208 142 2; /* #D08E02 (gold) */
+  --cre-text: 241 245 249; /* #F1F5F9 */
+  --cre-muted: 148 163 184; /* #94A3B8 */
+  --cre-bg: 11 27 43; /* #0B1B2B */
+  --cre-surface: 15 23 42; /* #0F172A */
+  --cre-border: 51 65 85; /* #334155 */
 }
 
 html,
