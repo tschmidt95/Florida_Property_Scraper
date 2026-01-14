@@ -364,6 +364,107 @@ def test_api_parcels_search_trigger_unknown_field_never_matches(tmp_path, monkey
     assert data["count"] == 0
 
 
+def test_api_parcels_search_filters_object(tmp_path, monkeypatch):
+    if app is None:
+        return
+
+    # Point parcel geojson dir to fixtures.
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    fixtures_dir = os.path.join(repo_root, "tests", "fixtures", "parcels")
+    monkeypatch.setenv("PARCEL_GEOJSON_DIR", fixtures_dir)
+
+    # Isolate PA DB.
+    db_path = tmp_path / "leads.sqlite"
+    monkeypatch.setenv("PA_DB", str(db_path))
+
+    from florida_property_scraper.pa.normalize import apply_defaults
+    from florida_property_scraper.pa.storage import PASQLite
+
+    store = PASQLite(str(db_path))
+    try:
+        # Two parcels inside the seminole fixture.
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0001",
+                    "situs_address": "100 E SAMPLE ST",
+                    "owner_names": ["OWNER 1"],
+                    "zoning": "R-1",
+                    "use_type": "Residential",
+                    "year_built": 2005,
+                    "living_sf": 2500,
+                    "bedrooms": 4,
+                    "bathrooms": 2.5,
+                    "just_value": 450000,
+                    "land_value": 120000,
+                    "improvement_value": 330000,
+                    "last_sale_date": "2020-01-15",
+                }
+            )
+        )
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0002",
+                    "situs_address": "200 E SAMPLE ST",
+                    "owner_names": ["OWNER 2"],
+                    "zoning": "C-2",
+                    "use_type": "Commercial",
+                    "year_built": 1985,
+                    "living_sf": 1200,
+                    "bedrooms": 2,
+                    "bathrooms": 1.0,
+                    "just_value": 250000,
+                    "land_value": 90000,
+                    "improvement_value": 160000,
+                    "last_sale_date": "2010-05-01",
+                }
+            )
+        )
+    finally:
+        store.close()
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+
+    # Polygon covering both SEM-0001 and SEM-0002 fixtures.
+    poly = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-81.372, 28.647],
+                [-81.362, 28.647],
+                [-81.362, 28.653],
+                [-81.372, 28.653],
+                [-81.372, 28.647],
+            ]
+        ],
+    }
+
+    payload = {
+        "county": "seminole",
+        "geometry": poly,
+        "limit": 50,
+        "filters": {
+            "min_sqft": 2000,
+            "min_beds": 3,
+            "min_baths": 2,
+            "property_type": "residential",
+            "min_value": 400000,
+            "last_sale_date_start": "2015-01-01",
+        },
+    }
+    r = client.post("/api/parcels/search", json=payload)
+    assert r.status_code == 200
+    data = r.json()
+
+    rec_ids = {row["parcel_id"] for row in data.get("records") or []}
+    assert rec_ids == {"SEM-0001"}
+
+
 def test_api_parcel_meta_roundtrip(tmp_path, monkeypatch):
     if app is None:
         return

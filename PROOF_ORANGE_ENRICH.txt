@@ -1,0 +1,233 @@
+== wait /health ==
+time_utc: 2026-01-14T17:18:04.010450+00:00
+
+== /api/debug/ping ==
+{
+  "ok": true,
+  "server_time": "2026-01-14T17:18:04.011438+00:00",
+  "git": {
+    "sha": "bb33265",
+    "branch": "feature/address-lookup-ui"
+  },
+  "env": {
+    "FPS_USE_FDOR_CENTROIDS": "1",
+    "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "APP_GIT_SHA": "bb33265",
+    "APP_GIT_BRANCH": "feature/address-lookup-ui"
+  }
+}
+== POST /api/parcels/search (live, baseline) ==
+baseline_count: 50
+sample_parcel_ids: ['362229000000026', '362229470801030', '362229470802050', '362229470802061', '362229470803010', '362229470803020', '362229470803030', '362229470803040']
+
+== POST /api/parcels/enrich (orange OCPA) ==
+enrich_count: 8
+enrich_errors_count: 1
+enrich_errors:
+{
+  "362229470801030": {
+    "error_reason": "no_improvement_data",
+    "http_status": 200,
+    "hint": "missing=['year_built', 'living_area_sqft']",
+    "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470801030"
+  }
+}
+
+== POST /api/parcels/search (post-enrich) ==
+qualified_count: 6
+qualified_parcel_ids: ['362229470802050', '362229470802061', '362229470803010', '362229470803020', '362229470803030', '362229470803040']
+
+qualified_record: 362229470802050
+{
+  "parcel_id": "362229470802050",
+  "county": "orange",
+  "situs_address": "",
+  "owner_name": "Property Address",
+  "land_use": "0800 - Multi-Family",
+  "beds": 3,
+  "baths": 2.0,
+  "year_built": 1940,
+  "last_sale_date": "2025-09-22",
+  "last_sale_price": 100.0,
+  "source": "live",
+  "zoning": "ORL-R-3B/T/AN",
+  "zoning_reason": null,
+  "sqft": [
+    {
+      "type": "living",
+      "value": 1705.0
+    }
+  ],
+  "raw_source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470802050%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    {
+      "name": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    }
+  ],
+  "provenance": {
+    "owner_name": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "land_use": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "zoning": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "year_built": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "sqft.living": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "last_sale_date": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "last_sale_price": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "land_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "building_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "total_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    }
+  },
+  "field_provenance": {
+    "baths": {
+      "raw_label": "Baths:",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "beds": {
+      "raw_label": "Beds:",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "building_value": {
+      "raw_label": "Tax Year Values (Building)",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "land_use": {
+      "raw_label": "Land Use Code",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "land_value": {
+      "raw_label": "Tax Year Values (Land)",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
+    },
+    "last_sale_date": {
+
+qualified_record: 362229470802061
+{
+  "parcel_id": "362229470802061",
+  "county": "orange",
+  "situs_address": "",
+  "owner_name": "Property Address",
+  "land_use": "0100 - Single Family",
+  "beds": 2,
+  "baths": 1.0,
+  "year_built": 1935,
+  "last_sale_date": "2013-10-29",
+  "last_sale_price": 97000.0,
+  "source": "live",
+  "zoning": "ORL-R-3B/T/AN",
+  "zoning_reason": null,
+  "sqft": [
+    {
+      "type": "living",
+      "value": 1340.0
+    }
+  ],
+  "raw_source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470802061%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    {
+      "name": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    }
+  ],
+  "provenance": {
+    "owner_name": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "land_use": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "zoning": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "year_built": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "sqft.living": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "last_sale_date": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "last_sale_price": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "land_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "building_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "total_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    }
+  },
+  "field_provenance": {
+    "baths": {
+      "raw_label": "Baths:",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "beds": {
+      "raw_label": "Beds:",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "building_value": {
+      "raw_label": "Tax Year Values (Building)",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "land_use": {
+      "raw_label": "Land Use Code",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "land_value": {
+      "raw_label": "Tax Year Values (Land)",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802061"
+    },
+    "last_sale_date"

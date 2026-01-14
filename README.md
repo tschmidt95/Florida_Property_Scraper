@@ -23,10 +23,33 @@ Scan properties and look up owner information in Florida
   - Terminal → Run Task… → **Start: Fullstack (8000)**
   - This starts single-port FastAPI serving the built UI on `:8000`.
 
+### Proof (Live parcels)
+
+- Terminal → Run Task… → **Proof: Live Search (FDOR)**
+  - This runs `scripts/prove_live_search.sh` and writes real output to `PROOF_LIVE_SEARCH.txt`.
+  - It exits non-zero if live results are missing.
+
+### Proof (Orange enrichment)
+
+- Terminal → Run Task… → **Proof: Orange Enrich (OCPA)**
+  - This runs `scripts/prove_orange_enrich.sh` and writes real output to `PROOF_ORANGE_ENRICH.txt`.
+  - It exits non-zero unless at least **2** parcels have real OCPA fields populated:
+    `year_built`, `living_area_sqft` (or living sqft), `total_value`, `last_sale_price`, and `data_sources` includes an `ocpaservices.ocpafl.org` URL.
+
+### Orange PA (OCPA) source
+
+Current integration uses OCPA's ASP.NET HTML flow (cookie+form POST):
+
+- Landing/search form: https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx
+- Parcel detail pages: `DisplayParcel.aspx` links returned from search results
+
+If OCPA ever exposes a stable JSON/ArcGIS endpoint, we can switch the provider to that for higher reliability.
+
 ### View
 
 - Codespaces forwarded URL format: `https://<CODESPACE_NAME>-8000.app.github.dev/`
 - VS Code: open the **Ports** tab → find port `8000` → **Open in Browser**.
+- Verify `http://127.0.0.1:8000/api/debug/ping` shows `env.FPS_USE_FDOR_CENTROIDS=1`.
 
 ### Stop
 

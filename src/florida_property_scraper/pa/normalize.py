@@ -41,5 +41,53 @@ def apply_defaults(partial: Mapping[str, Any] | None) -> PAProperty:
         data["exemptions"] = []
     if data.get("owner_names") is None:
         data["owner_names"] = []
+    if data.get("sources") is None:
+        data["sources"] = []
+    if data.get("field_provenance") is None:
+        data["field_provenance"] = {}
+
+    # Light normalization for filterable fields (avoid None/str surprises).
+    # Keep this intentionally conservative: we do not infer missing values.
+    try:
+        data["zoning"] = str(data.get("zoning") or "")
+    except Exception:
+        data["zoning"] = ""
+    try:
+        data["use_type"] = str(data.get("use_type") or "")
+    except Exception:
+        data["use_type"] = ""
+
+    def _to_float(v: Any) -> float:
+        if v is None:
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        try:
+            return float(str(v).strip().replace(",", ""))
+        except Exception:
+            return 0.0
+
+    def _to_int(v: Any) -> int:
+        return int(round(_to_float(v)))
+
+    for k in (
+        "living_sf",
+        "building_sf",
+        "land_sf",
+        "just_value",
+        "assessed_value",
+        "taxable_value",
+        "land_value",
+        "improvement_value",
+    ):
+        if k in data:
+            data[k] = _to_float(data.get(k))
+
+    for k in ("bedrooms", "units", "building_count", "year_built", "effective_year"):
+        if k in data:
+            data[k] = _to_int(data.get(k))
+
+    if "bathrooms" in data:
+        data["bathrooms"] = _to_float(data.get("bathrooms"))
 
     return PAProperty(**data)

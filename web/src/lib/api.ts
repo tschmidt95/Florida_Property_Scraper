@@ -18,6 +18,8 @@ export type ParcelSearchRequest =
       center?: never;
       radius_m?: never;
       live?: boolean;
+      enrich?: boolean;
+      enrich_limit?: number;
       limit?: number;
       include_geometry?: boolean;
     }
@@ -28,6 +30,8 @@ export type ParcelSearchRequest =
       center?: never;
       radius_m?: never;
       live?: boolean;
+      enrich?: boolean;
+      enrich_limit?: number;
       limit?: number;
       include_geometry?: boolean;
     };
@@ -39,28 +43,86 @@ export type ParcelSearchRequestV2 = {
   center: { lat: number; lng: number };
   radius_m: number;
   live?: boolean;
+  enrich?: boolean;
+  enrich_limit?: number;
   limit?: number;
   include_geometry?: boolean;
 };
 
+export type ParcelAttributeFilters = {
+  min_sqft?: number | null;
+  max_sqft?: number | null;
+  min_year_built?: number | null;
+  max_year_built?: number | null;
+  min_beds?: number | null;
+  min_baths?: number | null;
+  property_type?: string | null;
+  zoning?: string | string[] | null;
+  min_value?: number | null;
+  max_value?: number | null;
+  min_land_value?: number | null;
+  max_land_value?: number | null;
+  min_building_value?: number | null;
+  max_building_value?: number | null;
+  last_sale_date_start?: string | null; // YYYY-MM-DD
+  last_sale_date_end?: string | null; // YYYY-MM-DD
+};
+
+export type ParcelMapSearchRequest =
+  | {
+      county: string;
+      polygon_geojson: GeoJSON.Polygon;
+      center?: never;
+      radius_m?: never;
+      live?: boolean;
+      enrich?: boolean;
+      enrich_limit?: number;
+      limit?: number;
+      include_geometry?: boolean;
+      filters?: ParcelAttributeFilters;
+    }
+  | {
+      county: string;
+      polygon_geojson?: never;
+      center: { lat: number; lng: number };
+      radius_m: number;
+      live?: boolean;
+      enrich?: boolean;
+      enrich_limit?: number;
+      limit?: number;
+      include_geometry?: boolean;
+      filters?: ParcelAttributeFilters;
+    };
+
 export type ParcelRecord = {
   parcel_id: string;
   county: string;
-  address?: string;
   situs_address: string;
   owner_name: string;
-  property_class: string;
   land_use: string;
-  flu?: string;
-  zoning: string;
-  living_area_sqft: number | null;
-  lot_size_sqft: number | null;
+  zoning: string | null;
+  zoning_reason?: string | null;
+  sqft?: Array<{ type: 'living' | 'lot'; value: number }>;
   beds: number | null;
   baths: number | null;
   year_built: number | null;
   last_sale_date: string | null;
   last_sale_price: number | null;
-  source: 'local' | 'live' | 'geojson' | 'missing';
+  land_value?: number | null;
+  building_value?: number | null;
+  total_value?: number | null;
+  source: 'live' | 'cache';
+  raw_source_url?: string;
+  data_sources?: Array<{ name: string; url: string }>;
+  provenance?: Record<string, { source: string; url: string }>;
+  field_provenance?: Record<string, { source_url: string; raw_label: string }>;
+
+  // Back-compat fields still emitted by the API.
+  address?: string;
+  property_class?: string;
+  flu?: string;
+  living_area_sqft?: number | null;
+  lot_size_sqft?: number | null;
   lat: number;
   lng: number;
   geometry?: GeoJSON.Geometry;
@@ -68,12 +130,29 @@ export type ParcelRecord = {
 
 export type ParcelSearchResponse = {
   county: string;
-  summary: { count: number; source_counts: Record<string, number> };
+  summary: {
+    count: number;
+    source_counts: Record<string, number>;
+    source_counts_legacy?: Record<string, number>;
+  };
   records: ParcelRecord[];
   warnings?: string[];
   // Back-compat keys from the existing API
   count?: number;
   results?: unknown[];
+};
+
+export type ParcelsEnrichRequest = {
+  county: string;
+  parcel_ids: string[];
+  limit?: number;
+};
+
+export type ParcelsEnrichResponse = {
+  county: string;
+  count: number;
+  records: ParcelRecord[];
+  errors?: Record<string, unknown>;
 };
 
 export type DebugPingResponse = {
@@ -250,7 +329,7 @@ export async function advancedSearch(payload: AdvancedSearchRequest): Promise<Se
 }
 
 export async function parcelsSearch(
-  payload: ParcelSearchRequest | ParcelSearchRequestV2,
+  payload: ParcelSearchRequest | ParcelSearchRequestV2 | ParcelMapSearchRequest,
 ): Promise<ParcelSearchResponse> {
   const resp = await fetch('/api/parcels/search', {
     method: 'POST',
@@ -268,6 +347,31 @@ export async function parcelsSearch(
   }
 
   const data = (await resp.json()) as ParcelSearchResponse
+  if (!data || typeof data !== 'object' || !Array.isArray((data as any).records)) {
+    throw new Error('Unexpected response: expected {records: [...]}' )
+  }
+  return data
+}
+
+export async function parcelsEnrich(
+  payload: ParcelsEnrichRequest,
+): Promise<ParcelsEnrichResponse> {
+  const resp = await fetch('/api/parcels/enrich', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    const detail = text ? `: ${text}` : ''
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`)
+  }
+
+  const data = (await resp.json()) as ParcelsEnrichResponse
   if (!data || typeof data !== 'object' || !Array.isArray((data as any).records)) {
     throw new Error('Unexpected response: expected {records: [...]}' )
   }

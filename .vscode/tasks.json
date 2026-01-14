@@ -4,7 +4,11 @@
     {
       "label": "Start: Fullstack (8000)",
       "type": "shell",
-      "command": "./scripts/up.sh",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/up.sh"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -23,6 +27,114 @@
       "args": [
         "-lc",
         "if [ -f .uvicorn_8000.pid ]; then pid=$(cat .uvicorn_8000.pid 2>/dev/null || true); if [ -n \"$pid\" ]; then kill -TERM \"$pid\" 2>/dev/null || true; fi; fi"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Tmp: Echo",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "echo hi"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Live Search (FDOR)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_live_search.sh 2>&1 | tee PROOF_LIVE_SEARCH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Orange Enrich (OCPA)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_enrich.sh 2>&1 | tee PROOF_ORANGE_ENRICH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Open: PROOF Live Search",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 80 PROOF_LIVE_SEARCH.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Open: PROOF Orange Enrich",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 120 PROOF_ORANGE_ENRICH.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Open: Debug Ping",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS http://127.0.0.1:8000/api/debug/ping | head -n 60"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

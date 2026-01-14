@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict
 
 from florida_property_scraper.parcels.geometry_provider import ParcelGeometryProvider
+from florida_property_scraper.parcels.providers.fdor_centroids import FDORCentroidsProvider
 from florida_property_scraper.parcels.providers.orange import OrangeProvider
 from florida_property_scraper.parcels.providers.seminole import SeminoleProvider
 
@@ -33,6 +34,14 @@ def get_provider(county: str) -> ParcelGeometryProvider:
     """
 
     county_key = (county or "").strip().lower()
+
+    # Optional live geometry provider (network-backed). Kept behind an env flag
+    # so tests and offline deployments remain deterministic.
+    if os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1", "true", "True"}:
+        if county_key in {"seminole", "orange"}:
+            provider = FDORCentroidsProvider(county=county_key)
+            provider.load()
+            return provider
 
     providers: Dict[str, ParcelGeometryProvider] = {
         "seminole": SeminoleProvider(

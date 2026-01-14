@@ -88,5 +88,14 @@ class PAProperty:
     extracted_at: str = ""
     parser_version: str = ""
 
+    # provenance
+    # Keep a structured list of upstream sources (FDOR, PA, etc) so the UI
+    # can show multiple sources even when `source_url` is overwritten by a later
+    # enrichment step.
+    sources: List[Dict[str, str]] = field(default_factory=list)
+    # Per-field provenance for more granular auditability.
+    # Shape: {"field": {"source_url": "...", "raw_label": "..."}}
+    field_provenance: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

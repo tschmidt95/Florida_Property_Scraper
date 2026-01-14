@@ -196,6 +196,18 @@ def lookup_address(payload: dict = Body(...)):
             },
         )
 
+    # LIVE lookup: only supported where we have a purpose-built address lookup provider.
+    # We intentionally do NOT fall back to the generic native scraper here because:
+    # - it can hit the network during unit tests,
+    # - it isn't a stable address-lookup contract,
+    # - many counties have no suitable "start URL" for address search.
+    supported_live_lookup_counties: set[str] = set()
+    if county not in supported_live_lookup_counties:
+        raise HTTPException(
+            status_code=501,
+            detail=f"No LIVE address lookup provider for county: {county}",
+        )
+
     # Live fetch (best-effort): use the existing native adapter live search.
     # This returns basic owner/address/class/zoning fields (not full PA detail).
     try:

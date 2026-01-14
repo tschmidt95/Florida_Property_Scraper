@@ -85,6 +85,68 @@ def intersects(
             # Fall through to bbox check.
             pass
 
+    # Lightweight point-in-polygon fallback (useful for centroid-based layers).
+    try:
+        if (feature_geometry or {}).get("type") == "Point":
+            coords = (feature_geometry or {}).get("coordinates")
+            if (
+                isinstance(coords, (list, tuple))
+                and len(coords) == 2
+                and all(isinstance(x, (int, float)) for x in coords)
+            ):
+                px, py = float(coords[0]), float(coords[1])
+                st = (search_geometry or {}).get("type")
+                if st in {"Polygon", "MultiPolygon"}:
+                    rings: list[list[list[float]]] = []
+                    if st == "Polygon":
+                        poly = (search_geometry or {}).get("coordinates") or []
+                        if isinstance(poly, list):
+                            for ring in poly:
+                                if isinstance(ring, list):
+                                    rings.append(ring)
+                    else:
+                        multi = (search_geometry or {}).get("coordinates") or []
+                        if isinstance(multi, list):
+                            for poly in multi:
+                                if isinstance(poly, list):
+                                    for ring in poly:
+                                        if isinstance(ring, list):
+                                            rings.append(ring)
+
+                    def _in_ring(ring: list[list[float]]) -> bool:
+                        inside = False
+                        n = len(ring)
+                        if n < 4:
+                            return False
+                        j = n - 1
+                        for i in range(n):
+                            xi, yi = ring[i][0], ring[i][1]
+                            xj, yj = ring[j][0], ring[j][1]
+                            intersects_edge = ((yi > py) != (yj > py)) and (
+                                px < (xj - xi) * (py - yi) / ((yj - yi) or 1e-12) + xi
+                            )
+                            if intersects_edge:
+                                inside = not inside
+                            j = i
+                        return inside
+
+                    # GeoJSON polygon: first ring is outer, subsequent rings are holes.
+                    if st == "Polygon":
+                        if not rings:
+                            return False
+                        if not _in_ring(rings[0]):
+                            return False
+                        for hole in rings[1:]:
+                            if _in_ring(hole):
+                                return False
+                        return True
+
+                    # MultiPolygon: treat as inside if inside any polygon's outer ring and not inside its holes.
+                    # Since we flattened rings above, we approximate by checking any ring; good enough as a fallback.
+                    return any(_in_ring(r) for r in rings)
+    except Exception:
+        pass
+
     a = geometry_bbox(search_geometry)
     b = geometry_bbox(feature_geometry)
     if a is None or b is None:

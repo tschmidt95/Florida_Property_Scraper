@@ -86,6 +86,12 @@ source "$ROOT_DIR/.venv/bin/activate"
 echo "$ export LEADS_SQLITE_PATH=/workspaces/Florida_Property_Scraper/leads.sqlite"
 export LEADS_SQLITE_PATH=/workspaces/Florida_Property_Scraper/leads.sqlite
 
+echo "$ export PA_DB=$LEADS_SQLITE_PATH"
+export PA_DB="${PA_DB:-$LEADS_SQLITE_PATH}"
+
+echo "$ export FPS_USE_FDOR_CENTROIDS=1"
+export FPS_USE_FDOR_CENTROIDS="${FPS_USE_FDOR_CENTROIDS:-1}"
+
 # Kill previous PID if our pidfile exists
 if [[ -f "$PID_FILE" ]]; then
   old_pid="$(cat "$PID_FILE" || true)"

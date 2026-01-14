@@ -35,6 +35,14 @@ class PASQLite:
                 land_use_code TEXT NOT NULL,
                 year_built INTEGER NOT NULL,
                 building_sf REAL NOT NULL,
+                living_sf REAL NOT NULL,
+                bedrooms INTEGER NOT NULL,
+                bathrooms REAL NOT NULL,
+                zoning TEXT NOT NULL,
+                use_type TEXT NOT NULL,
+                land_value REAL NOT NULL,
+                improvement_value REAL NOT NULL,
+                just_value REAL NOT NULL,
                 last_sale_date TEXT,
                 last_sale_price REAL NOT NULL,
                 assessed_value REAL NOT NULL,
@@ -45,6 +53,28 @@ class PASQLite:
             )
             """
         )
+
+        # Backwards-compatible migrations for older DBs.
+        # SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we inspect and add.
+        cols = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(pa_properties)").fetchall()
+        }
+        to_add = [
+            ("living_sf", "REAL NOT NULL DEFAULT 0"),
+            ("bedrooms", "INTEGER NOT NULL DEFAULT 0"),
+            ("bathrooms", "REAL NOT NULL DEFAULT 0"),
+            ("zoning", "TEXT NOT NULL DEFAULT ''"),
+            ("use_type", "TEXT NOT NULL DEFAULT ''"),
+            ("land_value", "REAL NOT NULL DEFAULT 0"),
+            ("improvement_value", "REAL NOT NULL DEFAULT 0"),
+            ("just_value", "REAL NOT NULL DEFAULT 0"),
+        ]
+        for name, ddl in to_add:
+            if name in cols:
+                continue
+            self.conn.execute(f"ALTER TABLE pa_properties ADD COLUMN {name} {ddl}")
+
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_pa_county ON pa_properties(county)"
         )
@@ -60,6 +90,30 @@ class PASQLite:
         )
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_pa_building_sf ON pa_properties(building_sf)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_living_sf ON pa_properties(living_sf)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_bedrooms ON pa_properties(bedrooms)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_bathrooms ON pa_properties(bathrooms)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_zoning ON pa_properties(zoning)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_use_type ON pa_properties(use_type)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_land_value ON pa_properties(land_value)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_improvement_value ON pa_properties(improvement_value)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pa_just_value ON pa_properties(just_value)"
         )
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_pa_last_sale_date ON pa_properties(last_sale_date)"
@@ -78,13 +132,23 @@ class PASQLite:
             """
             INSERT INTO pa_properties (
                 county, parcel_id, zip, land_use_code, year_built, building_sf,
+                living_sf, bedrooms, bathrooms, zoning, use_type,
+                land_value, improvement_value, just_value,
                 last_sale_date, last_sale_price, assessed_value, latitude, longitude, record_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(county, parcel_id) DO UPDATE SET
                 zip=excluded.zip,
                 land_use_code=excluded.land_use_code,
                 year_built=excluded.year_built,
                 building_sf=excluded.building_sf,
+                living_sf=excluded.living_sf,
+                bedrooms=excluded.bedrooms,
+                bathrooms=excluded.bathrooms,
+                zoning=excluded.zoning,
+                use_type=excluded.use_type,
+                land_value=excluded.land_value,
+                improvement_value=excluded.improvement_value,
+                just_value=excluded.just_value,
                 last_sale_date=excluded.last_sale_date,
                 last_sale_price=excluded.last_sale_price,
                 assessed_value=excluded.assessed_value,
@@ -99,6 +163,14 @@ class PASQLite:
                 record.land_use_code,
                 int(record.year_built),
                 float(record.building_sf),
+                float(record.living_sf),
+                int(record.bedrooms),
+                float(record.bathrooms),
+                str(record.zoning or ""),
+                str(record.use_type or ""),
+                float(record.land_value),
+                float(record.improvement_value),
+                float(record.just_value),
                 record.last_sale_date,
                 float(record.last_sale_price),
                 float(record.assessed_value),
@@ -108,6 +180,39 @@ class PASQLite:
             ),
         )
         self.conn.commit()
+
+    def filter_cached_ids(
+        self,
+        *,
+        county: str,
+        parcel_ids: Sequence[str],
+        where_sql: str,
+        params: Sequence[Any],
+        limit: int,
+    ) -> List[str]:
+        """Return parcel_ids that match SQL constraints.
+
+        Intended for geometry search: intersecting parcel_ids are computed in Python,
+        then we apply attribute filters cheaply in SQL against the PA cache.
+        """
+
+        ids = [str(pid) for pid in parcel_ids if pid]
+        if not ids:
+            return []
+
+        placeholders = ",".join(["?"] * len(ids))
+        sql = (
+            f"SELECT parcel_id FROM pa_properties WHERE county=? AND parcel_id IN ({placeholders})"
+        )
+        args: List[Any] = [county, *ids]
+        if where_sql:
+            sql += " AND (" + where_sql + ")"
+            args.extend(list(params))
+        sql += " LIMIT ?"
+        args.append(int(limit))
+
+        rows = self.conn.execute(sql, tuple(args)).fetchall()
+        return [str(r["parcel_id"]) for r in rows]
 
     def upsert_many(self, records: Iterable[PAProperty]) -> None:
         for r in records:
