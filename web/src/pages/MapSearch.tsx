@@ -9,6 +9,8 @@ import 'leaflet-draw';
 
 import { parcelsSearch, type ParcelRecord } from '../lib/api';
 
+type MapStatus = 'loading' | 'loaded' | 'failed';
+
 type DrawnCircle = { center: LatLngLiteral; radius_m: number };
 
 function demoRecords(county: string): ParcelRecord[] {
@@ -50,7 +52,11 @@ function demoRecords(county: string): ParcelRecord[] {
   return out;
 }
 
-export default function MapSearch() {
+export default function MapSearch({
+  onMapStatus,
+}: {
+  onMapStatus?: (status: MapStatus) => void;
+}) {
   const [county, setCounty] = useState('orange');
   const [drawnPolygon, setDrawnPolygon] = useState<GeoJSON.Polygon | null>(null);
   const [drawnCircle, setDrawnCircle] = useState<DrawnCircle | null>(null);
@@ -152,7 +158,7 @@ export default function MapSearch() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-96px)] min-h-[720px]">
+    <div className="flex h-full min-h-[520px]">
       <aside className="w-[420px] shrink-0 border-r border-cre-border/40 bg-cre-surface p-4">
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -288,6 +294,10 @@ export default function MapSearch() {
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              eventHandlers={{
+                load: () => onMapStatus?.('loaded'),
+                tileerror: () => onMapStatus?.('failed'),
+              }}
             />
 
             <FeatureGroup ref={featureGroupRef}>

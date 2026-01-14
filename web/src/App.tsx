@@ -16,6 +16,9 @@ import { EditControl } from 'react-leaflet-draw';
 import { advancedSearch, debugPing, parcelsSearch, type ParcelRecord, type SearchResult } from './lib/api';
 
 const LazyMapSearch = lazy(() => import('./pages/MapSearch'));
+const LazySafeMap = lazy(() => import('./pages/SafeMap'));
+
+type MapStatus = 'loading' | 'loaded' | 'failed';
 
 class MapErrorBoundary extends Component<
   { children: ReactNode },
@@ -114,6 +117,7 @@ function RadiusClickHandler({
 export default function App() {
   const [apiOk, setApiOk] = useState(false);
   const [apiGit, setApiGit] = useState<{ sha: string; branch: string } | null>(null);
+  const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
 
   const [mode, setMode] = useState<'search' | 'map'>('map');
   const [query, setQuery] = useState('');
@@ -357,6 +361,33 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-cre-bg text-cre-text">
+      <div className="sticky top-0 z-50 border-b border-cre-border/30 bg-cre-surface px-4 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-emerald-300">✅ Frontend Loaded</span>
+          <span className={apiOk ? 'text-emerald-300' : 'text-red-300'}>
+            🔌 Backend: {apiOk ? 'OK' : 'FAIL'}
+          </span>
+          <span
+            className={
+              mapStatus === 'loaded'
+                ? 'text-emerald-300'
+                : mapStatus === 'failed'
+                  ? 'text-red-300'
+                  : 'text-cre-muted'
+            }
+          >
+            🗺️ Map: {mapStatus === 'loaded' ? 'Loaded' : mapStatus === 'failed' ? 'Failed' : 'Loading…'}
+          </span>
+          {apiGit ? (
+            <span className="ml-auto text-cre-muted">
+              {apiGit.branch} • {apiGit.sha}
+            </span>
+          ) : (
+            <span className="ml-auto text-cre-muted">(no git info)</span>
+          )}
+        </div>
+      </div>
+
       <header className="flex items-center gap-3 border-b border-cre-border/30 bg-cre-surface px-4 py-3">
         <div className="font-serif text-lg font-semibold tracking-tight text-cre-primary">
           Florida Property Scraper
@@ -436,9 +467,21 @@ export default function App() {
 
       <MapErrorBoundary>
         <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
-          <LazyMapSearch />
+          <div className="h-[70vh] min-h-[520px]">
+            <LazyMapSearch onMapStatus={setMapStatus} />
+          </div>
         </Suspense>
       </MapErrorBoundary>
+
+      {/* SAFE MODE: if MapSearch errors, show a guaranteed-simple Leaflet map */}
+      {/** MapErrorBoundary renders its own banner on failure; we also mount SafeMap so a map is visible. */}
+      <div className="px-4 pb-2">
+        <MapErrorBoundary>
+          <Suspense fallback={null}>
+            <LazySafeMap onStatus={setMapStatus} />
+          </Suspense>
+        </MapErrorBoundary>
+      </div>
 
       <div className="flex">
         <aside className="w-80 border-r border-cre-border/30 bg-cre-surface p-4">

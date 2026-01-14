@@ -9,8 +9,22 @@ import 'leaflet-draw';
 
 import './lib/leafletIcons';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+try {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+} catch (e) {
+  // If React crashes before rendering, ensure we still show something.
+  const msg = e instanceof Error ? e.message : String(e);
+  // eslint-disable-next-line no-console
+  console.error('Fatal frontend error', e);
+  document.body.innerHTML = `
+    <div style="font-family: ui-sans-serif, system-ui; padding: 16px;">
+      <div style="font-weight: 700;">Frontend failed to start</div>
+      <div style="margin-top: 8px; color: #555;">${msg}</div>
+      <div style="margin-top: 8px; color: #555;">Check console + web/BUILD_ERRORS.txt</div>
+    </div>
+  `;
+}
