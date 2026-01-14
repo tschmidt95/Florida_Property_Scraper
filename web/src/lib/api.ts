@@ -174,6 +174,117 @@ export type ParcelSearchResponse = {
   results?: unknown[];
 };
 
+export type ParcelSearchListItem = {
+  county: string;
+  parcel_id: string;
+  address: string;
+  owner_name: string;
+  owner_mailing_address?: string;
+  lat?: number;
+  lng?: number;
+  source?: 'live' | 'cache';
+  raw?: unknown;
+};
+
+export type ParcelSearchResponseNormalized = ParcelSearchResponse & {
+  parcels: ParcelSearchListItem[];
+};
+
+function _asString(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+function _asNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return undefined;
+}
+
+function _bestAddressFromHover(hover: Record<string, unknown> | null | undefined): string {
+  const h = hover || {};
+  const situs = _asString(h.situs_address).trim();
+  if (situs) return situs;
+  const addr = _asString(h.address).trim();
+  if (addr) return addr;
+  return '';
+}
+
+function _bestOwnerFromHover(hover: Record<string, unknown> | null | undefined): string {
+  const h = hover || {};
+  const owner = _asString(h.owner_name).trim();
+  if (owner) return owner;
+  const ownerLegacy = _asString(h.owner).trim();
+  if (ownerLegacy) return ownerLegacy;
+  return '';
+}
+
+function _bestMailingFromHover(hover: Record<string, unknown> | null | undefined): string {
+  const h = hover || {};
+  const mailing = _asString(h.mailing_address).trim();
+  if (mailing) return mailing;
+  const mailing2 = _asString(h.owner_mailing_address).trim();
+  if (mailing2) return mailing2;
+  return '';
+}
+
+function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchListItem[] {
+  const out: ParcelSearchListItem[] = [];
+
+  // Prefer modern `records` when present.
+  if (Array.isArray(resp.records)) {
+    for (const r of resp.records) {
+      if (!r || typeof r !== 'object') continue;
+      const parcelId = (r.parcel_id || '').trim();
+      if (!parcelId) continue;
+
+      const address = (r.situs_address || r.address || '').trim();
+      const owner = (r.owner_name || '').trim();
+      const mailing = (r as any).mailing_address || (r as any).owner_mailing_address;
+      const lat = _asNumber((r as any).lat);
+      const lng = _asNumber((r as any).lng);
+
+      out.push({
+        county: (r.county || resp.county || '').trim(),
+        parcel_id: parcelId,
+        address,
+        owner_name: owner,
+        owner_mailing_address: typeof mailing === 'string' && mailing.trim() ? mailing.trim() : undefined,
+        lat,
+        lng,
+        source: (r as any).source,
+        raw: r,
+      });
+    }
+  }
+
+  // Back-compat: `results` rows with `hover_fields`.
+  if (!out.length && Array.isArray((resp as any).results)) {
+    const results = (resp as any).results as unknown[];
+    for (const item of results) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const parcelId = _asString(row.parcel_id).trim();
+      if (!parcelId) continue;
+      const county = _asString(row.county || resp.county).trim();
+      const hoverAny = row.hover_fields;
+      const hover = (hoverAny && typeof hoverAny === 'object') ? (hoverAny as Record<string, unknown>) : null;
+      const address = _bestAddressFromHover(hover);
+      const owner = _bestOwnerFromHover(hover);
+      const mailing = _bestMailingFromHover(hover);
+
+      out.push({
+        county,
+        parcel_id: parcelId,
+        address,
+        owner_name: owner,
+        owner_mailing_address: mailing || undefined,
+        raw: item,
+      });
+    }
+  }
+
+  return out;
+}
+
 export type ParcelsEnrichRequest = {
   county: string;
   parcel_ids: string[];
@@ -407,6 +518,45 @@ export async function parcelsSearch(
     throw new Error('Unexpected response: expected {records: [...]}' )
   }
   return data
+}
+
+export async function parcelsSearchNormalized(
+  payload: ParcelSearchRequest | ParcelSearchRequestV2 | ParcelMapSearchRequest,
+): Promise<ParcelSearchResponseNormalized> {
+  const resp = await parcelsSearch(payload);
+  const parcels = _normalizeParcelListItems(resp);
+  return { ...resp, parcels };
+}
+
+export type ParcelsGeometryRequest = {
+  county: string;
+  parcel_ids: string[];
+};
+
+export type ParcelsGeometryResponse = GeoJSON.FeatureCollection;
+
+export async function parcelsGeometry(payload: ParcelsGeometryRequest): Promise<ParcelsGeometryResponse> {
+  const resp = await fetch('/api/parcels/geometry', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected GeoJSON object');
+  if ((data as any).type !== 'FeatureCollection' || !Array.isArray((data as any).features)) {
+    throw new Error('Unexpected response: expected FeatureCollection');
+  }
+  return data as ParcelsGeometryResponse;
 }
 
 export async function parcelsEnrich(

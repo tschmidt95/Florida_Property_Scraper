@@ -244,12 +244,76 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       }
     },
     {
+      "label": "Sanity: Parcel UI",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/sanity_parcel_ui.sh 2>&1 | tee PROOF_PARCEL_UI.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Open: PROOF Parcel UI",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 200 PROOF_PARCEL_UI.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Git: Status",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
         "git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Parcel UI)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add \
+  .vscode/tasks.json \
+  scripts/sanity_parcel_ui.sh \
+  PROOF_PARCEL_UI.txt \
+  src/florida_property_scraper/api/app.py \
+  src/florida_property_scraper/parcels/live/fdor_parcel_polygons.py \
+  web/src/lib/api.ts \
+  web/src/pages/MapSearch.tsx; \
+git commit -m 'feat: polygon owners list + parcel lines overlay'; \
+git push"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

@@ -1,0 +1,39 @@
+== wait /health ==
+time_utc: 2026-01-14T23:01:55.237598+00:00
+
+== /api/debug/ping ==
+{
+  "ok": true,
+  "server_time": "2026-01-14T23:01:55.243244+00:00",
+  "git": {
+    "sha": "3717ad0",
+    "branch": "feature/address-lookup-ui"
+  },
+  "env": {
+    "FPS_USE_FDOR_CENTROIDS": "1",
+    "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+    "APP_GIT_SHA": "",
+    "APP_GIT_BRANCH": ""
+  }
+}
+
+== POST /api/parcels/search (polygon) ==
+records_count: 25
+sample_parcel_ids: ['362229000000025', '362229000000026', '362229470801010', '362229470801030', '362229470802010', '362229470802050', '362229470802061', '362229470803010']
+
+== Owners (sample) ==
+- 362229000000025 | Property Address | —
+- 362229000000026 | Property Address | —
+- 362229470801010 | TURCA FLIPS REAL ESTATE LLC | 1112 E SOUTH ST, Orlando 32801
+- 362229470801030 | 1100 E SOUTH STREET LLC | 405 CALHOUN PL, ORLANDO 32801
+- 362229470802010 | Property Address | —
+
+== POST /api/parcels/geometry (requested parcel_ids) ==
+feature_count: 25
+feature0_properties: {
+  "parcel_id": "362229000000025",
+  "county": "orange",
+  "situs_address": "",
+  "owner_name": "Property Address"
+}

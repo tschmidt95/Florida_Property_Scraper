@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import L from 'leaflet';
 import type { LatLngLiteral } from 'leaflet';
-import { CircleMarker, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
+import { CircleMarker, GeoJSON, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 
 import 'leaflet-draw';
 
 import {
   parcelsEnrich,
+  parcelsGeometry,
   parcelsSearch,
+  parcelsSearchNormalized,
   permitsByParcel,
   type ParcelAttributeFilters,
   type ParcelRecord,
@@ -342,6 +344,13 @@ export default function MapSearch({
   const [lastResponseCount, setLastResponseCount] = useState<number>(records.length);
   const [lastError, setLastError] = useState<string | null>(null);
 
+  const [ownersQuery, setOwnersQuery] = useState('');
+
+  const [parcelLinesEnabled, setParcelLinesEnabled] = useState(false);
+  const [parcelLinesLoading, setParcelLinesLoading] = useState(false);
+  const [parcelLinesError, setParcelLinesError] = useState<string | null>(null);
+  const [parcelLinesFC, setParcelLinesFC] = useState<GeoJSON.FeatureCollection | null>(null);
+
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
 
@@ -352,6 +361,17 @@ export default function MapSearch({
       return true;
     });
   }, [records, showCache, showLive]);
+
+  const ownersRows = useMemo(() => {
+    const q = ownersQuery.trim().toLowerCase();
+    const base = records;
+    if (!q) return base;
+    return base.filter((r) => {
+      const owner = (r.owner_name || '').toLowerCase();
+      const addr = ((r.situs_address || r.address) || '').toLowerCase();
+      return owner.includes(q) || addr.includes(q) || r.parcel_id.toLowerCase().includes(q);
+    });
+  }, [ownersQuery, records]);
 
   const geometryStatus = useMemo(() => {
     if (drawnPolygon) return 'Polygon selected';
@@ -421,6 +441,53 @@ export default function MapSearch({
       cancelled = true;
     };
   }, [county, selectedParcelId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadParcelLines() {
+      if (!parcelLinesEnabled) return;
+      setParcelLinesError(null);
+
+      const ids = records.map((r) => r.parcel_id).filter(Boolean).slice(0, 50);
+      if (!ids.length) {
+        setParcelLinesFC(null);
+        return;
+      }
+
+      setParcelLinesLoading(true);
+      try {
+        const fc = await parcelsGeometry({ county, parcel_ids: ids });
+        if (cancelled) return;
+        if (!fc.features?.length) {
+          setParcelLinesFC(null);
+          setParcelLinesEnabled(false);
+          setParcelLinesError('Parcel geometry not available for this county yet.');
+          return;
+        }
+        setParcelLinesFC(fc);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setParcelLinesFC(null);
+        setParcelLinesEnabled(false);
+        setParcelLinesError(msg);
+      } finally {
+        if (!cancelled) setParcelLinesLoading(false);
+      }
+    }
+
+    // Only fetch geometry when the user has an active search area.
+    if (!drawnPolygon && !drawnCircle) {
+      setParcelLinesFC(null);
+      return;
+    }
+
+    void loadParcelLines();
+    return () => {
+      cancelled = true;
+    };
+  }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, records]);
 
   async function enrichVisible() {
     setLastError(null);
@@ -553,7 +620,7 @@ export default function MapSearch({
 
     const reqId = ++activeReq.current;
     try {
-      const resp = await parcelsSearch(payload);
+      const resp = await parcelsSearchNormalized(payload);
       if (reqId !== activeReq.current) return;
 
       const zo = (resp as any).zoning_options;
@@ -586,12 +653,22 @@ export default function MapSearch({
       }
 
       setRecords(recs);
+
+      // Refresh owner-list query results immediately.
+      setOwnersQuery('');
+
+      // If parcel lines are enabled, refresh them based on the new parcel_ids.
+      setParcelLinesError(null);
+      setParcelLinesFC(null);
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
       setLastError(msg);
       setErrorBanner(`Request failed: ${msg}`);
       setRecords([]);
+      setParcelLinesFC(null);
+      setParcelLinesEnabled(false);
+      setParcelLinesError(null);
     } finally {
       if (reqId === activeReq.current) setLoading(false);
     }
@@ -906,6 +983,57 @@ export default function MapSearch({
           </button>
         </div>
 
+        <div className="mt-4 overflow-hidden rounded-xl border border-cre-border/40">
+          <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs font-semibold uppercase tracking-widest text-cre-muted">
+            Owners (Polygon): {ownersRows.length}
+          </div>
+
+          <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2">
+            <input
+              className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-xs text-cre-text"
+              placeholder="Filter by owner, address, or parcel id"
+              value={ownersQuery}
+              onChange={(e) => setOwnersQuery(e.target.value)}
+            />
+            {!records.length ? (
+              <div className="mt-2 text-xs text-cre-muted">No parcels found.</div>
+            ) : null}
+          </div>
+
+          <div className="max-h-[240px] overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-cre-surface text-[11px] uppercase tracking-widest text-cre-muted">
+                <tr>
+                  <th className="px-2 py-2">Owner</th>
+                  <th className="px-2 py-2">Address</th>
+                  <th className="px-2 py-2">Parcel ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownersRows.map((r) => {
+                  const addr = (r.situs_address || r.address || '').trim();
+                  const selected = selectedParcelId === r.parcel_id;
+                  return (
+                    <tr
+                      key={`owners:${r.parcel_id}`}
+                      className={
+                        selected
+                          ? 'bg-cre-accent/15'
+                          : 'border-t border-cre-border/30 hover:bg-cre-bg'
+                      }
+                      onClick={() => setSelectedParcelId(r.parcel_id)}
+                    >
+                      <td className="px-2 py-2 text-cre-text">{r.owner_name || '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{addr || '—'}</td>
+                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{r.parcel_id}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div className="mt-4 text-xs text-cre-muted">
           Draw: polygon tool or circle tool (top-right on the map).
         </div>
@@ -1105,7 +1233,28 @@ export default function MapSearch({
       </aside>
 
       <main className="flex-1 bg-cre-bg p-4">
-        <div className="h-full overflow-hidden rounded-2xl border border-cre-border/40 bg-cre-surface shadow-panel">
+        <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/40 bg-cre-surface shadow-panel">
+          <div className="absolute left-3 top-3 z-[500] rounded-xl border border-cre-border/40 bg-cre-bg/95 px-3 py-2 text-xs text-cre-text shadow-panel">
+            <label className="flex items-center gap-2" title="May be slower; available where supported.">
+              <input
+                type="checkbox"
+                checked={parcelLinesEnabled}
+                disabled={isDrawing || parcelLinesLoading}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setParcelLinesError(null);
+                  setParcelLinesFC(null);
+                  setParcelLinesEnabled(next);
+                }}
+              />
+              Parcel Lines (beta)
+              {parcelLinesLoading ? <span className="text-cre-muted">…</span> : null}
+            </label>
+            {parcelLinesError ? (
+              <div className="mt-1 max-w-[320px] text-[11px] text-cre-muted">{parcelLinesError}</div>
+            ) : null}
+          </div>
+
           <MapContainer
             center={[28.5383, -81.3792]}
             zoom={12}
@@ -1135,6 +1284,36 @@ export default function MapSearch({
                 setDrawnCircle(null);
               }}
             />
+
+            {parcelLinesEnabled && parcelLinesFC ? (
+              <GeoJSON
+                data={parcelLinesFC as any}
+                interactive={!isDrawing}
+                style={() => ({
+                  color: '#3b82f6',
+                  weight: 2,
+                  opacity: 0.85,
+                  fillOpacity: 0.0,
+                })}
+                onEachFeature={(feature, layer) => {
+                  const props: any = (feature as any)?.properties || {};
+                  const addr = String(props.situs_address || '').trim();
+                  const owner = String(props.owner_name || '').trim();
+                  const pid = String(props.parcel_id || '').trim();
+                  const lines = [addr || '—', owner ? `Owner: ${owner}` : 'Owner: —', pid ? `Parcel: ${pid}` : 'Parcel: —'];
+                  try {
+                    (layer as any).bindTooltip(lines.join('\n'), {
+                      sticky: true,
+                      direction: 'top',
+                      opacity: 0.95,
+                      className: 'text-xs',
+                    });
+                  } catch {
+                    // ignore
+                  }
+                }}
+              />
+            ) : null}
 
             {rows.map((r) => {
               const selected = selectedParcelId === r.parcel_id;
