@@ -1,12 +1,12 @@
 == wait /health ==
-time_utc: 2026-01-14T23:01:55.237598+00:00
+time_utc: 2026-01-14T23:05:05.691325+00:00
 
 == /api/debug/ping ==
 {
   "ok": true,
-  "server_time": "2026-01-14T23:01:55.243244+00:00",
+  "server_time": "2026-01-14T23:05:05.697409+00:00",
   "git": {
-    "sha": "3717ad0",
+    "sha": "7be624c",
     "branch": "feature/address-lookup-ui"
   },
   "env": {
