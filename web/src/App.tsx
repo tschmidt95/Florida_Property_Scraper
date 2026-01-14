@@ -21,7 +21,7 @@ const LazySafeMap = lazy(() => import('./pages/SafeMap'));
 type MapStatus = 'loading' | 'loaded' | 'failed';
 
 class MapErrorBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; onSafeMapStatus: (status: MapStatus) => void },
   { hasError: boolean }
 > {
   state: { hasError: boolean } = { hasError: false };
@@ -37,13 +37,18 @@ class MapErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="m-4 rounded-xl border border-cre-accent/40 bg-cre-surface p-4">
-          <div className="text-sm font-semibold text-cre-accent">
-            MapSearch disabled — check console + web/BUILD_ERRORS.txt
+        <div className="m-4 space-y-3">
+          <div className="rounded-xl border border-cre-accent/40 bg-cre-surface p-4">
+            <div className="text-sm font-semibold text-cre-accent">
+              MapSearch disabled — check console + web/BUILD_ERRORS.txt
+            </div>
+            <div className="mt-1 text-xs text-cre-muted">
+              SAFE MODE active: showing a minimal base map.
+            </div>
           </div>
-          <div className="mt-1 text-xs text-cre-muted">
-            Falling back to the legacy UI below.
-          </div>
+          <Suspense fallback={<div className="p-4 text-sm text-cre-text">Loading safe map…</div>}>
+            <LazySafeMap onStatus={this.props.onSafeMapStatus} />
+          </Suspense>
         </div>
       );
     }
@@ -465,23 +470,13 @@ export default function App() {
         {buildBanner}
       </div>
 
-      <MapErrorBoundary>
+      <MapErrorBoundary onSafeMapStatus={setMapStatus}>
         <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
           <div className="h-[70vh] min-h-[520px]">
             <LazyMapSearch onMapStatus={setMapStatus} />
           </div>
         </Suspense>
       </MapErrorBoundary>
-
-      {/* SAFE MODE: if MapSearch errors, show a guaranteed-simple Leaflet map */}
-      {/** MapErrorBoundary renders its own banner on failure; we also mount SafeMap so a map is visible. */}
-      <div className="px-4 pb-2">
-        <MapErrorBoundary>
-          <Suspense fallback={null}>
-            <LazySafeMap onStatus={setMapStatus} />
-          </Suspense>
-        </MapErrorBoundary>
-      </div>
 
       <div className="flex">
         <aside className="w-80 border-r border-cre-border/30 bg-cre-surface p-4">

@@ -56,3 +56,7 @@ requirements.txt.bak
 .uvicorn_*.pid
 .pids_*.txt
 .tmp_*.sh
+
+# local dev-run artifacts
+.up_run.pid
+.up_run*.log
