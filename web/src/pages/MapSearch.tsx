@@ -115,9 +115,42 @@ function DrawControls({
 
       if (e?.layerType === 'polygon') {
         try {
-          const gj = e.layer?.toGeoJSON?.();
-          const geom = gj?.geometry;
-          if (geom?.type === 'Polygon') onPolygonRef.current(geom as GeoJSON.Polygon);
+          // Build a stable GeoJSON Polygon from Leaflet lat/lngs.
+          // This avoids subtle coordinate-order issues that can lead to
+          // bbox/intersection queries returning 0 parcels.
+          const latlngs = e.layer?.getLatLngs?.();
+
+          const toRing = (ring: any[]): number[][] => {
+            const coords: number[][] = [];
+            for (const p of ring) {
+              const lat = typeof p?.lat === 'number' ? p.lat : null;
+              const lng = typeof p?.lng === 'number' ? p.lng : null;
+              if (lat === null || lng === null) continue;
+              coords.push([lng, lat]);
+            }
+            if (coords.length >= 3) {
+              const first = coords[0];
+              const last = coords[coords.length - 1];
+              if (first[0] !== last[0] || first[1] !== last[1]) coords.push([...first]);
+            }
+            return coords;
+          };
+
+          let rings: any[][] = [];
+          if (Array.isArray(latlngs) && latlngs.length) {
+            if (Array.isArray(latlngs[0]) && latlngs[0]?.length && typeof latlngs[0][0]?.lat === 'number') {
+              // LatLng[][]
+              rings = latlngs as any[][];
+            } else if (typeof (latlngs as any)[0]?.lat === 'number') {
+              // LatLng[]
+              rings = [latlngs as any[]];
+            }
+          }
+
+          const coordinates = rings.map(toRing).filter((r) => r.length >= 4);
+          if (coordinates.length) {
+            onPolygonRef.current({ type: 'Polygon', coordinates } as GeoJSON.Polygon);
+          }
         } catch {
           // ignore
         }

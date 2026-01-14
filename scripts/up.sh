@@ -48,15 +48,34 @@ build_frontend_if_needed() {
   return 1
 }
 
-echo "$ (cd web && npm ci && npm run build)"
-set +e
-web_out="$(cd "$ROOT_DIR/web" && npm ci 2>&1 && npm run build 2>&1)"
-web_rc=$?
-set -e
-if [[ "$web_rc" -ne 0 ]]; then
-  echo "$web_out" | head -n 50 > "$ROOT_DIR/web/BUILD_ERRORS.txt" || true
-  echo "WEB BUILD FAILED — see web/BUILD_ERRORS.txt"
-  exit 1
+if build_frontend_if_needed; then
+  echo "$ (cd web && npm ci && npm run build)"
+  set +e
+  web_out="$({
+    cd "$ROOT_DIR/web" || exit 1
+    need_ci=0
+    if [[ ! -d node_modules ]]; then
+      need_ci=1
+    elif [[ ! -f node_modules/.package-lock.json ]]; then
+      need_ci=1
+    elif [[ -f package-lock.json ]] && [[ package-lock.json -nt node_modules/.package-lock.json ]]; then
+      need_ci=1
+    fi
+
+    if [[ "$need_ci" == "1" ]]; then
+      npm ci 2>&1 || exit $?
+    fi
+    npm run build 2>&1
+  } 2>&1)"
+  web_rc=$?
+  set -e
+  if [[ "$web_rc" -ne 0 ]]; then
+    echo "$web_out" | head -n 50 > "$ROOT_DIR/web/BUILD_ERRORS.txt" || true
+    echo "WEB BUILD FAILED — see web/BUILD_ERRORS.txt"
+    exit 1
+  fi
+else
+  echo "$ (cd web && npm run build)  # skipped (dist is up-to-date)"
 fi
 
 APP_GIT_SHA="$(get_git_sha)"

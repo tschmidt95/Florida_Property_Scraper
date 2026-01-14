@@ -1,43 +1,73 @@
 == wait /health ==
 == /api/debug/ping ==
 ok: True
-git: {'sha': 'bb33265', 'branch': 'feature/address-lookup-ui'}
-env: {'FPS_USE_FDOR_CENTROIDS': '1', 'PA_DB': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'LEADS_SQLITE_PATH': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'APP_GIT_SHA': 'bb33265', 'APP_GIT_BRANCH': 'feature/address-lookup-ui'}
+git: {'sha': '04c4dc6', 'branch': 'feature/address-lookup-ui'}
+env: {'FPS_USE_FDOR_CENTROIDS': '1', 'PA_DB': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'LEADS_SQLITE_PATH': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'APP_GIT_SHA': '04c4dc6', 'APP_GIT_BRANCH': 'feature/address-lookup-ui'}
 
 == POST /api/parcels/search (live) ==
 count: 50
-source_counts: {'live': 50, 'cache': 0, 'demo': 0}
+source_counts: {'live': 50, 'cache': 0}
 first_record:
 {
   "parcel_id": "362229000000025",
   "county": "orange",
-  "situs_address": "1300 E SOUTH ST, Orlando 32801",
-  "owner_name": "CITY OF ORLANDO",
-  "land_use": "089",
+  "situs_address": "",
+  "owner_name": "Property Address",
+  "land_use": "8900 - Municipal (Other)",
+  "future_land_use": "8900 - Municipal (Other)",
   "beds": null,
   "baths": null,
   "year_built": 1958,
   "last_sale_date": null,
   "last_sale_price": 0.0,
   "source": "live",
-  "zoning": null,
-  "zoning_reason": "not_provided_by_source",
+  "zoning": "ORL-P/T/AN",
+  "zoning_reason": null,
   "sqft": [
     {
-      "type": "lot",
-      "value": 43709.0
+      "type": "living",
+      "value": 988.0
     }
   ],
-  "raw_source_url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229000000025%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false",
-  "provenance": {
-    "situs_address": {
-      "source": "fdor_centroids",
+  "raw_source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
       "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229000000025%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
     },
+    {
+      "name": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    }
+  ],
+  "provenance": {
     "owner_name": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229000000025%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
     },
     "land_use": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229000000025%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "zoning": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "year_built": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "sqft.living": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "land_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Se
+
+== POST /api/parcels/search (MapSearch payload: polygon_geojson) ==
+count: 25
+
+== POST /api/parcels/search (swapped coords demo; expected 0) ==
+count: 0
+warnings: ['No parcel candidates returned for bbox']

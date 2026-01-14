@@ -63,13 +63,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; \
-git add \
-  .vscode/tasks.json \
-  web/src/pages/MapSearch.tsx \
-  PROOF_ORANGE_ENRICH.txt \
-  PROOF_ORANGE_LOT_SIZE_FILTER.txt; \
-git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
+        "echo hi"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -95,7 +89,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -113,7 +107,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -131,7 +125,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -149,7 +143,25 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Polygon Search (Orange)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_polygon_search.sh 2>&1 | tee PROOF_POLYGON_SEARCH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -167,7 +179,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -185,7 +197,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -203,7 +215,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -226,6 +238,24 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       }
     },
     {
+      "label": "Open: PROOF Polygon Search",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "tail -n 160 PROOF_POLYGON_SEARCH.txt || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Open: Debug Ping",
       "type": "shell",
       "command": "bash",
@@ -239,7 +269,7 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -286,6 +316,32 @@ git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       "args": [
         "-lc",
         "git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Fix Polygon Search)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add \
+  .vscode/tasks.json \
+  PROOF_LIVE_SEARCH.txt \
+  scripts/prove_live_search.sh \
+  scripts/up.sh \
+  web/src/pages/MapSearch.tsx; \
+git commit -m 'fix: restore polygon search results'; \
+git push"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
