@@ -63,7 +63,13 @@
       "command": "bash",
       "args": [
         "-lc",
-        "echo hi"
+        "set -euo pipefail; \
+git add \
+  .vscode/tasks.json \
+  web/src/pages/MapSearch.tsx \
+  PROOF_ORANGE_ENRICH.txt \
+  PROOF_ORANGE_LOT_SIZE_FILTER.txt; \
+git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
