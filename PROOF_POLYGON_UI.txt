@@ -1,7 +1,7 @@
 == /api/debug/ping ==
 {
     "ok": true,
-    "server_time": "2026-01-14T23:48:36.808768+00:00",
+    "server_time": "2026-01-15T00:14:54.666640+00:00",
     "git": {
         "sha": "7909209",
         "branch": "feature/address-lookup-ui"

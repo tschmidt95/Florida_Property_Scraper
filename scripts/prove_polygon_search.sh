@@ -3,12 +3,15 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 
-python -u - <<PY
+export BASE_URL
+
+python -u - <<'PY'
 import json
+import os
 import time
 import urllib.request
 
-BASE_URL = ${BASE_URL@Q}.rstrip('/')
+BASE_URL = os.environ.get('BASE_URL', 'http://127.0.0.1:8000').rstrip('/')
 
 # A simple polygon around downtown Orlando.
 POLY_LNGLAT = {
@@ -70,12 +73,19 @@ resp_ok = post_search(POLY_LNGLAT)
 recs_ok = resp_ok.get('records') or []
 print('records_count:', len(recs_ok))
 print('warnings:', resp_ok.get('warnings'))
+if len(recs_ok) <= 0:
+  raise SystemExit('FAIL: expected records_count > 0 for valid lng/lat polygon')
 
 print('\n== POST /api/parcels/search (lat,lng swapped; expected 0) ==')
 resp_bad = post_search(POLY_LATLNG)
 recs_bad = resp_bad.get('records') or []
 print('records_count:', len(recs_bad))
 print('warnings:', resp_bad.get('warnings'))
+
+# Not strictly required, but this is a helpful guardrail against accidental
+# coordinate order regressions.
+if len(recs_bad) != 0:
+  raise SystemExit('FAIL: expected records_count == 0 for swapped lat/lng polygon')
 
 # Print one example record (safe, already public fields) for sanity.
 if recs_ok:

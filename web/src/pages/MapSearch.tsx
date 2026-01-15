@@ -35,6 +35,7 @@ function DrawControls({
   const map = useMap();
   const wasDraggingEnabledRef = useRef<boolean>(false);
   const activePolygonHandlerRef = useRef<any>(null);
+  const firstVertexGuardedRef = useRef<boolean>(false);
   const onPolygonRef = useRef(onPolygon);
   const onDeletedRef = useRef(onDeleted);
   const onDrawingChangeRef = useRef(onDrawingChange);
@@ -82,6 +83,9 @@ function DrawControls({
       wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
       if (wasDraggingEnabledRef.current) map.dragging.disable();
 
+      // Reset per-draw state.
+      firstVertexGuardedRef.current = false;
+
       // Track the active polygon handler so we can explicitly finish on dblclick.
       // (Leaflet.Draw generally supports finishing via clicking the first vertex;
       // dblclick support varies by browser/config.)
@@ -102,7 +106,35 @@ function DrawControls({
       if (wasDraggingEnabledRef.current) map.dragging.enable();
       wasDraggingEnabledRef.current = false;
       activePolygonHandlerRef.current = null;
+      firstVertexGuardedRef.current = false;
       onDrawingChangeRef.current(false);
+    };
+
+    const handleDrawVertex = (e: any) => {
+      // Leaflet.Draw finishes polygons when clicking the first vertex.
+      // Product requirement: ONLY finish on dblclick or explicit Finish button.
+      if (firstVertexGuardedRef.current) return;
+      try {
+        const layers = e?.layers;
+        const markers: any[] = layers?.getLayers?.() || [];
+        const first = markers[0];
+        if (!first) return;
+
+        // Remove Leaflet.Draw's finish-on-first-click handler, but keep a click handler
+        // that just stops propagation.
+        first.off('click');
+        first.on('click', (evt: any) => {
+          try {
+            evt?.originalEvent?.preventDefault?.();
+            evt?.originalEvent?.stopPropagation?.();
+          } catch {
+            // ignore
+          }
+        });
+        firstVertexGuardedRef.current = true;
+      } catch {
+        // ignore
+      }
     };
 
     const handleDblClick = () => {
@@ -181,6 +213,7 @@ function DrawControls({
 
     map.on(L.Draw.Event.DRAWSTART, handleDrawStart);
     map.on(L.Draw.Event.DRAWSTOP, handleDrawStop);
+    map.on(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
     map.on('dblclick', handleDblClick);
@@ -188,6 +221,7 @@ function DrawControls({
     return () => {
       map.off(L.Draw.Event.DRAWSTART, handleDrawStart);
       map.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
+      map.off(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
       map.off('dblclick', handleDblClick);
