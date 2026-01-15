@@ -26,19 +26,30 @@ function DrawControls({
   onPolygon,
   onDeleted,
   onDrawingChange,
+  onFinishPolygonChange,
+  onDebug,
 }: {
   drawnItemsRef: React.MutableRefObject<L.FeatureGroup | null>;
   onPolygon: (geom: GeoJSON.Polygon) => void;
   onDeleted: () => void;
   onDrawingChange: (isDrawing: boolean) => void;
+  onFinishPolygonChange: (finish: (() => void) | null) => void;
+  onDebug: (patch: {
+    isDrawing?: boolean;
+    lastEvent?: string;
+    vertexCount?: number;
+    isClosed?: boolean;
+    emittedRingCount?: number;
+  }) => void;
 }) {
   const map = useMap();
   const wasDraggingEnabledRef = useRef<boolean>(false);
   const activePolygonHandlerRef = useRef<any>(null);
-  const firstVertexGuardedRef = useRef<boolean>(false);
   const onPolygonRef = useRef(onPolygon);
   const onDeletedRef = useRef(onDeleted);
   const onDrawingChangeRef = useRef(onDrawingChange);
+  const onFinishPolygonChangeRef = useRef(onFinishPolygonChange);
+  const onDebugRef = useRef(onDebug);
 
   useEffect(() => {
     onPolygonRef.current = onPolygon;
@@ -53,6 +64,14 @@ function DrawControls({
   }, [onDrawingChange]);
 
   useEffect(() => {
+    onFinishPolygonChangeRef.current = onFinishPolygonChange;
+  }, [onFinishPolygonChange]);
+
+  useEffect(() => {
+    onDebugRef.current = onDebug;
+  }, [onDebug]);
+
+  useEffect(() => {
     const drawnItems = new L.FeatureGroup();
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
@@ -61,7 +80,7 @@ function DrawControls({
       draw: {
         polygon: {
           maxPoints: 0,
-          allowIntersection: true,
+          allowIntersection: false,
           showArea: true,
         },
         polyline: false,
@@ -79,67 +98,7 @@ function DrawControls({
 
     map.addControl(control);
 
-    const handleDrawStart = (e: any) => {
-      wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
-      if (wasDraggingEnabledRef.current) map.dragging.disable();
-
-      // Reset per-draw state.
-      firstVertexGuardedRef.current = false;
-
-      // Track the active polygon handler so we can explicitly finish on dblclick.
-      // (Leaflet.Draw generally supports finishing via clicking the first vertex;
-      // dblclick support varies by browser/config.)
-      try {
-        if (e?.layerType === 'polygon') {
-          activePolygonHandlerRef.current = (control as any)?._toolbars?.draw?._modes?.polygon?.handler ?? null;
-        } else {
-          activePolygonHandlerRef.current = null;
-        }
-      } catch {
-        activePolygonHandlerRef.current = null;
-      }
-
-      onDrawingChangeRef.current(true);
-    };
-
-    const handleDrawStop = () => {
-      if (wasDraggingEnabledRef.current) map.dragging.enable();
-      wasDraggingEnabledRef.current = false;
-      activePolygonHandlerRef.current = null;
-      firstVertexGuardedRef.current = false;
-      onDrawingChangeRef.current(false);
-    };
-
-    const handleDrawVertex = (e: any) => {
-      // Leaflet.Draw finishes polygons when clicking the first vertex.
-      // Product requirement: ONLY finish on dblclick or explicit Finish button.
-      if (firstVertexGuardedRef.current) return;
-      try {
-        const layers = e?.layers;
-        const markers: any[] = layers?.getLayers?.() || [];
-        const first = markers[0];
-        if (!first) return;
-
-        // Remove Leaflet.Draw's finish-on-first-click handler, but keep a click handler
-        // that just stops propagation.
-        first.off('click');
-        first.on('click', (evt: any) => {
-          try {
-            evt?.originalEvent?.preventDefault?.();
-            evt?.originalEvent?.stopPropagation?.();
-          } catch {
-            // ignore
-          }
-        });
-        firstVertexGuardedRef.current = true;
-      } catch {
-        // ignore
-      }
-    };
-
-    const handleDblClick = () => {
-      // Finish the polygon on double click.
-      // Leaflet.Draw may finish on dblclick already, but this makes the behavior explicit.
+    const finishActivePolygon = () => {
       const handler = activePolygonHandlerRef.current;
       if (!handler) return;
       try {
@@ -155,6 +114,103 @@ function DrawControls({
       }
     };
 
+    const readActiveVertexCount = (): number => {
+      const handler = activePolygonHandlerRef.current;
+      if (!handler) return 0;
+      try {
+        if (Array.isArray(handler._markers)) {
+          return handler._markers.length;
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const poly = handler._poly;
+        const ll = poly?.getLatLngs?.();
+        if (Array.isArray(ll)) {
+          if (ll.length && Array.isArray(ll[0])) {
+            const ring = ll[0] as any[];
+            return Array.isArray(ring) ? ring.length : 0;
+          }
+          return ll.length;
+        }
+      } catch {
+        // ignore
+      }
+
+      return 0;
+    };
+
+    const isClosedFromGeoJsonRing = (coords: any[] | null | undefined): boolean => {
+      if (!Array.isArray(coords) || coords.length < 4) return false;
+      const first = coords[0];
+      const last = coords[coords.length - 1];
+      if (!Array.isArray(first) || !Array.isArray(last)) return false;
+      return first[0] === last[0] && first[1] === last[1];
+    };
+
+    const handleDrawStart = (e: any) => {
+      wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
+      if (wasDraggingEnabledRef.current) map.dragging.disable();
+
+      // Track the active polygon handler so we can explicitly finish on dblclick.
+      // (Leaflet.Draw generally supports finishing via clicking the first vertex;
+      // dblclick support varies by browser/config.)
+      try {
+        if (e?.layerType === 'polygon') {
+          activePolygonHandlerRef.current = (control as any)?._toolbars?.draw?._modes?.polygon?.handler ?? null;
+          onFinishPolygonChangeRef.current(finishActivePolygon);
+        } else {
+          activePolygonHandlerRef.current = null;
+          onFinishPolygonChangeRef.current(null);
+        }
+      } catch {
+        activePolygonHandlerRef.current = null;
+        onFinishPolygonChangeRef.current(null);
+      }
+
+      onDrawingChangeRef.current(true);
+
+      // Debug overlay
+      onDebugRef.current({
+        isDrawing: true,
+        lastEvent: 'draw:drawstart',
+        vertexCount: 0,
+        isClosed: false,
+      });
+    };
+
+    const handleDrawStop = () => {
+      if (wasDraggingEnabledRef.current) map.dragging.enable();
+      wasDraggingEnabledRef.current = false;
+      activePolygonHandlerRef.current = null;
+      onDrawingChangeRef.current(false);
+      onFinishPolygonChangeRef.current(null);
+
+      onDebugRef.current({
+        isDrawing: false,
+        lastEvent: 'draw:drawstop',
+      });
+    };
+
+    const handleDblClick = () => {
+      // Finish the polygon on double click.
+      // Leaflet.Draw may finish on dblclick already, but this makes the behavior explicit.
+      if (!activePolygonHandlerRef.current) return;
+      onDebugRef.current({ lastEvent: 'draw:dblclick_finish' });
+      finishActivePolygon();
+    };
+
+    const handleDrawVertex = () => {
+      if (!activePolygonHandlerRef.current) return;
+      onDebugRef.current({
+        lastEvent: 'draw:drawvertex',
+        vertexCount: readActiveVertexCount(),
+        isClosed: false,
+      });
+    };
+
     const handleCreated = (e: any) => {
       try {
         drawnItems.clearLayers();
@@ -165,41 +221,20 @@ function DrawControls({
 
       if (e?.layerType === 'polygon') {
         try {
-          // Build a stable GeoJSON Polygon from Leaflet lat/lngs.
-          // This avoids subtle coordinate-order issues that can lead to
-          // bbox/intersection queries returning 0 parcels.
-          const latlngs = e.layer?.getLatLngs?.();
-
-          const toRing = (ring: any[]): number[][] => {
-            const coords: number[][] = [];
-            for (const p of ring) {
-              const lat = typeof p?.lat === 'number' ? p.lat : null;
-              const lng = typeof p?.lng === 'number' ? p.lng : null;
-              if (lat === null || lng === null) continue;
-              coords.push([lng, lat]);
-            }
-            if (coords.length >= 3) {
-              const first = coords[0];
-              const last = coords[coords.length - 1];
-              if (first[0] !== last[0] || first[1] !== last[1]) coords.push([...first]);
-            }
-            return coords;
-          };
-
-          let rings: any[][] = [];
-          if (Array.isArray(latlngs) && latlngs.length) {
-            if (Array.isArray(latlngs[0]) && latlngs[0]?.length && typeof latlngs[0][0]?.lat === 'number') {
-              // LatLng[][]
-              rings = latlngs as any[][];
-            } else if (typeof (latlngs as any)[0]?.lat === 'number') {
-              // LatLng[]
-              rings = [latlngs as any[]];
-            }
-          }
-
-          const coordinates = rings.map(toRing).filter((r) => r.length >= 4);
-          if (coordinates.length) {
-            onPolygonRef.current({ type: 'Polygon', coordinates } as GeoJSON.Polygon);
+          // Use Leaflet's GeoJSON export so coordinate order is correct ([lng, lat])
+          // and the ring is properly closed.
+          const gj = e.layer?.toGeoJSON?.();
+          const geom = gj?.geometry;
+          if (geom?.type === 'Polygon' && Array.isArray((geom as any).coordinates)) {
+            const ring = ((geom as any).coordinates?.[0] as any[]) || [];
+            const ringCount = Array.isArray(ring) ? ring.length : 0;
+            onDebugRef.current({
+              lastEvent: 'draw:created',
+              vertexCount: Math.max(0, ringCount - 1),
+              isClosed: isClosedFromGeoJsonRing(ring),
+              emittedRingCount: ringCount,
+            });
+            onPolygonRef.current(geom as GeoJSON.Polygon);
           }
         } catch {
           // ignore
@@ -209,6 +244,16 @@ function DrawControls({
 
     const handleDeleted = () => {
       onDeletedRef.current();
+      onDebugRef.current({
+        lastEvent: 'draw:deleted',
+        vertexCount: 0,
+        isClosed: false,
+        emittedRingCount: 0,
+      });
+    };
+
+    const handleEdited = () => {
+      onDebugRef.current({ lastEvent: 'draw:edited' });
     };
 
     map.on(L.Draw.Event.DRAWSTART, handleDrawStart);
@@ -216,6 +261,7 @@ function DrawControls({
     map.on(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
+    map.on(L.Draw.Event.EDITED, handleEdited);
     map.on('dblclick', handleDblClick);
 
     return () => {
@@ -224,6 +270,7 @@ function DrawControls({
       map.off(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
+      map.off(L.Draw.Event.EDITED, handleEdited);
       map.off('dblclick', handleDblClick);
       try {
         map.removeControl(control);
@@ -236,6 +283,11 @@ function DrawControls({
         // ignore
       }
       if (drawnItemsRef.current === drawnItems) drawnItemsRef.current = null;
+      try {
+        onFinishPolygonChangeRef.current(null);
+      } catch {
+        // ignore
+      }
     };
   }, [drawnItemsRef, map]);
 
@@ -283,8 +335,10 @@ function MultiSelectFilter({
     onSelected([]);
   };
 
+  const [isOpen, setIsOpen] = useState(true);
+
   return (
-    <div className="rounded-xl border border-cre-border/40 bg-cre-bg p-3">
+    <div className="w-full rounded-xl border border-cre-border/40 bg-cre-bg p-3">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-xs font-semibold text-cre-text">{title}</div>
@@ -293,6 +347,13 @@ function MultiSelectFilter({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text"
+            onClick={() => setIsOpen((v) => !v)}
+          >
+            {isOpen ? 'Hide' : 'Show'}
+          </button>
           <button
             type="button"
             className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text"
@@ -334,38 +395,46 @@ function MultiSelectFilter({
         <div className="mt-2 text-[11px] text-cre-muted">No selections yet.</div>
       )}
 
-      <input
-        className="mt-2 w-full rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-sm text-cre-text"
-        value={query}
-        onChange={(e) => onQuery(e.target.value)}
-        placeholder="Search options..."
-      />
+      {isOpen ? (
+        <>
+          <input
+            className="mt-2 w-full rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-2 text-xs text-cre-text"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder="Search options..."
+          />
 
-      <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-cre-border/40 bg-cre-surface p-2">
-        {!options.length ? (
-          <div className="text-xs text-cre-muted">No options (field not available).</div>
-        ) : filtered.length ? (
-          <div className="space-y-1">
-            {filtered.slice(0, 250).map((o) => (
-              <label key={o} className="flex items-center gap-2 text-xs text-cre-text">
-                <input
-                  type="checkbox"
-                  checked={selectedSet.has(o)}
-                  onChange={() => toggle(o)}
-                />
-                <span className="truncate">{o}</span>
-              </label>
-            ))}
-            {filtered.length > 250 ? (
-              <div className="pt-1 text-[11px] text-cre-muted">
-                Showing first 250 matches. Refine your search.
+          <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-cre-border/40 bg-cre-surface p-2">
+            {!options.length ? (
+              <div className="text-xs text-cre-muted">No options (field not available).</div>
+            ) : filtered.length ? (
+              <div className="space-y-1">
+                {filtered.slice(0, 250).map((o) => (
+                  <label
+                    key={o}
+                    className="flex cursor-pointer select-none items-center gap-2 rounded-md px-1 py-1 text-xs text-cre-text hover:bg-cre-bg"
+                    title={o}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(o)}
+                      onChange={() => toggle(o)}
+                    />
+                    <span className="truncate">{o}</span>
+                  </label>
+                ))}
+                {filtered.length > 250 ? (
+                  <div className="pt-1 text-[11px] text-cre-muted">
+                    Showing first 250 matches. Refine your search.
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            ) : (
+              <div className="text-xs text-cre-muted">No matches.</div>
+            )}
           </div>
-        ) : (
-          <div className="text-xs text-cre-muted">No matches.</div>
-        )}
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -380,6 +449,34 @@ export default function MapSearch({
   const [drawnCircle, setDrawnCircle] = useState<DrawnCircle | null>(null);
 
   const [isDrawing, setIsDrawing] = useState(false);
+  const [finishPolygon, setFinishPolygon] = useState<(() => void) | null>(null);
+
+  const [drawDebug, setDrawDebug] = useState<{
+    isDrawing: boolean;
+    lastEvent: string;
+    vertexCount: number;
+    isClosed: boolean;
+    emittedRingCount: number;
+  }>({
+    isDrawing: false,
+    lastEvent: '—',
+    vertexCount: 0,
+    isClosed: false,
+    emittedRingCount: 0,
+  });
+
+  const [runDebugLoading, setRunDebugLoading] = useState(false);
+  const [runDebugOut, setRunDebugOut] = useState<
+    | {
+        payload: any;
+        recordsLen: number;
+        sample: Array<{ parcel_id: string; owner: string; address: string }>;
+        zoningOptionsLen: number;
+        futureLandUseOptionsLen: number;
+      }
+    | { payload: any; error: string }
+    | null
+  >(null);
 
   const [parcels, setParcels] = useState<ParcelSearchListItem[]>([]);
   const [records, setRecords] = useState<ParcelRecord[]>([]);
@@ -463,6 +560,7 @@ export default function MapSearch({
   const [parcelLinesLoading, setParcelLinesLoading] = useState(false);
   const [parcelLinesError, setParcelLinesError] = useState<string | null>(null);
   const [parcelLinesFC, setParcelLinesFC] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [parcelLinesFeatureCount, setParcelLinesFeatureCount] = useState<number>(0);
 
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
@@ -576,6 +674,7 @@ export default function MapSearch({
       const ids = parcels.map((p) => p.parcel_id).filter(Boolean).slice(0, 50);
       if (!ids.length) {
         setParcelLinesFC(null);
+        setParcelLinesFeatureCount(0);
         return;
       }
 
@@ -585,15 +684,18 @@ export default function MapSearch({
         if (cancelled) return;
         if (!fc.features?.length) {
           setParcelLinesFC(null);
+          setParcelLinesFeatureCount(0);
           setParcelLinesEnabled(false);
           setParcelLinesError('Parcel geometry not available for this county yet.');
           return;
         }
         setParcelLinesFC(fc);
+        setParcelLinesFeatureCount(fc.features.length);
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         setParcelLinesFC(null);
+        setParcelLinesFeatureCount(0);
         setParcelLinesEnabled(false);
         setParcelLinesError(msg);
       } finally {
@@ -604,6 +706,7 @@ export default function MapSearch({
     // Only fetch geometry when the user has an active search area.
     if (!drawnPolygon && !drawnCircle) {
       setParcelLinesFC(null);
+      setParcelLinesFeatureCount(0);
       return;
     }
 
@@ -612,6 +715,126 @@ export default function MapSearch({
       cancelled = true;
     };
   }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels]);
+
+  function buildSearchPayloadForMap(): { payload: any } | { error: string } {
+    if (!drawnPolygon && !drawnCircle) {
+      return { error: 'Draw polygon or radius first' };
+    }
+
+    const toIntOrNull = (v: string): number | null => {
+      const s = v.trim();
+      if (!s) return null;
+      const n = Number(s);
+      if (!Number.isFinite(n)) return null;
+      return Math.trunc(n);
+    };
+    const toFloatOrNull = (v: string): number | null => {
+      const s = v.trim();
+      if (!s) return null;
+      const n = Number(s);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    };
+
+    const minLotSize = toFloatOrNull(filterForm.minLotSize);
+    const maxLotSize = toFloatOrNull(filterForm.maxLotSize);
+    const hasLotSize = minLotSize !== null || maxLotSize !== null;
+    const lotSizeUnit = filterForm.lotSizeUnit === 'acres' ? 'acres' : 'sqft';
+
+    const toSqft = (v: number | null): number | null => {
+      if (v === null) return null;
+      if (lotSizeUnit === 'acres') return v * 43560.0;
+      return v;
+    };
+    const minLotSizeSqft = hasLotSize ? toSqft(minLotSize) : null;
+    const maxLotSizeSqft = hasLotSize ? toSqft(maxLotSize) : null;
+
+    const filters: ParcelAttributeFilters = {
+      min_sqft: toIntOrNull(filterForm.minSqft),
+      max_sqft: toIntOrNull(filterForm.maxSqft),
+      min_lot_size_sqft: minLotSizeSqft,
+      max_lot_size_sqft: maxLotSizeSqft,
+      lot_size_unit: null,
+      min_lot_size: null,
+      max_lot_size: null,
+      min_beds: toIntOrNull(filterForm.minBeds),
+      min_baths: toFloatOrNull(filterForm.minBaths),
+      min_year_built: toIntOrNull(filterForm.minYearBuilt),
+      max_year_built: toIntOrNull(filterForm.maxYearBuilt),
+      property_type: filterForm.propertyType.trim() || null,
+      zoning: filterForm.zoning.trim() || null,
+      zoning_in: selectedZoning.length ? selectedZoning : null,
+      future_land_use_in: selectedFutureLandUse.length ? selectedFutureLandUse : null,
+      min_value: toIntOrNull(filterForm.minValue),
+      max_value: toIntOrNull(filterForm.maxValue),
+      min_land_value: toIntOrNull(filterForm.minLandValue),
+      max_land_value: toIntOrNull(filterForm.maxLandValue),
+      min_building_value: toIntOrNull(filterForm.minBuildingValue),
+      max_building_value: toIntOrNull(filterForm.maxBuildingValue),
+      last_sale_date_start: filterForm.lastSaleStart.trim() || null,
+      last_sale_date_end: filterForm.lastSaleEnd.trim() || null,
+    };
+    const hasAnyFilters = Object.values(filters).some((v) => v !== null && v !== undefined && v !== '');
+
+    const payload: any = {
+      county,
+      live: true,
+      limit: 50,
+      include_geometry: false,
+      filters: hasAnyFilters ? filters : undefined,
+      enrich: hasAnyFilters ? autoEnrichMissing : false,
+      enrich_limit: hasAnyFilters ? 25 : undefined,
+    };
+
+    if (drawnPolygon) {
+      payload.polygon_geojson = drawnPolygon;
+    } else if (drawnCircle) {
+      payload.center = drawnCircle.center;
+      payload.radius_m = drawnCircle.radius_m;
+    }
+
+    return { payload };
+  }
+
+  async function runDebug() {
+    setRunDebugOut(null);
+    setRunDebugLoading(true);
+    try {
+      const built = buildSearchPayloadForMap();
+      if ('error' in built) {
+        setRunDebugOut({ payload: null, error: built.error });
+        return;
+      }
+      const payload = built.payload;
+      setLastRequest(payload);
+      console.log('[Run(debug)] payload', payload);
+
+      const resp = await parcelsSearchNormalized(payload);
+      const recs = resp.records || [];
+      const zoningOpts = Array.isArray((resp as any).zoning_options) ? ((resp as any).zoning_options as any[]) : [];
+      const fluOpts = Array.isArray((resp as any).future_land_use_options) ? ((resp as any).future_land_use_options as any[]) : [];
+
+      const sample = recs.slice(0, 3).map((r) => ({
+        parcel_id: (r.parcel_id || '').trim(),
+        owner: (r.owner_name || '').trim(),
+        address: (r.situs_address || r.address || '').trim(),
+      }));
+
+      setRunDebugOut({
+        payload,
+        recordsLen: recs.length,
+        sample,
+        zoningOptionsLen: zoningOpts.filter((x) => typeof x === 'string' && x.trim()).length,
+        futureLandUseOptionsLen: fluOpts.filter((x) => typeof x === 'string' && x.trim()).length,
+      });
+      console.log('[Run(debug)] recordsLen=', recs.length, 'sample=', sample);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRunDebugOut({ payload: lastRequest, error: msg });
+    } finally {
+      setRunDebugLoading(false);
+    }
+  }
 
   async function enrichVisible() {
     setLastError(null);
@@ -661,87 +884,15 @@ export default function MapSearch({
     setLastError(null);
     setErrorBanner(null);
 
-    if (!drawnPolygon && !drawnCircle) {
-      setErrorBanner('Draw polygon or radius first');
+    const built = buildSearchPayloadForMap();
+    if ('error' in built) {
+      setErrorBanner(built.error);
       setParcels([]);
       setRecords([]);
       return;
     }
 
-    const toIntOrNull = (v: string): number | null => {
-      const s = v.trim();
-      if (!s) return null;
-      const n = Number(s);
-      if (!Number.isFinite(n)) return null;
-      return Math.trunc(n);
-    };
-    const toFloatOrNull = (v: string): number | null => {
-      const s = v.trim();
-      if (!s) return null;
-      const n = Number(s);
-      if (!Number.isFinite(n)) return null;
-      return n;
-    };
-
-    const minLotSize = toFloatOrNull(filterForm.minLotSize);
-    const maxLotSize = toFloatOrNull(filterForm.maxLotSize);
-    const hasLotSize = minLotSize !== null || maxLotSize !== null;
-    const lotSizeUnit = filterForm.lotSizeUnit === 'acres' ? 'acres' : 'sqft';
-
-    const toSqft = (v: number | null): number | null => {
-      if (v === null) return null;
-      if (lotSizeUnit === 'acres') return v * 43560.0;
-      return v;
-    };
-    const minLotSizeSqft = hasLotSize ? toSqft(minLotSize) : null;
-    const maxLotSizeSqft = hasLotSize ? toSqft(maxLotSize) : null;
-
-    const filters: ParcelAttributeFilters = {
-      min_sqft: toIntOrNull(filterForm.minSqft),
-      max_sqft: toIntOrNull(filterForm.maxSqft),
-      // Preferred contract: always send normalized sqft values.
-      min_lot_size_sqft: minLotSizeSqft,
-      max_lot_size_sqft: maxLotSizeSqft,
-      // Legacy contract (kept null to avoid accidental double-filtering).
-      lot_size_unit: null,
-      min_lot_size: null,
-      max_lot_size: null,
-      min_beds: toIntOrNull(filterForm.minBeds),
-      min_baths: toFloatOrNull(filterForm.minBaths),
-      min_year_built: toIntOrNull(filterForm.minYearBuilt),
-      max_year_built: toIntOrNull(filterForm.maxYearBuilt),
-      property_type: filterForm.propertyType.trim() || null,
-      zoning: filterForm.zoning.trim() || null,
-      zoning_in: selectedZoning.length ? selectedZoning : null,
-      future_land_use_in: selectedFutureLandUse.length ? selectedFutureLandUse : null,
-      min_value: toIntOrNull(filterForm.minValue),
-      max_value: toIntOrNull(filterForm.maxValue),
-      min_land_value: toIntOrNull(filterForm.minLandValue),
-      max_land_value: toIntOrNull(filterForm.maxLandValue),
-      min_building_value: toIntOrNull(filterForm.minBuildingValue),
-      max_building_value: toIntOrNull(filterForm.maxBuildingValue),
-      last_sale_date_start: filterForm.lastSaleStart.trim() || null,
-      last_sale_date_end: filterForm.lastSaleEnd.trim() || null,
-    };
-    const hasAnyFilters = Object.values(filters).some((v) => v !== null && v !== undefined && v !== '');
-
-    const payload: any = {
-      county,
-      live: true,
-      limit: 50,
-      include_geometry: false,
-      filters: hasAnyFilters ? filters : undefined,
-      enrich: hasAnyFilters ? autoEnrichMissing : false,
-      enrich_limit: hasAnyFilters ? 25 : undefined,
-    };
-
-    if (drawnPolygon) {
-      payload.polygon_geojson = drawnPolygon;
-    } else if (drawnCircle) {
-      payload.center = drawnCircle.center;
-      payload.radius_m = drawnCircle.radius_m;
-    }
-
+    const payload = built.payload;
     setLastRequest(payload);
     setLoading(true);
 
@@ -799,6 +950,7 @@ export default function MapSearch({
       // If parcel lines are enabled, refresh them based on the new parcel_ids.
       setParcelLinesError(null);
       setParcelLinesFC(null);
+      setParcelLinesFeatureCount(0);
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -809,6 +961,7 @@ export default function MapSearch({
       setParcelLinesFC(null);
       setParcelLinesEnabled(false);
       setParcelLinesError(null);
+      setParcelLinesFeatureCount(0);
     } finally {
       if (reqId === activeReq.current) setLoading(false);
     }
@@ -981,7 +1134,7 @@ export default function MapSearch({
               />
             </label>
 
-          <div className="mt-3 space-y-3">
+          <div className="col-span-2 mt-3 space-y-3">
             <MultiSelectFilter
               title="Current Zoning (multi-select)"
               options={zoningOptions}
@@ -1105,6 +1258,28 @@ export default function MapSearch({
           >
             {loading ? 'Running…' : 'Run'}
           </button>
+
+          <button
+            type="button"
+            className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm font-semibold text-cre-text hover:bg-cre-surface disabled:opacity-60"
+            onClick={() => void runDebug()}
+            disabled={runDebugLoading}
+            title="Runs the same /api/parcels/search request but renders key fields on-screen"
+          >
+            {runDebugLoading ? 'Debug…' : 'Run (debug)'}
+          </button>
+
+          {isDrawing && finishPolygon ? (
+            <button
+              type="button"
+              className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm font-semibold text-cre-text hover:bg-cre-surface"
+              onClick={() => finishPolygon()}
+              title="Finish polygon drawing"
+            >
+              Finish
+            </button>
+          ) : null}
+
           <button
             type="button"
             className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface"
@@ -1123,6 +1298,38 @@ export default function MapSearch({
             Enrich results
           </button>
         </div>
+
+        {runDebugOut ? (
+          <div className="mt-3 rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
+            <div className="font-semibold">Run(debug) output</div>
+            {'error' in runDebugOut ? (
+              <div className="mt-1 text-cre-muted">Error: {runDebugOut.error}</div>
+            ) : (
+              <div className="mt-2 space-y-1">
+                <div className="text-cre-muted">records.length: <span className="text-cre-text">{runDebugOut.recordsLen}</span></div>
+                <div className="text-cre-muted">zoning_options.length: <span className="text-cre-text">{runDebugOut.zoningOptionsLen}</span></div>
+                <div className="text-cre-muted">future_land_use_options.length: <span className="text-cre-text">{runDebugOut.futureLandUseOptionsLen}</span></div>
+                <div className="pt-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-widest text-cre-muted">Sample (first 3)</div>
+                  <div className="mt-1 space-y-1">
+                    {runDebugOut.sample.length ? runDebugOut.sample.map((s) => (
+                      <div key={`sample:${s.parcel_id}`} className="rounded-lg border border-cre-border/40 bg-cre-surface p-2">
+                        <div className="font-mono text-[11px] text-cre-text">{s.parcel_id || '—'}</div>
+                        <div className="text-cre-text">Owner: {s.owner || '—'}</div>
+                        <div className="text-cre-text">Addr: {s.address || '—'}</div>
+                      </div>
+                    )) : <div className="text-cre-muted">No records.</div>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-2">
+              <div className="text-[11px] font-semibold uppercase tracking-widest text-cre-muted">Payload</div>
+              <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-words text-[11px]">{JSON.stringify(runDebugOut.payload, null, 2)}</pre>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 overflow-hidden rounded-xl border border-cre-border/40">
           <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs font-semibold uppercase tracking-widest text-cre-muted">
@@ -1396,6 +1603,25 @@ export default function MapSearch({
 
       <main className="flex-1 bg-cre-bg p-4">
         <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/40 bg-cre-surface shadow-panel">
+          <div className="absolute right-3 top-3 z-50 max-w-[360px] rounded-xl border border-cre-border/40 bg-cre-bg/95 px-3 py-2 text-xs text-cre-text shadow-panel">
+            <div className="font-semibold">Draw Debug</div>
+            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+              <div className="text-cre-muted">isDrawing</div>
+              <div className="font-mono">{String(drawDebug.isDrawing)}</div>
+              <div className="text-cre-muted">lastEvent</div>
+              <div className="font-mono">{drawDebug.lastEvent}</div>
+              <div className="text-cre-muted">vertexCount</div>
+              <div className="font-mono">{drawDebug.vertexCount}</div>
+              <div className="text-cre-muted">closed</div>
+              <div className="font-mono">{String(drawDebug.isClosed)}</div>
+              <div className="text-cre-muted">ringCount</div>
+              <div className="font-mono">{drawDebug.emittedRingCount}</div>
+            </div>
+            <div className="mt-2 text-[11px] text-cre-muted">
+              Tip: ringCount includes closing point (first==last).
+            </div>
+          </div>
+
           <div className="absolute left-3 top-3 z-[500] rounded-xl border border-cre-border/40 bg-cre-bg/95 px-3 py-2 text-xs text-cre-text shadow-panel">
             <label className="flex items-center gap-2" title="May be slower; available where supported.">
               <input
@@ -1406,12 +1632,18 @@ export default function MapSearch({
                   const next = e.target.checked;
                   setParcelLinesError(null);
                   setParcelLinesFC(null);
+                  setParcelLinesFeatureCount(0);
                   setParcelLinesEnabled(next);
                 }}
               />
-              Parcel Lines (beta)
+              Parcel Lines
               {parcelLinesLoading ? <span className="text-cre-muted">…</span> : null}
             </label>
+            {parcelLinesEnabled ? (
+              <div className="mt-1 text-[11px] text-cre-muted">
+                parcel lines loaded: {parcelLinesFeatureCount} features
+              </div>
+            ) : null}
             {parcelLinesError ? (
               <div className="mt-1 max-w-[320px] text-[11px] text-cre-muted">{parcelLinesError}</div>
             ) : null}
@@ -1435,15 +1667,49 @@ export default function MapSearch({
             <DrawControls
               drawnItemsRef={drawnItemsRef}
               onDrawingChange={(v) => setIsDrawing(v)}
+              onFinishPolygonChange={(fn) => setFinishPolygon(() => fn)}
+              onDebug={(patch) => {
+                setDrawDebug((prev) => ({
+                  ...prev,
+                  ...patch,
+                  isDrawing: typeof patch.isDrawing === 'boolean' ? patch.isDrawing : prev.isDrawing,
+                  lastEvent: typeof patch.lastEvent === 'string' ? patch.lastEvent : prev.lastEvent,
+                  vertexCount: typeof patch.vertexCount === 'number' ? patch.vertexCount : prev.vertexCount,
+                  isClosed: typeof patch.isClosed === 'boolean' ? patch.isClosed : prev.isClosed,
+                  emittedRingCount: typeof patch.emittedRingCount === 'number' ? patch.emittedRingCount : prev.emittedRingCount,
+                }));
+              }}
               onPolygon={(geom) => {
                 setSelectedParcelId(null);
                 setErrorBanner(null);
                 setDrawnPolygon(geom);
                 setDrawnCircle(null);
+
+                try {
+                  const ring = (geom.coordinates?.[0] as any[]) || [];
+                  const ringCount = Array.isArray(ring) ? ring.length : 0;
+                  const first = Array.isArray(ring) && ring.length ? ring[0] : null;
+                  const last = Array.isArray(ring) && ring.length ? ring[ring.length - 1] : null;
+                  const closed =
+                    Array.isArray(first) && Array.isArray(last) && first[0] === last[0] && first[1] === last[1];
+                  setDrawDebug((prev) => ({
+                    ...prev,
+                    emittedRingCount: ringCount,
+                    isClosed: closed,
+                  }));
+                } catch {
+                  // ignore
+                }
               }}
               onDeleted={() => {
                 setDrawnPolygon(null);
                 setDrawnCircle(null);
+                setDrawDebug((prev) => ({
+                  ...prev,
+                  emittedRingCount: 0,
+                  vertexCount: 0,
+                  isClosed: false,
+                }));
               }}
             />
 
@@ -1459,10 +1725,19 @@ export default function MapSearch({
                 })}
                 onEachFeature={(feature, layer) => {
                   const props: any = (feature as any)?.properties || {};
-                  const addr = String(props.situs_address || '').trim();
-                  const owner = String(props.owner_name || '').trim();
-                  const pid = String(props.parcel_id || '').trim();
-                  const lines = [addr || '—', owner ? `Owner: ${owner}` : 'Owner: —', pid ? `Parcel: ${pid}` : 'Parcel: —'];
+                  const pid = String(props.parcel_id || props.parcelId || '').trim();
+                  const rec = pid ? recordById.get(pid) : undefined;
+                  const fallbackFromList = pid ? parcels.find((p) => p.parcel_id === pid) : undefined;
+                  const addr = String(
+                    props.situs_address ||
+                      props.address ||
+                      rec?.situs_address ||
+                      rec?.address ||
+                      fallbackFromList?.address ||
+                      ''
+                  ).trim();
+                  const owner = String(props.owner_name || props.owner || rec?.owner_name || fallbackFromList?.owner_name || '').trim();
+                  const lines = [owner ? `Owner: ${owner}` : 'Owner: —', addr ? `Address: ${addr}` : 'Address: —', pid ? `Parcel: ${pid}` : 'Parcel: —'];
                   try {
                     (layer as any).bindTooltip(lines.join('\n'), {
                       sticky: true,
