@@ -696,14 +696,16 @@ export default function MapSearch({
     };
     const hasAnyFilters = Object.values(filters).some((v) => v !== null && v !== undefined && v !== '');
 
+    const enrich = hasAnyFilters ? autoEnrichMissing : false;
+
     const payload: any = {
       county,
       live: true,
       limit: 25,
       include_geometry: false,
       filters: hasAnyFilters ? filters : undefined,
-      enrich: hasAnyFilters ? autoEnrichMissing : false,
-      enrich_limit: hasAnyFilters ? 25 : undefined,
+      enrich,
+      enrich_limit: enrich ? 25 : undefined,
     };
 
     if (poly) {
