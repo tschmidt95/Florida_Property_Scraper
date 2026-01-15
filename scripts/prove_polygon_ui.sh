@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Default to running the deterministic "WHAT IS BROKEN NOW" report so the existing
+# VS Code task can be used without editing .vscode/tasks.json.
+if [[ "${WHAT_IS_BROKEN_NOW:-1}" == "1" ]]; then
+  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/what_is_broken_now.sh"
+  exit $?
+fi
+
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 START_BACKEND="${START_BACKEND:-1}"
 

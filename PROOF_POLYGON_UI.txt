@@ -1,32 +1,76 @@
-== UI expectations (TEMP DEBUG) ==
-- Map page shows a "Draw Debug" overlay (top-right) with: isDrawing, lastEvent, vertexCount, closed, ringCount.
-- ringCount should reflect the emitted GeoJSON ring size (includes closing point).
-- Polygon finish paths should all work: first-vertex click, double-click, and toolbar Finish.
-- "Run (debug)" renders payload + response summary on-screen: records.length, zoning_options.length, future_land_use_options.length, plus sample rows.
-- Zoning/FLU filters: clearly usable width, options list opens (Show/Hide), checkboxes clickable, chips removable.
-- Parcel Lines overlay shows: "parcel lines loaded: N features" and tooltips use robust owner/address/parcel fallbacks.
+$ curl -sS -o /dev/null -w "HTTP_STATUS=%{http_code}\n" http://127.0.0.1:8000/api/debug/ping
+HTTP_STATUS=200
 
-== /api/debug/ping ==
+$ gh codespace ports --json sourcePort,browseUrl (filter port 8000)
+CODESPACE_NAME=urban-tribble-9p457599q79h9xrx
+GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN=app.github.dev
+$ gh codespace ports -c urban-tribble-9p457599q79h9xrx --json sourcePort,browseUrl
+[]
+LOCALHOST_URL=http://127.0.0.1:8000/
+FORWARDED_URL=https://urban-tribble-9p457599q79h9xrx-8000.app.github.dev/
+
+$ curl -sS -o /dev/null -w "HTTP_STATUS=%{http_code}\n" "${FORWARDED_URL}api/debug/ping"
+HTTP_STATUS=200
+
+$ BASE_URL=<localhost> node web/scripts/diag_runtime_report.mjs
+{'baseUrl': 'http://127.0.0.1:8000/', 'ok': True, 'errors': [], 'polygonRunOk': True, 'polygonResponseStatus': 200, 'polygonRequestSeen': True, 'consoleErrorsCount': 0, 'consoleLinesCount': 2}
+
+$ BASE_URL=<forwarded> node web/scripts/diag_runtime_report.mjs
+{'baseUrl': 'https://urban-tribble-9p457599q79h9xrx-8000.app.github.dev/', 'ok': True, 'errors': [], 'polygonRunOk': True, 'polygonResponseStatus': 200, 'polygonRequestSeen': True, 'consoleErrorsCount': 0, 'consoleLinesCount': 2}
+
+$ curl -sS http://127.0.0.1:8000/api/debug/ping (stable fields)
+{"env": {"APP_GIT_BRANCH": "feature/address-lookup-ui", "APP_GIT_SHA": "ba16a01"}, "git": {"branch": "feature/address-lookup-ui", "sha": "ba16a01"}, "ok": true}
+
+$ curl -sS http://127.0.0.1:8000/health
+{"status":"ok"}
+$ curl /api/openapi.json (or /openapi.json) status + first 30 lines
+OPENAPI_URL=http://127.0.0.1:8000/openapi.json
+HTTP_STATUS=200
 {
-    "ok": true,
-    "server_time": "2026-01-15T01:34:19.759011+00:00",
-    "git": {
-        "sha": "12b6a52",
-        "branch": "feature/address-lookup-ui"
+    "openapi": "3.1.0",
+    "info": {
+        "title": "FastAPI",
+        "version": "0.1.0"
     },
-    "env": {
-        "FPS_USE_FDOR_CENTROIDS": "1",
-        "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
-        "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
-        "APP_GIT_SHA": "",
-        "APP_GIT_BRANCH": ""
-    }
-}
-== POST /api/parcels/search (known-good polygon) ==
-count: 25
-sample_parcel_id: 362229000000025
-sample_owner_name: Property Address
-sample_address: 
+    "paths": {
+        "/api/search": {
+            "get": {
+                "tags": [
+                    "search"
+                ],
+                "summary": "Search",
+                "operationId": "search_api_search_get",
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Q"
+                        }
+                    },
+                    {
+                        "name": "county",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
 
-== POST /api/parcels/geometry (optional) ==
-feature_count: 10
+$ BASE_URL=http://127.0.0.1:8000 bash scripts/prove_polygon_search.sh
+== POST /api/parcels/search (lng,lat) ==
+records_count: 25
+warnings: []
+
+== POST /api/parcels/search (lat,lng swapped; expected 0) ==
+records_count: 0
+warnings: ['No parcel candidates returned for bbox']
+
+== sample record ==
+parcel_id: 362229000000025
+owner_name: Property Address
+situs_address: 
+
+URL | ping | page load ok | console lines | requestfailed count | 4xx/5xx count | polygon run ok | PASS/FAIL
+http://127.0.0.1:8000/ | HTTP_STATUS=200 | PASS | 2 | 0 | 0 | PASS | PASS
+https://urban-tribble-9p457599q79h9xrx-8000.app.github.dev/ | HTTP_STATUS=200 | PASS | 2 | 0 | 0 | PASS | PASS

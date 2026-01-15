@@ -5,6 +5,12 @@
   "python.analysis.extraPaths": ["${workspaceFolder}/src"],
   "python.analysis.autoImportCompletions": true,
   "python.analysis.typeCheckingMode": "basic",
+  "remote.portsAttributes": {
+    "8000": {
+      "label": "Florida Property Scraper",
+      "visibility": "public"
+    }
+  },
   "terminal.integrated.env.linux": {
     "VIRTUAL_ENV": "/workspaces/Florida_Property_Scraper/.venv",
     "PATH": "/workspaces/Florida_Property_Scraper/.venv/bin:${env:PATH}"
