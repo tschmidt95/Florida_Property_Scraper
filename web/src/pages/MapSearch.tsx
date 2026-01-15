@@ -57,7 +57,6 @@ function DrawControls({
     const control = new L.Control.Draw({
       draw: {
         polygon: {
-          maxPoints: 0,
           allowIntersection: false,
           showArea: true,
         },
@@ -95,30 +94,34 @@ function DrawControls({
       if (e?.layerType === 'polygon') {
         try {
           // Use Leaflet's GeoJSON export so coordinate order is correct ([lng, lat])
-          // and the ring is properly closed.
+          // and build a closed ring without mutating Leaflet internals.
           const gj = e.layer?.toGeoJSON?.();
           const geom = gj?.geometry;
           if (geom?.type === 'Polygon' && Array.isArray((geom as any).coordinates)) {
-            const coords = (geom as any).coordinates;
-            const ring = Array.isArray(coords?.[0]) ? (coords[0] as any[]) : [];
+            const coordsAny = (geom as any).coordinates;
+            const ringAny = Array.isArray(coordsAny?.[0]) ? (coordsAny[0] as any[]) : [];
 
-            // Defensive: ensure the ring is closed (last point equals first).
-            if (Array.isArray(ring) && ring.length >= 3) {
-              const first = ring[0];
-              const last = ring[ring.length - 1];
-              const closed =
-                Array.isArray(first) &&
-                Array.isArray(last) &&
-                first.length >= 2 &&
-                last.length >= 2 &&
-                first[0] === last[0] &&
-                first[1] === last[1];
-              if (!closed && Array.isArray(first)) {
-                ring.push([first[0], first[1]]);
-              }
+            const ring: Array<[number, number]> = [];
+            for (const pt of ringAny) {
+              if (!Array.isArray(pt) || pt.length < 2) continue;
+              const lng = Number(pt[0]);
+              const lat = Number(pt[1]);
+              if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+              ring.push([lng, lat]);
             }
 
-            onPolygonRef.current(geom as GeoJSON.Polygon);
+            if (ring.length >= 3) {
+              const first = ring[0];
+              const last = ring[ring.length - 1];
+              const closed = first[0] === last[0] && first[1] === last[1];
+              const closedRing = closed ? ring : [...ring, [first[0], first[1]]];
+
+              const geomClosed: GeoJSON.Polygon = {
+                type: 'Polygon',
+                coordinates: [closedRing],
+              };
+              onPolygonRef.current(geomClosed);
+            }
           }
         } catch {
           // ignore
