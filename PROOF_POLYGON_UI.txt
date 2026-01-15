@@ -1,0 +1,24 @@
+== /api/debug/ping ==
+{
+    "ok": true,
+    "server_time": "2026-01-14T23:48:36.808768+00:00",
+    "git": {
+        "sha": "7909209",
+        "branch": "feature/address-lookup-ui"
+    },
+    "env": {
+        "FPS_USE_FDOR_CENTROIDS": "1",
+        "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+        "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
+        "APP_GIT_SHA": "7909209",
+        "APP_GIT_BRANCH": "feature/address-lookup-ui"
+    }
+}
+== POST /api/parcels/search (known-good polygon) ==
+count: 25
+sample_parcel_id: 362229000000025
+sample_owner_name: Property Address
+sample_address: 
+
+== POST /api/parcels/geometry (optional) ==
+feature_count: 10

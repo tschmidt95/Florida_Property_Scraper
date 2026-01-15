@@ -1,0 +1,12 @@
+== POST /api/parcels/search (lng,lat) ==
+records_count: 25
+warnings: []
+
+== POST /api/parcels/search (lat,lng swapped; expected 0) ==
+records_count: 0
+warnings: ['No parcel candidates returned for bbox']
+
+== sample record ==
+parcel_id: 362229000000025
+owner_name: Property Address
+situs_address: 
