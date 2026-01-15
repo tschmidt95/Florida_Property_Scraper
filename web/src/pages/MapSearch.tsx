@@ -26,27 +26,16 @@ function DrawControls({
   onPolygon,
   onDeleted,
   onDrawingChange,
-  onDebug,
 }: {
   drawnItemsRef: React.MutableRefObject<L.FeatureGroup | null>;
   onPolygon: (geom: GeoJSON.Polygon) => void;
   onDeleted: () => void;
   onDrawingChange: (isDrawing: boolean) => void;
-  onDebug: (patch: {
-    isDrawing?: boolean;
-    lastEvent?: string;
-    vertexCount?: number;
-    isClosed?: boolean;
-    emittedRingCount?: number;
-  }) => void;
 }) {
   const map = useMap();
-  const wasDraggingEnabledRef = useRef<boolean>(false);
-  const vertexCountRef = useRef<number>(0);
   const onPolygonRef = useRef(onPolygon);
   const onDeletedRef = useRef(onDeleted);
   const onDrawingChangeRef = useRef(onDrawingChange);
-  const onDebugRef = useRef(onDebug);
 
   useEffect(() => {
     onPolygonRef.current = onPolygon;
@@ -59,10 +48,6 @@ function DrawControls({
   useEffect(() => {
     onDrawingChangeRef.current = onDrawingChange;
   }, [onDrawingChange]);
-
-  useEffect(() => {
-    onDebugRef.current = onDebug;
-  }, [onDebug]);
 
   useEffect(() => {
     const drawnItems = new L.FeatureGroup();
@@ -91,50 +76,12 @@ function DrawControls({
 
     map.addControl(control);
 
-    const isClosedFromGeoJsonRing = (coords: any[] | null | undefined): boolean => {
-      if (!Array.isArray(coords) || coords.length < 4) return false;
-      const first = coords[0];
-      const last = coords[coords.length - 1];
-      if (!Array.isArray(first) || !Array.isArray(last)) return false;
-      return first[0] === last[0] && first[1] === last[1];
-    };
-
     const handleDrawStart = (e: any) => {
-      wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
-      if (wasDraggingEnabledRef.current) map.dragging.disable();
-
-      // Use supported Leaflet.Draw events only. Vertex count is tracked via DRAWVERTEX.
-      vertexCountRef.current = 0;
-
       onDrawingChangeRef.current(true);
-
-      // Debug overlay
-      onDebugRef.current({
-        isDrawing: true,
-        lastEvent: 'draw:drawstart',
-        vertexCount: 0,
-        isClosed: false,
-      });
     };
 
     const handleDrawStop = () => {
-      if (wasDraggingEnabledRef.current) map.dragging.enable();
-      wasDraggingEnabledRef.current = false;
       onDrawingChangeRef.current(false);
-
-      onDebugRef.current({
-        isDrawing: false,
-        lastEvent: 'draw:drawstop',
-      });
-    };
-
-    const handleDrawVertex = () => {
-      vertexCountRef.current += 1;
-      onDebugRef.current({
-        lastEvent: 'draw:drawvertex',
-        vertexCount: vertexCountRef.current,
-        isClosed: false,
-      });
     };
 
     const handleCreated = (e: any) => {
@@ -152,14 +99,25 @@ function DrawControls({
           const gj = e.layer?.toGeoJSON?.();
           const geom = gj?.geometry;
           if (geom?.type === 'Polygon' && Array.isArray((geom as any).coordinates)) {
-            const ring = ((geom as any).coordinates?.[0] as any[]) || [];
-            const ringCount = Array.isArray(ring) ? ring.length : 0;
-            onDebugRef.current({
-              lastEvent: 'draw:created',
-              vertexCount: Math.max(0, ringCount - 1),
-              isClosed: isClosedFromGeoJsonRing(ring),
-              emittedRingCount: ringCount,
-            });
+            const coords = (geom as any).coordinates;
+            const ring = Array.isArray(coords?.[0]) ? (coords[0] as any[]) : [];
+
+            // Defensive: ensure the ring is closed (last point equals first).
+            if (Array.isArray(ring) && ring.length >= 3) {
+              const first = ring[0];
+              const last = ring[ring.length - 1];
+              const closed =
+                Array.isArray(first) &&
+                Array.isArray(last) &&
+                first.length >= 2 &&
+                last.length >= 2 &&
+                first[0] === last[0] &&
+                first[1] === last[1];
+              if (!closed && Array.isArray(first)) {
+                ring.push([first[0], first[1]]);
+              }
+            }
+
             onPolygonRef.current(geom as GeoJSON.Polygon);
           }
         } catch {
@@ -170,32 +128,18 @@ function DrawControls({
 
     const handleDeleted = () => {
       onDeletedRef.current();
-      onDebugRef.current({
-        lastEvent: 'draw:deleted',
-        vertexCount: 0,
-        isClosed: false,
-        emittedRingCount: 0,
-      });
-    };
-
-    const handleEdited = () => {
-      onDebugRef.current({ lastEvent: 'draw:edited' });
     };
 
     map.on(L.Draw.Event.DRAWSTART, handleDrawStart);
     map.on(L.Draw.Event.DRAWSTOP, handleDrawStop);
-    map.on(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
-    map.on(L.Draw.Event.EDITED, handleEdited);
 
     return () => {
       map.off(L.Draw.Event.DRAWSTART, handleDrawStart);
       map.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
-      map.off(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
-      map.off(L.Draw.Event.EDITED, handleEdited);
       try {
         map.removeControl(control);
       } catch {
@@ -874,6 +818,7 @@ export default function MapSearch({
 
     const payload = built.payload;
     setLastRequest(payload);
+    console.log('[Run] payload', payload);
     setLoading(true);
 
     const reqId = ++activeReq.current;
@@ -897,6 +842,18 @@ export default function MapSearch({
 
       const recs = resp.records || [];
       const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
+
+      const first = recs?.[0];
+      console.log('[Run] response', {
+        recordsLen: recs.length,
+        first: first
+          ? {
+              parcel_id: (first.parcel_id || '').trim(),
+              owner: (first.owner_name || '').trim(),
+              address: (first.situs_address || first.address || '').trim(),
+            }
+          : null,
+      });
       const warnings = (resp as any).warnings as string[] | undefined;
       setLastResponseCount(list.length || recs.length);
 
@@ -1623,9 +1580,6 @@ export default function MapSearch({
             <DrawControls
               drawnItemsRef={drawnItemsRef}
               onDrawingChange={(v) => setIsDrawing(v)}
-              onDebug={() => {
-                // Intentionally ignored: keep Leaflet.Draw UX unobstructed.
-              }}
               onPolygon={(geom) => {
                 setSelectedParcelId(null);
                 setErrorBanner(null);
