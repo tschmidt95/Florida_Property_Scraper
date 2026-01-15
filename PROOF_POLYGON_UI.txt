@@ -1,5 +1,6 @@
 == UI expectations (TEMP DEBUG) ==
 - Map page shows a "Draw Debug" overlay (top-right) with: isDrawing, lastEvent, vertexCount, closed, ringCount.
+- ringCount should reflect the emitted GeoJSON ring size (includes closing point).
 - Polygon finish paths should all work: first-vertex click, double-click, and toolbar Finish.
 - "Run (debug)" renders payload + response summary on-screen: records.length, zoning_options.length, future_land_use_options.length, plus sample rows.
 - Zoning/FLU filters: clearly usable width, options list opens (Show/Hide), checkboxes clickable, chips removable.
