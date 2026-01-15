@@ -54,7 +54,9 @@ function DrawControls({
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
 
-    const control = new L.Control.Draw({
+    const isDrawingRef = { current: false };
+
+    const drawControlOptions = {
       draw: {
         polygon: {
           allowIntersection: false,
@@ -72,15 +74,21 @@ function DrawControls({
         edit: false,
         remove: true,
       },
-    });
+    } as const;
+
+    console.log('[Draw] control options', JSON.stringify(drawControlOptions));
+
+    const control = new L.Control.Draw(drawControlOptions as any);
 
     map.addControl(control);
 
-    const handleDrawStart = (e: any) => {
+    const handleDrawStart = () => {
+      isDrawingRef.current = true;
       onDrawingChangeRef.current(true);
     };
 
     const handleDrawStop = () => {
+      isDrawingRef.current = false;
       onDrawingChangeRef.current(false);
     };
 
@@ -115,20 +123,10 @@ function DrawControls({
             const closedRing = closed ? ringAny : [...ringAny, first];
             const coordsClosed = [closedRing, ...(Array.isArray(coordsAny) ? coordsAny.slice(1) : [])];
 
-            const closedNow = (() => {
-              const f = closedRing[0];
-              const l = closedRing[closedRing.length - 1];
-              return (
-                Array.isArray(f) &&
-                Array.isArray(l) &&
-                f.length >= 2 &&
-                l.length >= 2 &&
-                f[0] === l[0] &&
-                f[1] === l[1]
-              );
-            })();
-
-            console.log('[Draw] created', { ringLen: closedRing.length, closed: closedNow });
+            if (closedRing.length < 4) {
+              console.log('[Draw] created too-small polygon ignored');
+              return;
+            }
             onPolygonRef.current({ type: 'Polygon', coordinates: coordsClosed } as GeoJSON.Polygon);
           }
         } catch {
@@ -146,11 +144,37 @@ function DrawControls({
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
 
+    const container = map.getContainer();
+    const onCaptureDblClick = (e: any) => {
+      if (!isDrawingRef.current) return;
+      try {
+        if (typeof e?.preventDefault === 'function') e.preventDefault();
+      } catch {
+        // ignore
+      }
+      try {
+        if (typeof e?.stopPropagation === 'function') e.stopPropagation();
+      } catch {
+        // ignore
+      }
+      try {
+        if (typeof e?.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      } catch {
+        // ignore
+      }
+    };
+    container.addEventListener('dblclick', onCaptureDblClick, true);
+
     return () => {
       map.off(L.Draw.Event.DRAWSTART, handleDrawStart);
       map.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
+      try {
+        container.removeEventListener('dblclick', onCaptureDblClick, true);
+      } catch {
+        // ignore
+      }
       try {
         map.removeControl(control);
       } catch {
