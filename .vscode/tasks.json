@@ -53,7 +53,7 @@
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
+        "panel": "shared",
         "clear": true
       }
     },
@@ -328,12 +328,59 @@
       }
     },
     {
+      "label": "Git: Restore Proof Artifacts",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh; \
+echo; \
+git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Git: Status",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
         "git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Final UX)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add web/src/pages/MapSearch.tsx; \
+git commit -m \"fix: polygon UI reliable (finish + owners + zoning + parcel lines)\"; \
+git push; \
+git checkout -- .vscode/tasks.json; \
+echo; \
+git --no-pager log -1 --oneline; \
+echo; \
+git status --porcelain"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
