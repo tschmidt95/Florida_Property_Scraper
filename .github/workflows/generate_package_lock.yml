@@ -17,7 +17,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           # Pin Node to a specific patch version for reproducible CI
           node-version: '18.20.8'
