@@ -5,6 +5,8 @@ import './index.css';
 
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
+
+import './lib/leafletGlobal';
 import 'leaflet-draw';
 
 import './lib/leafletIcons';

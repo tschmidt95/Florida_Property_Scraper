@@ -4,8 +4,6 @@ import L from 'leaflet';
 import type { LatLngLiteral } from 'leaflet';
 import { CircleMarker, GeoJSON, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 
-import 'leaflet-draw';
-
 import {
   parcelsEnrich,
   parcelsGeometry,
@@ -55,12 +53,19 @@ function DrawControls({
     map.addLayer(drawnItems);
 
     const isDrawingRef = { current: false };
+    const prevInteractionRef = {
+      current: {
+        draggingEnabled: true,
+        doubleClickZoomEnabled: true,
+      },
+    };
+
 
     const drawControlOptions = {
       draw: {
         polygon: {
           allowIntersection: false,
-          showArea: true,
+          showArea: false,
           repeatMode: false,
         },
         polyline: false,
@@ -76,23 +81,60 @@ function DrawControls({
       },
     } as const;
 
-    console.log('[Draw] control options', JSON.stringify(drawControlOptions));
-
     const control = new L.Control.Draw(drawControlOptions as any);
-
     map.addControl(control);
 
     const handleDrawStart = () => {
       isDrawingRef.current = true;
       onDrawingChangeRef.current(true);
+
+      try {
+        prevInteractionRef.current.draggingEnabled = map.dragging?.enabled?.() ?? true;
+        prevInteractionRef.current.doubleClickZoomEnabled = map.doubleClickZoom?.enabled?.() ?? true;
+      } catch {
+        // ignore
+      }
+      try {
+        map.doubleClickZoom?.disable?.();
+      } catch {
+        // ignore
+      }
+      try {
+        map.dragging?.disable?.();
+      } catch {
+        // ignore
+      }
     };
 
     const handleDrawStop = () => {
       isDrawingRef.current = false;
       onDrawingChangeRef.current(false);
+
+      try {
+        if (prevInteractionRef.current.doubleClickZoomEnabled) map.doubleClickZoom?.enable?.();
+      } catch {
+        // ignore
+      }
+      try {
+        if (prevInteractionRef.current.draggingEnabled) map.dragging?.enable?.();
+      } catch {
+        // ignore
+      }
     };
 
     const handleCreated = (e: any) => {
+      // Drawing is effectively finished; restore map interactions.
+      try {
+        if (prevInteractionRef.current.doubleClickZoomEnabled) map.doubleClickZoom?.enable?.();
+      } catch {
+        // ignore
+      }
+      try {
+        if (prevInteractionRef.current.draggingEnabled) map.dragging?.enable?.();
+      } catch {
+        // ignore
+      }
+
       try {
         drawnItems.clearLayers();
         if (e?.layer) drawnItems.addLayer(e.layer);
@@ -124,7 +166,6 @@ function DrawControls({
             const coordsClosed = [closedRing, ...(Array.isArray(coordsAny) ? coordsAny.slice(1) : [])];
 
             if (closedRing.length < 4) {
-              console.log('[Draw] created too-small polygon ignored');
               return;
             }
             onPolygonRef.current({ type: 'Polygon', coordinates: coordsClosed } as GeoJSON.Polygon);
@@ -144,37 +185,11 @@ function DrawControls({
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
 
-    const container = map.getContainer();
-    const onCaptureDblClick = (e: any) => {
-      if (!isDrawingRef.current) return;
-      try {
-        if (typeof e?.preventDefault === 'function') e.preventDefault();
-      } catch {
-        // ignore
-      }
-      try {
-        if (typeof e?.stopPropagation === 'function') e.stopPropagation();
-      } catch {
-        // ignore
-      }
-      try {
-        if (typeof e?.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-      } catch {
-        // ignore
-      }
-    };
-    container.addEventListener('dblclick', onCaptureDblClick, true);
-
     return () => {
       map.off(L.Draw.Event.DRAWSTART, handleDrawStart);
       map.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
-      try {
-        container.removeEventListener('dblclick', onCaptureDblClick, true);
-      } catch {
-        // ignore
-      }
       try {
         map.removeControl(control);
       } catch {
@@ -346,6 +361,9 @@ export default function MapSearch({
   const [drawnPolygon, setDrawnPolygon] = useState<GeoJSON.Polygon | null>(null);
   const [drawnCircle, setDrawnCircle] = useState<DrawnCircle | null>(null);
 
+  const drawnPolygonRef = useRef<GeoJSON.Polygon | null>(null);
+  const drawnCircleRef = useRef<DrawnCircle | null>(null);
+
   const [isDrawing, setIsDrawing] = useState(false);
 
   const [runDebugLoading, setRunDebugLoading] = useState(false);
@@ -496,6 +514,8 @@ export default function MapSearch({
     } catch {
       // ignore
     }
+    drawnPolygonRef.current = null;
+    drawnCircleRef.current = null;
     setDrawnPolygon(null);
     setDrawnCircle(null);
     setSelectedParcelId(null);
@@ -614,7 +634,10 @@ export default function MapSearch({
   }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels]);
 
   function buildSearchPayloadForMap(): { payload: any } | { error: string } {
-    if (!drawnPolygon && !drawnCircle) {
+    const poly = drawnPolygonRef.current ?? drawnPolygon;
+    const circle = drawnCircleRef.current ?? drawnCircle;
+
+    if (!poly && !circle) {
       return { error: 'Draw polygon or radius first' };
     }
 
@@ -683,11 +706,11 @@ export default function MapSearch({
       enrich_limit: hasAnyFilters ? 25 : undefined,
     };
 
-    if (drawnPolygon) {
-      payload.polygon_geojson = drawnPolygon;
-    } else if (drawnCircle) {
-      payload.center = drawnCircle.center;
-      payload.radius_m = drawnCircle.radius_m;
+    if (poly) {
+      payload.polygon_geojson = poly;
+    } else if (circle) {
+      payload.center = circle.center;
+      payload.radius_m = circle.radius_m;
     }
 
     return { payload };
@@ -1607,10 +1630,14 @@ export default function MapSearch({
               onPolygon={(geom) => {
                 setSelectedParcelId(null);
                 setErrorBanner(null);
+                drawnPolygonRef.current = geom;
+                drawnCircleRef.current = null;
                 setDrawnPolygon(geom);
                 setDrawnCircle(null);
               }}
               onDeleted={() => {
+                drawnPolygonRef.current = null;
+                drawnCircleRef.current = null;
                 setDrawnPolygon(null);
                 setDrawnCircle(null);
               }}
