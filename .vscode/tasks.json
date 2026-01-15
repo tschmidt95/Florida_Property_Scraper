@@ -407,14 +407,10 @@ git push"
         "-lc",
         "set -euo pipefail; \
 git add \
-  .vscode/tasks.json \
   web/src/pages/MapSearch.tsx \
-  web/src/lib/api.ts \
-  scripts/prove_polygon_ui.sh \
-  scripts/prove_polygon_search.sh \
   PROOF_POLYGON_UI.txt \
   PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: polygon finish UX + refresh proofs'; \
+git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
 git push"
       ],
       "options": {
@@ -464,7 +460,37 @@ git commit -m 'feat: Zoning/FLU multi-select filters'"
       "command": "bash",
       "args": [
         "-lc",
-        "git push"
+        "set -euo pipefail; \
+git add \
+  web/src/pages/MapSearch.tsx \
+  PROOF_POLYGON_UI.txt \
+  PROOF_POLYGON_SEARCH.txt; \
+git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
+git push"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Deterministic Polygon Debug UI)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; \
+git add \
+  web/src/pages/MapSearch.tsx \
+  PROOF_POLYGON_UI.txt \
+  PROOF_POLYGON_SEARCH.txt; \
+git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
+git push"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
