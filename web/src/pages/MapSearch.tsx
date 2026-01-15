@@ -59,6 +59,7 @@ function DrawControls({
         polygon: {
           allowIntersection: false,
           showArea: true,
+          repeatMode: false,
         },
         polyline: false,
         rectangle: false,
@@ -94,34 +95,41 @@ function DrawControls({
       if (e?.layerType === 'polygon') {
         try {
           // Use Leaflet's GeoJSON export so coordinate order is correct ([lng, lat])
-          // and build a closed ring without mutating Leaflet internals.
+          // and only ensure the first ring is closed.
           const gj = e.layer?.toGeoJSON?.();
           const geom = gj?.geometry;
-          if (geom?.type === 'Polygon' && Array.isArray((geom as any).coordinates)) {
-            const coordsAny = (geom as any).coordinates;
-            const ringAny = Array.isArray(coordsAny?.[0]) ? (coordsAny[0] as any[]) : [];
+          const coordsAny = geom?.type === 'Polygon' ? (geom as any).coordinates : null;
+          const ringAny = Array.isArray(coordsAny?.[0]) ? (coordsAny[0] as any[]) : null;
 
-            const ring: Array<[number, number]> = [];
-            for (const pt of ringAny) {
-              if (!Array.isArray(pt) || pt.length < 2) continue;
-              const lng = Number(pt[0]);
-              const lat = Number(pt[1]);
-              if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-              ring.push([lng, lat]);
-            }
+          if (ringAny && ringAny.length >= 3) {
+            const first = ringAny[0];
+            const last = ringAny[ringAny.length - 1];
+            const closed =
+              Array.isArray(first) &&
+              Array.isArray(last) &&
+              first.length >= 2 &&
+              last.length >= 2 &&
+              first[0] === last[0] &&
+              first[1] === last[1];
 
-            if (ring.length >= 3) {
-              const first = ring[0];
-              const last = ring[ring.length - 1];
-              const closed = first[0] === last[0] && first[1] === last[1];
-              const closedRing = closed ? ring : [...ring, [first[0], first[1]]];
+            const closedRing = closed ? ringAny : [...ringAny, first];
+            const coordsClosed = [closedRing, ...(Array.isArray(coordsAny) ? coordsAny.slice(1) : [])];
 
-              const geomClosed: GeoJSON.Polygon = {
-                type: 'Polygon',
-                coordinates: [closedRing],
-              };
-              onPolygonRef.current(geomClosed);
-            }
+            const closedNow = (() => {
+              const f = closedRing[0];
+              const l = closedRing[closedRing.length - 1];
+              return (
+                Array.isArray(f) &&
+                Array.isArray(l) &&
+                f.length >= 2 &&
+                l.length >= 2 &&
+                f[0] === l[0] &&
+                f[1] === l[1]
+              );
+            })();
+
+            console.log('[Draw] created', { ringLen: closedRing.length, closed: closedNow });
+            onPolygonRef.current({ type: 'Polygon', coordinates: coordsClosed } as GeoJSON.Polygon);
           }
         } catch {
           // ignore
@@ -672,7 +680,7 @@ export default function MapSearch({
       }
       const payload = built.payload;
       setLastRequest(payload);
-      console.log('[Run(debug)] payload', payload);
+      // (no console logs here; keep logs centralized in Run)
 
       let polygonRingLen: number | undefined;
       let polygonFirst: [number, number] | null | undefined;
@@ -754,7 +762,6 @@ export default function MapSearch({
         zoningOptionsLen: zoningOpts.filter((x) => typeof x === 'string' && x.trim()).length,
         futureLandUseOptionsLen: fluOpts.filter((x) => typeof x === 'string' && x.trim()).length,
       });
-      console.log('[Run(debug)] recordsLen=', recs.length, 'sample=', sample);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setRunDebugOut({ payload: lastRequest, error: msg });
@@ -846,17 +853,7 @@ export default function MapSearch({
       const recs = resp.records || [];
       const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
 
-      const first = recs?.[0];
-      console.log('[Run] response', {
-        recordsLen: recs.length,
-        first: first
-          ? {
-              parcel_id: (first.parcel_id || '').trim(),
-              owner: (first.owner_name || '').trim(),
-              address: (first.situs_address || first.address || '').trim(),
-            }
-          : null,
-      });
+      console.log('[Run] response', { recordsLen: recs.length });
       const warnings = (resp as any).warnings as string[] | undefined;
       setLastResponseCount(list.length || recs.length);
 
