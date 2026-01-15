@@ -53,6 +53,12 @@ if build_frontend_if_needed; then
   set +e
   web_out="$({
     cd "$ROOT_DIR/web" || exit 1
+
+    # Avoid Node OOMs during builds in smaller dev containers.
+    if [[ -z "${NODE_OPTIONS:-}" ]]; then
+      export NODE_OPTIONS="--max_old_space_size=1536"
+    fi
+
     need_ci=0
     if [[ ! -d node_modules ]]; then
       need_ci=1

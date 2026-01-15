@@ -9,11 +9,11 @@ import 'leaflet-draw';
 import {
   parcelsEnrich,
   parcelsGeometry,
-  parcelsSearch,
   parcelsSearchNormalized,
   permitsByParcel,
   type ParcelAttributeFilters,
   type ParcelRecord,
+  type ParcelSearchListItem,
   type PermitRecord,
 } from '../lib/api';
 
@@ -34,6 +34,7 @@ function DrawControls({
 }) {
   const map = useMap();
   const wasDraggingEnabledRef = useRef<boolean>(false);
+  const activePolygonHandlerRef = useRef<any>(null);
   const onPolygonRef = useRef(onPolygon);
   const onDeletedRef = useRef(onDeleted);
   const onDrawingChangeRef = useRef(onDrawingChange);
@@ -80,25 +81,42 @@ function DrawControls({
     const handleDrawStart = (e: any) => {
       wasDraggingEnabledRef.current = !!map.dragging?.enabled?.();
       if (wasDraggingEnabledRef.current) map.dragging.disable();
+
+      // Track the active polygon handler so we can explicitly finish on dblclick.
+      // (Leaflet.Draw generally supports finishing via clicking the first vertex;
+      // dblclick support varies by browser/config.)
+      try {
+        if (e?.layerType === 'polygon') {
+          activePolygonHandlerRef.current = (control as any)?._toolbars?.draw?._modes?.polygon?.handler ?? null;
+        } else {
+          activePolygonHandlerRef.current = null;
+        }
+      } catch {
+        activePolygonHandlerRef.current = null;
+      }
+
       onDrawingChangeRef.current(true);
     };
 
     const handleDrawStop = () => {
       if (wasDraggingEnabledRef.current) map.dragging.enable();
       wasDraggingEnabledRef.current = false;
+      activePolygonHandlerRef.current = null;
       onDrawingChangeRef.current(false);
     };
 
-    const handleDrawVertex = (e: any) => {
-      // Supported Leaflet.Draw event.
-      // Prevent the default Leaflet.Draw behavior of finishing a polygon by clicking
-      // the first vertex; we only want dblclick or the toolbar Finish action.
+    const handleDblClick = () => {
+      // Finish the polygon on double click.
+      // Leaflet.Draw may finish on dblclick already, but this makes the behavior explicit.
+      const handler = activePolygonHandlerRef.current;
+      if (!handler) return;
       try {
-        const layers = e?.layers;
-        const markers: any[] = layers?.getLayers?.() || [];
-        const first = markers?.[0];
-        if (first?.off) {
-          first.off('click');
+        if (typeof handler._finishShape === 'function') {
+          handler._finishShape();
+          return;
+        }
+        if (typeof handler.completeShape === 'function') {
+          handler.completeShape();
         }
       } catch {
         // ignore
@@ -163,16 +181,16 @@ function DrawControls({
 
     map.on(L.Draw.Event.DRAWSTART, handleDrawStart);
     map.on(L.Draw.Event.DRAWSTOP, handleDrawStop);
-    map.on(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
     map.on(L.Draw.Event.CREATED, handleCreated);
     map.on(L.Draw.Event.DELETED, handleDeleted);
+    map.on('dblclick', handleDblClick);
 
     return () => {
       map.off(L.Draw.Event.DRAWSTART, handleDrawStart);
       map.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
-      map.off(L.Draw.Event.DRAWVERTEX, handleDrawVertex);
       map.off(L.Draw.Event.CREATED, handleCreated);
       map.off(L.Draw.Event.DELETED, handleDeleted);
+      map.off('dblclick', handleDblClick);
       try {
         map.removeControl(control);
       } catch {
@@ -218,6 +236,11 @@ function MultiSelectFilter({
     else onSelected([...selected, v]);
   };
 
+  const remove = (v: string) => {
+    if (!selectedSet.has(v)) return;
+    onSelected(selected.filter((x) => x !== v));
+  };
+
   const selectAll = () => {
     onSelected([...options]);
   };
@@ -255,11 +278,33 @@ function MultiSelectFilter({
         </div>
       </div>
 
+      {selected.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {selected.slice(0, 40).map((v) => (
+            <button
+              key={`chip:${v}`}
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text hover:bg-cre-bg"
+              onClick={() => remove(v)}
+              title="Click to remove"
+            >
+              <span className="max-w-[240px] truncate">{v}</span>
+              <span className="text-cre-muted">×</span>
+            </button>
+          ))}
+          {selected.length > 40 ? (
+            <div className="px-1 py-1 text-[11px] text-cre-muted">+{selected.length - 40} more</div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-2 text-[11px] text-cre-muted">No selections yet.</div>
+      )}
+
       <input
         className="mt-2 w-full rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-sm text-cre-text"
         value={query}
         onChange={(e) => onQuery(e.target.value)}
-        placeholder="Search..."
+        placeholder="Search options..."
       />
 
       <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-cre-border/40 bg-cre-surface p-2">
@@ -302,6 +347,7 @@ export default function MapSearch({
 
   const [isDrawing, setIsDrawing] = useState(false);
 
+  const [parcels, setParcels] = useState<ParcelSearchListItem[]>([]);
   const [records, setRecords] = useState<ParcelRecord[]>([]);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
 
@@ -374,7 +420,7 @@ export default function MapSearch({
   const [showCache, setShowCache] = useState(true);
 
   const [lastRequest, setLastRequest] = useState<any | null>(null);
-  const [lastResponseCount, setLastResponseCount] = useState<number>(records.length);
+  const [lastResponseCount, setLastResponseCount] = useState<number>(0);
   const [lastError, setLastError] = useState<string | null>(null);
 
   const [ownersQuery, setOwnersQuery] = useState('');
@@ -387,24 +433,33 @@ export default function MapSearch({
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
 
+  const recordById = useMemo(() => {
+    const m = new Map<string, ParcelRecord>();
+    for (const r of records) {
+      if (r?.parcel_id) m.set(r.parcel_id, r);
+    }
+    return m;
+  }, [records]);
+
   const rows = useMemo(() => {
-    return records.filter((r) => {
-      if (r.source === 'live') return showLive;
-      if (r.source === 'cache') return showCache;
+    return parcels.filter((p) => {
+      const src = p.source;
+      if (src === 'live') return showLive;
+      if (src === 'cache') return showCache;
       return true;
     });
-  }, [records, showCache, showLive]);
+  }, [parcels, showCache, showLive]);
 
   const ownersRows = useMemo(() => {
     const q = ownersQuery.trim().toLowerCase();
-    const base = records;
+    const base = parcels;
     if (!q) return base;
-    return base.filter((r) => {
-      const owner = (r.owner_name || '').toLowerCase();
-      const addr = ((r.situs_address || r.address) || '').toLowerCase();
-      return owner.includes(q) || addr.includes(q) || r.parcel_id.toLowerCase().includes(q);
+    return base.filter((p) => {
+      const owner = (p.owner_name || '').toLowerCase();
+      const addr = (p.address || '').toLowerCase();
+      return owner.includes(q) || addr.includes(q) || p.parcel_id.toLowerCase().includes(q);
     });
-  }, [ownersQuery, records]);
+  }, [ownersQuery, parcels]);
 
   const geometryStatus = useMemo(() => {
     if (drawnPolygon) return 'Polygon selected';
@@ -421,6 +476,8 @@ export default function MapSearch({
     setDrawnPolygon(null);
     setDrawnCircle(null);
     setSelectedParcelId(null);
+    setParcels([]);
+    setRecords([]);
     setZoningOptions([]);
     setFutureLandUseOptions([]);
     setZoningQuery('');
@@ -482,7 +539,7 @@ export default function MapSearch({
       if (!parcelLinesEnabled) return;
       setParcelLinesError(null);
 
-      const ids = records.map((r) => r.parcel_id).filter(Boolean).slice(0, 50);
+      const ids = parcels.map((p) => p.parcel_id).filter(Boolean).slice(0, 50);
       if (!ids.length) {
         setParcelLinesFC(null);
         return;
@@ -520,17 +577,17 @@ export default function MapSearch({
     return () => {
       cancelled = true;
     };
-  }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, records]);
+  }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels]);
 
   async function enrichVisible() {
     setLastError(null);
     setErrorBanner(null);
-    if (!records.length) {
+    if (!parcels.length) {
       setErrorBanner('No records to enrich yet.');
       return;
     }
 
-    const ids = records.map((r) => r.parcel_id)
+    const ids = parcels.map((p) => p.parcel_id)
       .slice(0, 150);
 
     if (!ids.length) return;
@@ -543,7 +600,9 @@ export default function MapSearch({
 
       const enriched = resp.records || [];
       const map = new Map(enriched.map((r) => [r.parcel_id, r] as const));
-      const merged = records.map((r) => map.get(r.parcel_id) ?? r);
+      const merged = records.length
+        ? records.map((r) => map.get(r.parcel_id) ?? r)
+        : enriched;
 
       setRecords(merged);
 
@@ -570,6 +629,7 @@ export default function MapSearch({
 
     if (!drawnPolygon && !drawnCircle) {
       setErrorBanner('Draw polygon or radius first');
+      setParcels([]);
       setRecords([]);
       return;
     }
@@ -617,7 +677,7 @@ export default function MapSearch({
       min_year_built: toIntOrNull(filterForm.minYearBuilt),
       max_year_built: toIntOrNull(filterForm.maxYearBuilt),
       property_type: filterForm.propertyType.trim() || null,
-      zoning: selectedZoning.length ? null : filterForm.zoning.trim() || null,
+      zoning: filterForm.zoning.trim() || null,
       zoning_in: selectedZoning.length ? selectedZoning : null,
       future_land_use_in: selectedFutureLandUse.length ? selectedFutureLandUse : null,
       min_value: toIntOrNull(filterForm.minValue),
@@ -656,14 +716,24 @@ export default function MapSearch({
       const resp = await parcelsSearchNormalized(payload);
       if (reqId !== activeReq.current) return;
 
-      const zo = (resp as any).zoning_options;
-      setZoningOptions(Array.isArray(zo) ? (zo as string[]) : []);
-      const fu = (resp as any).future_land_use_options;
-      setFutureLandUseOptions(Array.isArray(fu) ? (fu as string[]) : []);
+      const uniqSorted = (arr: unknown): string[] => {
+        if (!Array.isArray(arr)) return [];
+        const set = new Set<string>();
+        for (const v of arr) {
+          if (typeof v !== 'string') continue;
+          const s = v.trim();
+          if (s) set.add(s);
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+      };
+
+      setZoningOptions(uniqSorted((resp as any).zoning_options));
+      setFutureLandUseOptions(uniqSorted((resp as any).future_land_use_options));
 
       const recs = resp.records || [];
+      const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
       const warnings = (resp as any).warnings as string[] | undefined;
-      setLastResponseCount(recs.length);
+      setLastResponseCount(list.length || recs.length);
 
       const rawCounts = resp.summary?.source_counts || {};
       setSourceCounts({
@@ -671,12 +741,13 @@ export default function MapSearch({
         cache: Number(rawCounts.cache || 0),
       });
 
-      if (!recs.length) {
+      if (!list.length && !recs.length) {
         const msg = warnings?.length
           ? `No results returned. ${warnings.join(' / ')}`
           : 'No results returned from backend.';
         setLastError(msg);
         setErrorBanner(msg);
+        setParcels([]);
         setRecords([]);
         return;
       }
@@ -685,6 +756,7 @@ export default function MapSearch({
         setErrorBanner(`Warnings: ${warnings.join(' / ')}`);
       }
 
+      setParcels(list);
       setRecords(recs);
 
       // Refresh owner-list query results immediately.
@@ -698,6 +770,7 @@ export default function MapSearch({
       const msg = e instanceof Error ? e.message : String(e);
       setLastError(msg);
       setErrorBanner(`Request failed: ${msg}`);
+      setParcels([]);
       setRecords([]);
       setParcelLinesFC(null);
       setParcelLinesEnabled(false);
@@ -723,6 +796,7 @@ export default function MapSearch({
             value={county}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => {
               setCounty(e.target.value);
+              setParcels([]);
               setRecords([]);
               setSourceCounts({ live: 0, cache: 0 });
               setSelectedParcelId(null);
@@ -891,7 +965,7 @@ export default function MapSearch({
               onSelected={setSelectedFutureLandUse}
             />
             <div className="text-[11px] text-cre-muted">
-              Note: selecting multi-select values overrides the Zoning “contains” input.
+              Tip: “Zoning contains” and multi-select both apply (AND).
             </div>
           </div>
 
@@ -1009,7 +1083,7 @@ export default function MapSearch({
             type="button"
             className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
             onClick={() => void enrichVisible()}
-            disabled={loading || records.length === 0}
+            disabled={loading || parcels.length === 0}
             title="Fetch live attributes + cache"
           >
             Enrich results
@@ -1028,7 +1102,7 @@ export default function MapSearch({
               value={ownersQuery}
               onChange={(e) => setOwnersQuery(e.target.value)}
             />
-            {!records.length ? (
+            {!parcels.length ? (
               <div className="mt-2 text-xs text-cre-muted">No parcels found.</div>
             ) : null}
           </div>
@@ -1043,22 +1117,21 @@ export default function MapSearch({
                 </tr>
               </thead>
               <tbody>
-                {ownersRows.map((r) => {
-                  const addr = (r.situs_address || r.address || '').trim();
-                  const selected = selectedParcelId === r.parcel_id;
+                {ownersRows.map((p) => {
+                  const selected = selectedParcelId === p.parcel_id;
                   return (
                     <tr
-                      key={`owners:${r.parcel_id}`}
+                      key={`owners:${p.parcel_id}`}
                       className={
                         selected
                           ? 'bg-cre-accent/15'
                           : 'border-t border-cre-border/30 hover:bg-cre-bg'
                       }
-                      onClick={() => setSelectedParcelId(r.parcel_id)}
+                      onClick={() => setSelectedParcelId(p.parcel_id)}
                     >
-                      <td className="px-2 py-2 text-cre-text">{r.owner_name || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{addr || '—'}</td>
-                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{r.parcel_id}</td>
+                      <td className="px-2 py-2 text-cre-text">{p.owner_name || '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{p.address || '—'}</td>
+                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{p.parcel_id}</td>
                     </tr>
                   );
                 })}
@@ -1107,30 +1180,37 @@ export default function MapSearch({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
-                  const selected = selectedParcelId === r.parcel_id;
-                  const addr = (r.address || r.situs_address || '').trim();
-                  const sqftLiving = r.sqft?.find((s) => s.type === 'living')?.value ?? r.living_area_sqft ?? null;
-                  const srcLabel = r.source.toUpperCase();
+                {rows.map((p) => {
+                  const rec = recordById.get(p.parcel_id);
+                  const selected = selectedParcelId === p.parcel_id;
+
+                  const addr = (p.address || rec?.situs_address || rec?.address || '').trim();
+                  const owner = (p.owner_name || rec?.owner_name || '').trim();
+                  const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
+                  const sqftLiving = rec?.sqft?.find((s) => s.type === 'living')?.value ?? rec?.living_area_sqft ?? null;
+                  const zoning = (rec?.zoning || '').trim();
+                  const landUse = ((rec as any)?.flu || rec?.land_use || '').toString().trim();
+                  const beds = rec?.beds ?? null;
+                  const baths = rec?.baths ?? null;
                   return (
                     <tr
-                      key={r.parcel_id}
+                      key={p.parcel_id}
                       className={
                         selected
                           ? 'bg-cre-accent/15'
                           : 'border-t border-cre-border/30 hover:bg-cre-bg'
                       }
-                      onClick={() => setSelectedParcelId(r.parcel_id)}
+                      onClick={() => setSelectedParcelId(p.parcel_id)}
                     >
-                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{r.parcel_id}</td>
+                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{p.parcel_id}</td>
                       <td className="px-2 py-2 text-[11px] text-cre-text">{srcLabel}</td>
                       <td className="px-2 py-2 text-cre-text">{addr || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{r.owner_name || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{r.zoning || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{(r.flu || r.land_use) || '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{owner || '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{zoning || '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{landUse || '—'}</td>
                       <td className="px-2 py-2 text-cre-text">{sqftLiving ?? '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{r.beds ?? '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{r.baths ?? '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{beds ?? '—'}</td>
+                      <td className="px-2 py-2 text-cre-text">{baths ?? '—'}</td>
                     </tr>
                   );
                 })}
@@ -1143,7 +1223,22 @@ export default function MapSearch({
           <div className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
             {(() => {
               const rec = records.find((r) => r.parcel_id === selectedParcelId);
-              if (!rec) return <div className="text-cre-muted">Select a parcel to view details.</div>;
+              const p = parcels.find((x) => x.parcel_id === selectedParcelId) || null;
+              if (!rec) {
+                if (!p) return <div className="text-cre-muted">Select a parcel to view details.</div>;
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-semibold">Details</div>
+                      <div className="text-[11px] text-cre-muted">Source: {(p.source || '—').toUpperCase()}</div>
+                    </div>
+                    <div className="font-mono text-[11px] text-cre-muted">{p.parcel_id}</div>
+                    <div>{p.address || '—'}</div>
+                    <div>Owner: {p.owner_name || '—'}</div>
+                    <div className="text-[11px] text-cre-muted">(More fields available after enrichment.)</div>
+                  </div>
+                );
+              }
               const url = rec.raw_source_url || '';
               const sources = (rec.data_sources || []).filter((s) => s && s.url);
               const sqftLiving =
@@ -1156,7 +1251,7 @@ export default function MapSearch({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-semibold">Details</div>
-                    <div className="text-[11px] text-cre-muted">Source: {rec.source.toUpperCase()}</div>
+                    <div className="text-[11px] text-cre-muted">Source: {(rec.source || '—').toUpperCase()}</div>
                   </div>
 
                   {photoUrl ? (
@@ -1348,13 +1443,17 @@ export default function MapSearch({
               />
             ) : null}
 
-            {rows.map((r) => {
-              const selected = selectedParcelId === r.parcel_id;
-              const pos: [number, number] = [r.lat, r.lng];
+            {rows.map((p) => {
+              const lat = typeof p.lat === 'number' && Number.isFinite(p.lat) ? p.lat : null;
+              const lng = typeof p.lng === 'number' && Number.isFinite(p.lng) ? p.lng : null;
+              if (lat === null || lng === null) return null;
+
+              const selected = selectedParcelId === p.parcel_id;
+              const pos: [number, number] = [lat, lng];
               if (selected) {
                 return (
                   <CircleMarker
-                    key={r.parcel_id}
+                    key={p.parcel_id}
                     center={pos}
                     radius={9}
                     pathOptions={{ color: '#D08E02', weight: 2, fillOpacity: 0.35 }}
@@ -1363,11 +1462,11 @@ export default function MapSearch({
               }
               return (
                 <Marker
-                  key={r.parcel_id}
+                  key={p.parcel_id}
                   position={pos}
                   interactive={!isDrawing}
                   eventHandlers={{
-                    click: () => setSelectedParcelId(r.parcel_id),
+                    click: () => setSelectedParcelId(p.parcel_id),
                   }}
                 />
               );

@@ -513,11 +513,26 @@ export async function parcelsSearch(
     throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`)
   }
 
-  const data = (await resp.json()) as ParcelSearchResponse
-  if (!data || typeof data !== 'object' || !Array.isArray((data as any).records)) {
-    throw new Error('Unexpected response: expected {records: [...]}' )
+  const data: unknown = await resp.json()
+  if (!data || typeof data !== 'object') {
+    throw new Error('Unexpected response: expected JSON object')
   }
-  return data
+
+  // Stabilize the contract for callers:
+  // - Modern API returns {records: ParcelRecord[]}
+  // - Legacy/alt API may return {results: [...]}
+  // Always return `records` as an array (possibly empty) and keep any back-compat fields.
+  const obj = data as any
+  const out: ParcelSearchResponse = {
+    ...obj,
+    records: Array.isArray(obj.records) ? (obj.records as ParcelRecord[]) : [],
+  }
+
+  if (!Array.isArray(out.records) && !Array.isArray((out as any).results)) {
+    throw new Error('Unexpected response: expected {records:[...]} or {results:[...]}' )
+  }
+
+  return out
 }
 
 export async function parcelsSearchNormalized(

@@ -148,12 +148,12 @@
       }
     },
     {
-      "label": "Proof: Polygon Search (Orange)",
+      "label": "Proof: Polygon UI (Orange)",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
-        "set -o pipefail; bash scripts/prove_polygon_search.sh 2>&1 | tee PROOF_POLYGON_SEARCH.txt"
+        "set -o pipefail; bash scripts/prove_polygon_ui.sh 2>&1 | tee PROOF_POLYGON_UI.txt"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -238,12 +238,12 @@
       }
     },
     {
-      "label": "Open: PROOF Polygon Search",
+      "label": "Open: PROOF Polygon UI",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
-        "tail -n 160 PROOF_POLYGON_SEARCH.txt || true"
+        "tail -n 200 PROOF_POLYGON_UI.txt || true"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
