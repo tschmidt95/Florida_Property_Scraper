@@ -475,6 +475,8 @@ if app:
         store = PASQLite(db_path)
         enriched_live_ids: set[str] = set()
         live_error_reason: str | None = None
+        zoning_options: list[str] = []
+        future_land_use_options: list[str] = []
         try:
             parcel_ids = [f.parcel_id for f in intersecting]
 
@@ -493,113 +495,8 @@ if app:
             # Baseline (unfiltered) option lists must be computed from the polygon/radius
             # candidates, regardless of any attribute filters.
             baseline_parcel_ids = list(parcel_ids)
-            baseline_pa_by_id = store.get_many(county=county_key, parcel_ids=baseline_parcel_ids)
 
-            def _baseline_options(field_name: str) -> list[str]:
-                any_real = False
-                values: set[str] = set()
-                for pa in baseline_pa_by_id.values():
-                    try:
-                        raw = getattr(pa, field_name, "")
-                    except Exception:
-                        raw = ""
-
-                    # Practical fallback: many counties do not explicitly publish a
-                    # separate Future Land Use field; treat PA use_type as a proxy.
-                    if field_name == "future_land_use":
-                        if not str(raw or "").strip():
-                            raw = (pa.use_type or pa.land_use_code or "")
-
-                    s = str(raw or "").strip()
-                    if s:
-                        any_real = True
-                        values.add(_norm_choice(s))
-                    else:
-                        values.add("UNKNOWN")
-                if not any_real:
-                    return []
-                return sorted(values)
-
-            zoning_options = _baseline_options("zoning")
-            future_land_use_options = _baseline_options("future_land_use")
-
-            if isinstance(raw_filters, dict) and parcel_ids and not enrich_requested:
-                where_parts: list[str] = []
-                where_params: list[object] = []
-
-                def _add_num(col: str, op: str, v: object) -> None:
-                    try:
-                        if v is None:
-                            return
-                        if isinstance(v, (int, float)):
-                            num = float(v)
-                        else:
-                            s = str(v).strip().replace(",", "")
-                            if not s:
-                                return
-                            num = float(s)
-                        where_parts.append(f"{col} {op} ?")
-                        where_params.append(num)
-                    except Exception:
-                        return
-
-                def _add_text_contains(col: str, v: object) -> None:
-                    if v is None:
-                        return
-                    s = str(v).strip()
-                    if not s:
-                        return
-                    where_parts.append(f"LOWER({col}) LIKE ?")
-                    where_params.append(f"%{s.lower()}%")
-
-                # Ranges
-                _add_num("living_sf", ">=", raw_filters.get("min_sqft"))
-                _add_num("living_sf", "<=", raw_filters.get("max_sqft"))
-                _add_num("year_built", ">=", raw_filters.get("min_year_built"))
-                _add_num("year_built", "<=", raw_filters.get("max_year_built"))
-                _add_num("bedrooms", ">=", raw_filters.get("min_beds"))
-                _add_num("bathrooms", ">=", raw_filters.get("min_baths"))
-
-                _add_num("just_value", ">=", raw_filters.get("min_value"))
-                _add_num("just_value", "<=", raw_filters.get("max_value"))
-                _add_num("land_value", ">=", raw_filters.get("min_land_value"))
-                _add_num("land_value", "<=", raw_filters.get("max_land_value"))
-                _add_num("improvement_value", ">=", raw_filters.get("min_building_value"))
-                _add_num("improvement_value", "<=", raw_filters.get("max_building_value"))
-
-                # Text
-                _add_text_contains("zoning", raw_filters.get("zoning"))
-                _add_text_contains("use_type", raw_filters.get("property_type"))
-
-                # Dates (ISO strings compare lexicographically)
-                d0 = raw_filters.get("last_sale_date_start")
-                d1 = raw_filters.get("last_sale_date_end")
-                if isinstance(d0, str) and d0.strip():
-                    where_parts.append("last_sale_date >= ?")
-                    where_params.append(d0.strip())
-                if isinstance(d1, str) and d1.strip():
-                    where_parts.append("last_sale_date <= ?")
-                    where_params.append(d1.strip())
-
-                if where_parts:
-                    where_sql = " AND ".join(where_parts)
-                    # Filter intersecting candidates down to cached matches.
-                    matching_ids = set(
-                        store.filter_cached_ids(
-                            county=county_key,
-                            parcel_ids=parcel_ids,
-                            where_sql=where_sql,
-                            params=where_params,
-                            limit=len(parcel_ids),
-                        )
-                    )
-                    if matching_ids:
-                        intersecting = [f for f in intersecting if f.parcel_id in matching_ids]
-                        parcel_ids = [f.parcel_id for f in intersecting]
-                    else:
-                        intersecting = []
-                        parcel_ids = []
-
+            # Load cached rows up front so we can determine which live IDs are missing.
             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
 
             if live:
@@ -875,6 +772,124 @@ if app:
                             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
                         except Exception as e:
                             warnings.append(f"inline_ocpa_batch_failed:{e}")
+
+            # Compute baseline (unfiltered) option lists AFTER best-effort enrichment.
+            # Otherwise the first run in a new area can return empty option arrays.
+            baseline_pa_by_id = store.get_many(county=county_key, parcel_ids=baseline_parcel_ids)
+
+            def _baseline_options(field_name: str) -> list[str]:
+                any_real = False
+                values: set[str] = set()
+                for pa in baseline_pa_by_id.values():
+                    try:
+                        raw = getattr(pa, field_name, "")
+                    except Exception:
+                        raw = ""
+
+                    # Practical fallback: many counties do not explicitly publish a
+                    # separate Future Land Use field; treat PA use_type as a proxy.
+                    if field_name == "future_land_use":
+                        if not str(raw or "").strip():
+                            raw = (pa.use_type or pa.land_use_code or "")
+
+                    s = str(raw or "").strip()
+                    if s:
+                        any_real = True
+                        values.add(_norm_choice(s))
+                    else:
+                        values.add("UNKNOWN")
+                if not any_real:
+                    return []
+                return sorted(values)
+
+            zoning_options = _baseline_options("zoning")
+            future_land_use_options = _baseline_options("future_land_use")
+
+            # Optional: SQL-side filtering against cached columns.
+            # Only applies when the request is not asking us to enrich missing data.
+            # If enrich=true, we need to consider parcels not yet cached.
+            #
+            # IMPORTANT: run this AFTER the best-effort live enrichment so we don't
+            # accidentally filter away all candidates simply because they were not
+            # yet cached at the moment the request started.
+            if isinstance(raw_filters, dict) and parcel_ids and not enrich_requested:
+                where_parts: list[str] = []
+                where_params: list[object] = []
+
+                def _add_num(col: str, op: str, v: object) -> None:
+                    try:
+                        if v is None:
+                            return
+                        if isinstance(v, (int, float)):
+                            num = float(v)
+                        else:
+                            s = str(v).strip().replace(",", "")
+                            if not s:
+                                return
+                            num = float(s)
+                        where_parts.append(f"{col} {op} ?")
+                        where_params.append(num)
+                    except Exception:
+                        return
+
+                def _add_text_contains(col: str, v: object) -> None:
+                    if v is None:
+                        return
+                    s = str(v).strip()
+                    if not s:
+                        return
+                    where_parts.append(f"LOWER({col}) LIKE ?")
+                    where_params.append(f"%{s.lower()}%")
+
+                # Ranges
+                _add_num("living_sf", ">=", raw_filters.get("min_sqft"))
+                _add_num("living_sf", "<=", raw_filters.get("max_sqft"))
+                _add_num("year_built", ">=", raw_filters.get("min_year_built"))
+                _add_num("year_built", "<=", raw_filters.get("max_year_built"))
+                _add_num("bedrooms", ">=", raw_filters.get("min_beds"))
+                _add_num("bathrooms", ">=", raw_filters.get("min_baths"))
+
+                _add_num("just_value", ">=", raw_filters.get("min_value"))
+                _add_num("just_value", "<=", raw_filters.get("max_value"))
+                _add_num("land_value", ">=", raw_filters.get("min_land_value"))
+                _add_num("land_value", "<=", raw_filters.get("max_land_value"))
+                _add_num("improvement_value", ">=", raw_filters.get("min_building_value"))
+                _add_num("improvement_value", "<=", raw_filters.get("max_building_value"))
+
+                # Text
+                _add_text_contains("zoning", raw_filters.get("zoning"))
+                _add_text_contains("use_type", raw_filters.get("property_type"))
+
+                # Dates (ISO strings compare lexicographically)
+                d0 = raw_filters.get("last_sale_date_start")
+                d1 = raw_filters.get("last_sale_date_end")
+                if isinstance(d0, str) and d0.strip():
+                    where_parts.append("last_sale_date >= ?")
+                    where_params.append(d0.strip())
+                if isinstance(d1, str) and d1.strip():
+                    where_parts.append("last_sale_date <= ?")
+                    where_params.append(d1.strip())
+
+                if where_parts:
+                    where_sql = " AND ".join(where_parts)
+                    matching_ids = set(
+                        store.filter_cached_ids(
+                            county=county_key,
+                            parcel_ids=parcel_ids,
+                            where_sql=where_sql,
+                            params=where_params,
+                            limit=len(parcel_ids),
+                        )
+                    )
+                    if matching_ids:
+                        intersecting = [f for f in intersecting if f.parcel_id in matching_ids]
+                        parcel_ids = [f.parcel_id for f in intersecting]
+                    else:
+                        intersecting = []
+                        parcel_ids = []
+
+                # Refresh after SQL filtering.
+                pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
 
             hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
         finally:

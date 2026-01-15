@@ -58,13 +58,37 @@ def eval_condition(fields: Dict[str, Any], cond: Condition) -> bool:
     if op in ("!=", "not_equals"):
         return v != cond.value
     if op in (">", "gt"):
-        return v > cond.value
+        try:
+            return v > cond.value
+        except TypeError:
+            try:
+                return float(v) > float(cond.value)
+            except Exception:
+                return False
     if op in (">=", "gte"):
-        return v >= cond.value
+        try:
+            return v >= cond.value
+        except TypeError:
+            try:
+                return float(v) >= float(cond.value)
+            except Exception:
+                return False
     if op in ("<", "lt"):
-        return v < cond.value
+        try:
+            return v < cond.value
+        except TypeError:
+            try:
+                return float(v) < float(cond.value)
+            except Exception:
+                return False
     if op in ("<=", "lte"):
-        return v <= cond.value
+        try:
+            return v <= cond.value
+        except TypeError:
+            try:
+                return float(v) <= float(cond.value)
+            except Exception:
+                return False
     if op in ("contains",):
         return _contains(v, cond.value)
     if op in ("in", "in_list"):

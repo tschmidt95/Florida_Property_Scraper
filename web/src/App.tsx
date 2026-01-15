@@ -124,6 +124,11 @@ export default function App() {
   const [apiGit, setApiGit] = useState<{ sha: string; branch: string } | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
 
+  // MapSearch v2 (web/src/pages/MapSearch.tsx) is the primary map UI.
+  // Keep the legacy map panel code for now, but do not render it, otherwise
+  // we end up with multiple Leaflet containers + duplicated controls.
+  const showLegacyMapPanel = false;
+
   const [mode, setMode] = useState<'search' | 'map'>('map');
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
@@ -677,7 +682,8 @@ export default function App() {
 
         <main className="flex-1 p-6">
           {mode === 'map' ? (
-            <div className="space-y-4">
+            showLegacyMapPanel ? (
+              <div className="space-y-4">
               <div className="rounded-xl border border-cre-border/30 bg-cre-surface p-4 shadow-panel">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="text-sm font-semibold text-cre-primary">Map Search</div>
@@ -911,6 +917,11 @@ export default function App() {
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="rounded-xl border border-cre-border/30 bg-cre-surface p-4 text-sm text-cre-text shadow-panel">
+                Legacy map panel disabled (prevents double maps/controls). Use the MapSearch UI above.
+              </div>
+            )
           ) : (
             <div className="overflow-hidden rounded-xl border border-cre-border/30 bg-cre-surface shadow-panel">
               <div className="border-b border-cre-border/30 px-4 py-3">

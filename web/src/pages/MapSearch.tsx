@@ -439,7 +439,7 @@ export default function MapSearch({
     lastSaleStart: '',
     lastSaleEnd: '',
   });
-  const [autoEnrichMissing, setAutoEnrichMissing] = useState(false);
+  const [autoEnrichMissing, setAutoEnrichMissing] = useState(true);
 
   const [zoningOptions, setZoningOptions] = useState<string[]>([]);
   const [futureLandUseOptions, setFutureLandUseOptions] = useState<string[]>([]);

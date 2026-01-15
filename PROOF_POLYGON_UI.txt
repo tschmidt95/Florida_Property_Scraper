@@ -19,7 +19,7 @@ $ BASE_URL=<forwarded> node web/scripts/diag_runtime_report.mjs
 {'baseUrl': 'https://urban-tribble-9p457599q79h9xrx-8000.app.github.dev/', 'ok': True, 'errors': [], 'polygonRunOk': True, 'polygonResponseStatus': 200, 'polygonRequestSeen': True, 'consoleErrorsCount': 0, 'consoleLinesCount': 2}
 
 $ curl -sS http://127.0.0.1:8000/api/debug/ping (stable fields)
-{"env": {"APP_GIT_BRANCH": "feature/address-lookup-ui", "APP_GIT_SHA": "ba16a01"}, "git": {"branch": "feature/address-lookup-ui", "sha": "ba16a01"}, "ok": true}
+{"env": {"APP_GIT_BRANCH": "feature/address-lookup-ui", "APP_GIT_SHA": "dc951b9"}, "git": {"branch": "feature/address-lookup-ui", "sha": "dc951b9"}, "ok": true}
 
 $ curl -sS http://127.0.0.1:8000/health
 {"status":"ok"}
@@ -61,6 +61,14 @@ $ BASE_URL=http://127.0.0.1:8000 bash scripts/prove_polygon_search.sh
 == POST /api/parcels/search (lng,lat) ==
 records_count: 25
 warnings: []
+zoning_options_len: 5
+future_land_use_options_len: 44
+
+== POST /api/parcels/search (filters: lot size sqft) ==
+min_lot_size_sqft: 21854.5
+max_lot_size_sqft: 65563.5
+records_count: 25
+warnings: []
 
 == POST /api/parcels/search (lat,lng swapped; expected 0) ==
 records_count: 0
@@ -69,7 +77,84 @@ warnings: ['No parcel candidates returned for bbox']
 == sample record ==
 parcel_id: 362229000000025
 owner_name: Property Address
-situs_address: 
+situs_address: 1300 E SOUTH ST, Orlando 32801
+
+== UI smoke (Playwright): polygon + filters payload ==
+== open http://127.0.0.1:8000/ ==
+maps: [ { idx: 0, w: 826, h: 486, toolbarCount: 2, polygonBtnCount: 1 } ]
+selected_map: { idx: 0, w: 826, h: 486 }
+leaflet: {
+  hasGlobalL: true,
+  hasControl: true,
+  hasDrawControl: true,
+  hasDrawEvent: true
+}
+draw_dom: { toolbarCount: 2, polygonBtnCount: 1, anyLeafletControls: 6 }
+control_anchors: [
+  { className: 'leaflet-control-zoom-in', title: 'Zoom in', text: '+' },
+  {
+    className: 'leaflet-control-zoom-out',
+    title: 'Zoom out',
+    text: '−'
+  },
+  {
+    className: 'leaflet-draw-draw-polygon',
+    title: 'Draw a polygon',
+    text: 'Draw a polygon'
+  },
+  {
+    className: 'leaflet-draw-edit-remove leaflet-disabled',
+    title: 'No layers to delete',
+    text: 'Delete layers'
+  },
+  {
+    className: '',
+    title: 'A JavaScript library for interactive maps',
+    text: 'Leaflet'
+  },
+  { className: '', title: '', text: 'OpenStreetMap' }
+]
+== select polygon tool ==
+== draw polygon (5 clicks) ==
+== finish polygon ==
+== click Run (baseline) and assert POST /api/parcels/search with polygon_geojson ==
+[browser:log] [Run] payload {county: orange, live: true, limit: 25, include_geometry: false, filters: undefined}
+run0_payload_has_filters: false
+[browser:log] [Run] response {recordsLen: 25}
+response0 counts: { recordsLen0: 25, parcelsLen0: 0 }
+response0 option_lens: { zoning: 7, futureLandUse: 49 }
+== set parcel size filter (sqft) ==
+auto_enrich_checked: false
+== click Run (filtered) and assert payload.filters contains min/max lot_size_sqft ==
+[browser:log] [Run] payload {county: orange, live: true, limit: 25, include_geometry: false, filters: Object}
+[browser:log] [Run] response {recordsLen: 25}
+response1 counts: { recordsLen1: 25, parcelsLen1: 0 }
+checked_lot_size_records: 25
+last_observed_post_body_keys: [
+  'county',
+  'live',
+  'limit',
+  'include_geometry',
+  'filters',
+  'enrich',
+  'enrich_limit',
+  'polygon_geojson'
+]
+last_observed_filters_keys: [
+  'min_sqft',           'max_sqft',
+  'min_lot_size_sqft',  'max_lot_size_sqft',
+  'lot_size_unit',      'min_lot_size',
+  'max_lot_size',       'min_beds',
+  'min_baths',          'min_year_built',
+  'max_year_built',     'property_type',
+  'zoning',             'zoning_in',
+  'future_land_use_in', 'min_value',
+  'max_value',          'min_land_value',
+  'max_land_value',     'min_building_value',
+  'max_building_value', 'last_sale_date_start',
+  'last_sale_date_end'
+]
+PASS
 
 URL | ping | page load ok | console lines | requestfailed count | 4xx/5xx count | polygon run ok | PASS/FAIL
 http://127.0.0.1:8000/ | HTTP_STATUS=200 | PASS | 2 | 0 | 0 | PASS | PASS
