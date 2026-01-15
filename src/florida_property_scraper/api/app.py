@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -330,6 +331,28 @@ if app:
         Missing fields are treated as unknown and do not match triggers.
         """
 
+        search_id = uuid.uuid4().hex[:12]
+
+        def _append_search_debug(event: dict) -> None:
+            """Append a single JSON event line to a local debug log.
+
+            Uses a file instead of stdout to keep interactive runs readable.
+            """
+
+            try:
+                log_path = os.getenv(
+                    "FPS_SEARCH_DEBUG_LOG", ".fps_parcels_search_debug.jsonl"
+                )
+                event_out = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "search_id": search_id,
+                    **(event or {}),
+                }
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(event_out, ensure_ascii=False) + "\n")
+            except Exception:
+                return
+
         flags = get_flags()
         if not flags.geometry_search:
             raise HTTPException(status_code=404, detail="geometry search is disabled")
@@ -445,12 +468,56 @@ if app:
             "true",
             "True",
         }
-        candidates = provider.query(bbox_t)
+        provider_warnings: list[str] = []
+        try:
+            candidates = provider.query(bbox_t)
+        except Exception as e:
+            # FDOR centroid service is best-effort and can occasionally return transient
+            # HTTP errors (ex: 421). For Orange/Seminole we have local GeoJSON fallbacks
+            # that keep UI + proofs deterministic.
+            candidates = []
+            try:
+                provider_warnings.append(
+                    f"geometry_provider_error:{type(e).__name__}"
+                )
+            except Exception:
+                provider_warnings.append("geometry_provider_error")
+
+            if provider_is_live and county_key in {"orange", "seminole"}:
+                try:
+                    from florida_property_scraper.parcels.geometry_registry import _default_geojson_dir
+                    from florida_property_scraper.parcels.providers.orange import OrangeProvider
+                    from florida_property_scraper.parcels.providers.seminole import SeminoleProvider
+
+                    geo_dir = _default_geojson_dir()
+                    if county_key == "orange":
+                        fallback = OrangeProvider(geojson_path=geo_dir / "orange.geojson")
+                    else:
+                        fallback = SeminoleProvider(geojson_path=geo_dir / "seminole.geojson")
+                    fallback.load()
+                    candidates = fallback.query(bbox_t)
+                    provider_warnings.append("geometry_provider_fallback:local_geojson")
+                except Exception:
+                    # Keep the original error warning and proceed with empty candidates.
+                    pass
 
         # Filter to true intersections when possible.
         intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
 
+        _append_search_debug(
+            {
+                "event": "request",
+                "county": county_key,
+                "payload": payload,
+                "bbox": bbox_t,
+                "candidates_count": len(candidates),
+                "intersecting_count": len(intersecting),
+            }
+        )
+
         warnings: list[str] = []
+        if provider_warnings:
+            warnings.extend(provider_warnings)
         if not candidates:
             warnings.append("No parcel candidates returned for bbox")
         if candidates and not intersecting:
@@ -477,6 +544,16 @@ if app:
         live_error_reason: str | None = None
         zoning_options: list[str] = []
         future_land_use_options: list[str] = []
+        field_stats: dict[str, Any] = {
+            "scanned": 0,
+            "present": {
+                "living_area_sqft": 0,
+                "lot_size_sqft": 0,
+                "lot_size_acres": 0,
+                "zoning": 0,
+                "future_land_use": 0,
+            },
+        }
         try:
             parcel_ids = [f.parcel_id for f in intersecting]
 
@@ -490,7 +567,8 @@ if app:
             # Only applies when the request is not asking us to enrich missing data.
             # If enrich=true, we need to consider parcels not yet cached.
             raw_filters = payload.get("filters")
-            enrich_requested = bool(payload.get("enrich", False))
+            explicit_enrich = payload.get("enrich", None)
+            enrich_requested = bool(explicit_enrich) if explicit_enrich is not None else False
 
             # Baseline (unfiltered) option lists must be computed from the polygon/radius
             # candidates, regardless of any attribute filters.
@@ -498,6 +576,25 @@ if app:
 
             # Load cached rows up front so we can determine which live IDs are missing.
             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
+
+            # If any attribute filters are present and the UI did not explicitly
+            # disable enrichment, enable best-effort enrichment.
+            compiled_filters: list[Any] = []
+            try:
+                compiled_filters = compile_filters(raw_filters)
+                filters_present = len(compiled_filters) > 0
+            except Exception:
+                compiled_filters = []
+                filters_present = False
+
+            # STRICT attribute filtering mode:
+            # - When the user supplies any attribute filters (sqft/acres/beds/baths/year/zoning/FLU/etc),
+            #   missing values MUST fail the filter.
+            # - Soft-missing is only allowed for polygon-only browsing (no attribute filters).
+            strict_attribute_filters = bool(filters_present)
+
+            if explicit_enrich is None and filters_present:
+                enrich_requested = True
 
             if live:
                 from florida_property_scraper.pa.schema import PAProperty
@@ -681,14 +778,230 @@ if app:
                             county=county_key, parcel_ids=parcel_ids
                         )
 
-                # Optional: inline enrichment of the first N results.
-                inline_enrich = bool(payload.get("enrich", False))
+                # Optional: inline enrichment via OCPA.
+                # This can be slow / blocked and has caused long-hanging search requests.
+                # Default to OFF unless filters require OCPA-only fields (ex: living area).
+                inline_ocpa_pref = payload.get("inline_ocpa", None)
+                inline_ocpa_enabled = False
+                try:
+                    disable_inline = os.getenv("FPS_DISABLE_INLINE_OCPA", "").strip() in {
+                        "1",
+                        "true",
+                        "True",
+                    }
+                except Exception:
+                    disable_inline = False
+
+                ocpa_sensitive_fields = {
+                    # Not available from FDOR centroids.
+                    "living_area_sqft",
+                    "beds",
+                    "baths",
+                    "zoning",
+                    "zoning_norm",
+                    "future_land_use_norm",
+                    "total_value",
+                    "land_value",
+                    "building_value",
+                }
+                needs_ocpa_fields = any(
+                    getattr(c, "field", None) in ocpa_sensitive_fields
+                    for c in (compiled_filters or [])
+                )
+
+                try:
+                    if inline_ocpa_pref is not None:
+                        inline_ocpa_enabled = bool(inline_ocpa_pref)
+                    else:
+                        inline_ocpa_enabled = (
+                            os.getenv("FPS_INLINE_OCPA", "").strip() in {"1", "true", "True"}
+                        ) or (bool(enrich_requested) and bool(needs_ocpa_fields))
+                except Exception:
+                    inline_ocpa_enabled = False
+
+                if disable_inline:
+                    inline_ocpa_enabled = False
+
+                inline_enrich = bool(enrich_requested) and bool(inline_ocpa_enabled)
                 if inline_enrich and county_key == "orange" and fdor_enabled:
                     inline_cap = int(payload.get("enrich_limit", 5) or 0)
                     if inline_cap < 0:
                         inline_cap = 0
-                    inline_cap = min(inline_cap, 25)
-                    ids_to_enrich = [pid for pid in parcel_ids if pid][:inline_cap]
+                    # When the caller didn't explicitly request inline OCPA but filters
+                    # require it (e.g. living area), raise the cap to improve chances
+                    # of returning non-empty filtered results.
+                    if inline_ocpa_pref is None and needs_ocpa_fields:
+                        try:
+                            inline_cap = max(
+                                inline_cap,
+                                int(
+                                    min(
+                                        max(limit * (6 if strict_attribute_filters else 4), 50),
+                                        250,
+                                    )
+                                ),
+                            )
+                        except Exception:
+                            inline_cap = max(inline_cap, 50)
+                    inline_cap = min(inline_cap, 250)
+
+                    # Guardrail: inline enrichment can be slow (OCPA HTML + rate limiting).
+                    # Never let it block the search request indefinitely.
+                    try:
+                        import time as _time
+
+                        # In strict mode we prefer correctness over speed.
+                        # OCPA HTML fetches are slow enough that 60s can be too tight to
+                        # find any strict matches in a large polygon.
+                        default_budget = "120" if strict_attribute_filters else "20"
+                        inline_budget_s = float(
+                            os.getenv("INLINE_ENRICH_BUDGET_S", default_budget) or default_budget
+                        )
+                    except Exception:
+                        inline_budget_s = 120.0 if strict_attribute_filters else 20.0
+                    inline_deadline = None
+                    if inline_cap > 0 and inline_budget_s > 0:
+                        try:
+                            inline_deadline = _time.time() + float(inline_budget_s)
+                        except Exception:
+                            inline_deadline = None
+
+                    # Prefer enriching candidates that have a chance to match
+                    # cheap/non-OCPA filters (notably lot size), so we don't waste
+                    # OCPA requests on obviously-ineligible parcels.
+                    eligible_ids: list[str] = [pid for pid in parcel_ids if pid]
+
+                    def _pa_lot_sqft(pid: str) -> float:
+                        pa_tmp = pa_by_id.get(pid)
+                        if pa_tmp is None:
+                            return 0.0
+                        try:
+                            land_sf = float(getattr(pa_tmp, "land_sf", 0) or 0)
+                        except Exception:
+                            land_sf = 0.0
+                        try:
+                            land_acres = float(getattr(pa_tmp, "land_acres", 0) or 0)
+                        except Exception:
+                            land_acres = 0.0
+                        if land_sf <= 0 and land_acres > 0:
+                            land_sf = land_acres * 43560.0
+                        return float(land_sf or 0)
+
+                    if isinstance(raw_filters, dict):
+                        min_lot_sqft_v: float | None = None
+                        max_lot_sqft_v: float | None = None
+
+                        try:
+                            v = raw_filters.get("min_lot_size_sqft")
+                            if v is not None:
+                                min_lot_sqft_v = float(_as_float(v))
+                        except Exception:
+                            min_lot_sqft_v = None
+                        try:
+                            v = raw_filters.get("max_lot_size_sqft")
+                            if v is not None:
+                                max_lot_sqft_v = float(_as_float(v))
+                        except Exception:
+                            max_lot_sqft_v = None
+
+                        # UI shorthand: acres.
+                        if min_lot_sqft_v is None:
+                            try:
+                                v = raw_filters.get("min_acres")
+                                if v is not None:
+                                    a = float(_as_float(v))
+                                    if a > 0:
+                                        min_lot_sqft_v = a * 43560.0
+                            except Exception:
+                                pass
+                        if max_lot_sqft_v is None:
+                            try:
+                                v = raw_filters.get("max_acres")
+                                if v is not None:
+                                    a = float(_as_float(v))
+                                    if a > 0:
+                                        max_lot_sqft_v = a * 43560.0
+                            except Exception:
+                                pass
+
+                        # Legacy unit+value.
+                        if min_lot_sqft_v is None and max_lot_sqft_v is None:
+                            try:
+                                unit = str(raw_filters.get("lot_size_unit") or "").strip().lower()
+                                min_lot = raw_filters.get("min_lot_size")
+                                max_lot = raw_filters.get("max_lot_size")
+                                if unit == "acres":
+                                    if min_lot is not None:
+                                        min_lot_sqft_v = float(_as_float(min_lot)) * 43560.0
+                                    if max_lot is not None:
+                                        max_lot_sqft_v = float(_as_float(max_lot)) * 43560.0
+                                elif unit:
+                                    if min_lot is not None:
+                                        min_lot_sqft_v = float(_as_float(min_lot))
+                                    if max_lot is not None:
+                                        max_lot_sqft_v = float(_as_float(max_lot))
+                            except Exception:
+                                pass
+
+                        if min_lot_sqft_v is not None or max_lot_sqft_v is not None:
+                            filtered_ids: list[str] = []
+                            for pid in eligible_ids:
+                                ls = _pa_lot_sqft(pid)
+                                if min_lot_sqft_v is not None and ls < float(min_lot_sqft_v):
+                                    continue
+                                if max_lot_sqft_v is not None and float(max_lot_sqft_v) > 0 and ls > float(max_lot_sqft_v):
+                                    continue
+                                filtered_ids.append(pid)
+                            eligible_ids = filtered_ids
+
+                        # Heuristic ordering: when sqft filters are present, prioritize parcels
+                        # that look like improved residential (year_built present + lower land_use_code).
+                        try:
+                            wants_sqft = False
+                            try:
+                                wants_sqft = bool(_as_float(raw_filters.get("min_sqft")) or _as_float(raw_filters.get("max_sqft")))
+                            except Exception:
+                                wants_sqft = False
+
+                            if wants_sqft and eligible_ids:
+                                def _sort_key(pid: str) -> tuple[int, int, int]:
+                                    pa_tmp = pa_by_id.get(pid)
+                                    yb = 0
+                                    try:
+                                        yb = int(getattr(pa_tmp, "year_built", 0) or 0)
+                                    except Exception:
+                                        yb = 0
+                                    luc = 9999
+                                    try:
+                                        s = str(getattr(pa_tmp, "land_use_code", "") or "").strip()
+                                        if s.isdigit():
+                                            luc = int(s)
+                                    except Exception:
+                                        luc = 9999
+                                    # year_built=0 tends to be vacant/unknown; push it later.
+                                    has_yb = 1 if yb > 0 else 0
+                                    return (0 if luc < 100 else 1, 0 if has_yb else 1, luc)
+
+                                eligible_ids = sorted(eligible_ids, key=_sort_key)
+                        except Exception:
+                            pass
+
+                    ids_to_enrich: list[str] = []
+                    for pid in eligible_ids:
+                        existing = pa_by_id.get(pid)
+                        if existing is None:
+                            ids_to_enrich.append(pid)
+                            continue
+                        try:
+                            needs_living = float(existing.living_sf or 0) <= 0 and float(existing.building_sf or 0) <= 0
+                        except Exception:
+                            needs_living = True
+                        needs_zoning = not str(getattr(existing, "zoning", "") or "").strip()
+                        needs_flu = not str(getattr(existing, "future_land_use", "") or "").strip()
+                        if needs_living or needs_zoning or needs_flu:
+                            ids_to_enrich.append(pid)
+                        if len(ids_to_enrich) >= inline_cap:
+                            break
                     if ids_to_enrich:
                         try:
                             from florida_property_scraper.parcels.live.fdor_centroids import (
@@ -700,7 +1013,104 @@ if app:
 
                             client = FDORCentroidClient()
                             fdor_rows = client.fetch_parcels(ids_to_enrich, include_geometry=True)
+                            # Early-stop once we have *some* strict matches.
+                            # Avoid a full O(n^2) rescan after every upsert; just evaluate
+                            # the newly enriched record and keep a running count.
+                            strict_match_target = 0
+                            strict_match_count = 0
+                            if strict_attribute_filters:
+                                try:
+                                    # Prefer returning at least a handful of correct matches quickly
+                                    # over spending the entire budget trying to fill the whole `limit`.
+                                    strict_match_target = max(1, min(int(limit or 0), 5))
+                                except Exception:
+                                    strict_match_target = 1
+
+                            def _fields_for_pa(_pa: Any) -> dict[str, object]:
+                                fields_tmp: dict[str, object] = {}
+                                try:
+                                    fields_tmp.update(_pa.to_dict())
+                                except Exception:
+                                    return fields_tmp
+                                try:
+                                    fields_tmp.update(compute_ui_fields(fields_tmp))
+                                except Exception:
+                                    pass
+
+                                # Stable filter aliases.
+                                try:
+                                    living = float(_pa.living_sf or 0) or float(_pa.building_sf or 0) or 0.0
+                                    fields_tmp["living_area_sqft"] = living if living > 0 else None
+                                except Exception:
+                                    fields_tmp["living_area_sqft"] = None
+                                try:
+                                    land_sf = float(_pa.land_sf or 0) or 0.0
+                                    land_acres = float(_pa.land_acres or 0) or 0.0
+                                    lot_sqft = land_sf
+                                    if lot_sqft <= 0 and land_acres > 0:
+                                        lot_sqft = land_acres * 43560.0
+                                    fields_tmp["lot_size_sqft"] = lot_sqft if lot_sqft > 0 else None
+                                except Exception:
+                                    fields_tmp["lot_size_sqft"] = None
+                                try:
+                                    lot_acres = float(_pa.land_acres or 0) or 0.0
+                                    if lot_acres <= 0:
+                                        lot_sqft_any = fields_tmp.get("lot_size_sqft")
+                                        if isinstance(lot_sqft_any, (int, float, str)):
+                                            lot_sqft = float(lot_sqft_any) or 0.0
+                                        else:
+                                            lot_sqft = 0.0
+                                        lot_acres = (lot_sqft / 43560.0) if lot_sqft > 0 else 0.0
+                                    fields_tmp["lot_size_acres"] = lot_acres if lot_acres > 0 else None
+                                except Exception:
+                                    fields_tmp["lot_size_acres"] = None
+                                try:
+                                    fields_tmp["zoning_norm"] = _norm_choice(_pa.zoning)
+                                except Exception:
+                                    fields_tmp["zoning_norm"] = "UNKNOWN"
+                                try:
+                                    flu_raw = str(getattr(_pa, "future_land_use", "") or "").strip()
+                                    fields_tmp["future_land_use_norm"] = _norm_choice(flu_raw)
+                                except Exception:
+                                    fields_tmp["future_land_use_norm"] = "UNKNOWN"
+                                try:
+                                    pt = (_pa.use_type or _pa.land_use_code or "").strip()
+                                    fields_tmp["property_type"] = pt or None
+                                except Exception:
+                                    fields_tmp["property_type"] = None
+
+                                return fields_tmp
+
+                            def _is_strict_match(_pa: Any) -> bool:
+                                if strict_match_target <= 0:
+                                    return False
+                                try:
+                                    return bool(apply_filters(_fields_for_pa(_pa), compiled_filters))
+                                except Exception:
+                                    return False
+
+                            if strict_match_target > 0:
+                                try:
+                                    # Seed the counter from whatever is already cached.
+                                    for _pid in eligible_ids:
+                                        _pa0 = pa_by_id.get(_pid)
+                                        if _pa0 is None:
+                                            continue
+                                        if _is_strict_match(_pa0):
+                                            strict_match_count += 1
+                                            if strict_match_count >= strict_match_target:
+                                                break
+                                except Exception:
+                                    strict_match_count = 0
+
                             for pid in ids_to_enrich:
+                                if inline_deadline is not None:
+                                    try:
+                                        if _time.time() > inline_deadline:
+                                            warnings.append("inline_enrich_budget_exhausted")
+                                            break
+                                    except Exception:
+                                        pass
                                 existing = pa_by_id.get(pid)
                                 row = fdor_rows.get(pid)
                                 base_sources: list[dict] = []
@@ -708,6 +1118,13 @@ if app:
                                     base_sources.append({"name": "fdor_centroids", "url": row.raw_source_url})
                                 try:
                                     ocpa = ocpa_enrich(str(pid))
+                                    if isinstance(ocpa, dict) and ocpa.get("error_reason"):
+                                        try:
+                                            er = str(ocpa.get("error_reason") or "").strip() or "unknown"
+                                        except Exception:
+                                            er = "unknown"
+                                        warnings.append(f"inline_ocpa_enrich_error_reason:{pid}:{er}")
+                                        continue
                                     ocpa_url = str(ocpa.get("source_url") or "").strip()
                                     ocpa_sources = (
                                         [{"name": "orange_ocpa", "url": ocpa_url}] if ocpa_url else []
@@ -722,6 +1139,7 @@ if app:
 
                                     land_use = str(ocpa.get("land_use") or "").strip()
                                     zoning_v = str(ocpa.get("zoning") or "").strip()
+                                    future_land_use_v = str(ocpa.get("future_land_use") or "").strip()
                                     property_type_v = str(ocpa.get("property_type") or "").strip()
                                     year_built = int(ocpa.get("year_built") or 0)
                                     living_sf = float(ocpa.get("living_area_sqft") or 0)
@@ -742,6 +1160,7 @@ if app:
                                         land_use_code=land_use or (existing.land_use_code if existing else ""),
                                         use_type=(property_type_v or land_use) or (existing.use_type if existing else ""),
                                         zoning=zoning_v or (existing.zoning if existing else ""),
+                                        future_land_use=future_land_use_v or (existing.future_land_use if existing else ""),
                                         land_sf=float((row.land_sqft if row is not None else (existing.land_sf if existing else 0)) or 0),
                                         year_built=year_built or (existing.year_built if existing else 0),
                                         living_sf=living_sf or (existing.living_sf if existing else 0),
@@ -766,6 +1185,17 @@ if app:
                                     )
                                     store.upsert(pa_rec)
                                     enriched_live_ids.add(str(pid))
+                                    pa_by_id[str(pid)] = pa_rec
+
+                                    # Early-stop to avoid needless enrichment.
+                                    if strict_match_target > 0:
+                                        try:
+                                            if _is_strict_match(pa_rec):
+                                                strict_match_count += 1
+                                            if strict_match_count >= strict_match_target:
+                                                break
+                                        except Exception:
+                                            pass
                                 except Exception as e:
                                     warnings.append(f"inline_ocpa_enrich_failed:{pid}:{e}")
 
@@ -777,33 +1207,115 @@ if app:
             # Otherwise the first run in a new area can return empty option arrays.
             baseline_pa_by_id = store.get_many(county=county_key, parcel_ids=baseline_parcel_ids)
 
+            def _looks_like_code(s: str) -> bool:
+                import re
+
+                t = (s or "").strip()
+                if not t:
+                    return True
+                # Treat purely numeric / slash-y strings as non-human (ex: "01/001", "089").
+                if re.fullmatch(r"[0-9\s\-/\.]+", t):
+                    return True
+                return False
+
+            def _candidate_coverage() -> dict[str, dict[str, object]]:
+                total = int(len(baseline_parcel_ids) or 0)
+                present = {
+                    "living_area_sqft": 0,
+                    "lot_size_sqft": 0,
+                    "lot_size_acres": 0,
+                    "zoning": 0,
+                    "future_land_use": 0,
+                }
+                for pid in baseline_parcel_ids:
+                    pa = baseline_pa_by_id.get(pid)
+                    if pa is None:
+                        continue
+                    try:
+                        living = float(pa.living_sf or 0) or float(pa.building_sf or 0) or 0.0
+                        if living > 0:
+                            present["living_area_sqft"] += 1
+                    except Exception:
+                        pass
+                    try:
+                        land_sf = float(pa.land_sf or 0) or 0.0
+                        land_acres = float(pa.land_acres or 0) or 0.0
+                        if land_sf > 0 or land_acres > 0:
+                            present["lot_size_sqft"] += 1
+                            present["lot_size_acres"] += 1
+                    except Exception:
+                        pass
+                    try:
+                        if str(getattr(pa, "zoning", "") or "").strip():
+                            present["zoning"] += 1
+                    except Exception:
+                        pass
+                    try:
+                        if str(getattr(pa, "future_land_use", "") or "").strip():
+                            present["future_land_use"] += 1
+                    except Exception:
+                        pass
+
+                out: dict[str, dict[str, object]] = {}
+                for k, v in present.items():
+                    frac = (float(v) / float(total)) if total > 0 else 0.0
+                    out[k] = {
+                        "present": int(v),
+                        "total": int(total),
+                        "coverage": frac,
+                    }
+                return out
+
+            field_stats["coverage_candidates"] = _candidate_coverage()
+
             def _baseline_options(field_name: str) -> list[str]:
-                any_real = False
                 values: set[str] = set()
                 for pa in baseline_pa_by_id.values():
                     try:
                         raw = getattr(pa, field_name, "")
                     except Exception:
                         raw = ""
-
-                    # Practical fallback: many counties do not explicitly publish a
-                    # separate Future Land Use field; treat PA use_type as a proxy.
-                    if field_name == "future_land_use":
-                        if not str(raw or "").strip():
-                            raw = (pa.use_type or pa.land_use_code or "")
-
                     s = str(raw or "").strip()
-                    if s:
-                        any_real = True
-                        values.add(_norm_choice(s))
-                    else:
-                        values.add("UNKNOWN")
-                if not any_real:
-                    return []
+                    if not s:
+                        continue
+                    if field_name == "future_land_use" and _looks_like_code(s):
+                        continue
+                    values.add(_norm_choice(s))
                 return sorted(values)
 
             zoning_options = _baseline_options("zoning")
             future_land_use_options = _baseline_options("future_land_use")
+
+            # When strict filters are enabled, include explicit coverage warnings for
+            # fields the user is attempting to filter on.
+            if strict_attribute_filters:
+                required: set[str] = set()
+                for c in compiled_filters or []:
+                    try:
+                        required.add(str(getattr(c, "field", "") or ""))
+                    except Exception:
+                        continue
+
+                # Map normalized filter fields back to their PA source fields.
+                required_pa_fields: set[str] = set()
+                for f in required:
+                    if f in {"zoning_norm"}:
+                        required_pa_fields.add("zoning")
+                    elif f in {"future_land_use_norm"}:
+                        required_pa_fields.add("future_land_use")
+                    elif f in {"living_area_sqft", "lot_size_sqft", "lot_size_acres"}:
+                        required_pa_fields.add(f)
+
+                cov = field_stats.get("coverage_candidates") or {}
+                if isinstance(cov, dict):
+                    for f in sorted(required_pa_fields):
+                        stats_f = cov.get(f)
+                        if not isinstance(stats_f, dict):
+                            continue
+                        p = stats_f.get("present")
+                        t = stats_f.get("total")
+                        if isinstance(p, int) and isinstance(t, int) and t > 0:
+                            warnings.append(f"coverage:{f}:{p}/{t}")
 
             # Optional: SQL-side filtering against cached columns.
             # Only applies when the request is not asking us to enrich missing data.
@@ -892,6 +1404,9 @@ if app:
                 pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
 
             hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
+
+            # Strict mode: missing values must fail attribute filters. Soft-missing is
+            # reserved for polygon-only browsing (no attribute filters).
         finally:
             store.close()
 
@@ -962,6 +1477,8 @@ if app:
             fields.update(computed)
             fields.update(hover)
 
+            # Soft-missing behavior is disabled when attribute filters are present.
+
             # Provide stable, UI-friendly aliases for filtering.
             # These keys are treated as authoritative only when PA has a record.
             if pa is not None:
@@ -971,7 +1488,11 @@ if app:
                 except Exception:
                     fields["living_area_sqft"] = None
                 try:
-                    lot_sqft = float(pa.land_sf or 0) or 0.0
+                    land_sf = float(pa.land_sf or 0) or 0.0
+                    land_acres = float(pa.land_acres or 0) or 0.0
+                    lot_sqft = land_sf
+                    if lot_sqft <= 0 and land_acres > 0:
+                        lot_sqft = land_acres * 43560.0
                     fields["lot_size_sqft"] = lot_sqft if lot_sqft > 0 else None
                 except Exception:
                     fields["lot_size_sqft"] = None
@@ -1024,9 +1545,7 @@ if app:
                 except Exception:
                     fields["zoning_norm"] = "UNKNOWN"
                 try:
-                    flu_raw = (pa.future_land_use or "").strip() or (
-                        (pa.use_type or pa.land_use_code or "").strip()
-                    )
+                    flu_raw = str(getattr(pa, "future_land_use", "") or "").strip()
                     fields["future_land_use_norm"] = _norm_choice(flu_raw)
                 except Exception:
                     fields["future_land_use_norm"] = "UNKNOWN"
@@ -1035,6 +1554,64 @@ if app:
             if not flags.sale_filtering:
                 for k in sale_fields:
                     fields.pop(k, None)
+
+            # Track field availability for UI warnings/debug.
+            try:
+                field_stats["scanned"] += 1
+                if fields.get("living_area_sqft") not in (None, "", 0):
+                    field_stats["present"]["living_area_sqft"] += 1
+                if fields.get("lot_size_sqft") not in (None, "", 0):
+                    field_stats["present"]["lot_size_sqft"] += 1
+                if fields.get("lot_size_acres") not in (None, "", 0):
+                    field_stats["present"]["lot_size_acres"] += 1
+                if str(fields.get("zoning") or "").strip():
+                    field_stats["present"]["zoning"] += 1
+                if str(fields.get("future_land_use") or "").strip():
+                    field_stats["present"]["future_land_use"] += 1
+            except Exception:
+                pass
+
+            # Capture one representative candidate BEFORE filters are applied.
+            if "sample_candidate" not in field_stats:
+                try:
+                    raw_subset: dict[str, object] = {"parcel_id": feat.parcel_id}
+                    if pa is not None:
+                        raw_subset.update(
+                            {
+                                "land_sf": getattr(pa, "land_sf", None),
+                                "land_acres": getattr(pa, "land_acres", None),
+                                "living_sf": getattr(pa, "living_sf", None),
+                                "building_sf": getattr(pa, "building_sf", None),
+                                "bedrooms": getattr(pa, "bedrooms", None),
+                                "bathrooms": getattr(pa, "bathrooms", None),
+                                "year_built": getattr(pa, "year_built", None),
+                                "zoning": getattr(pa, "zoning", None),
+                                "future_land_use": getattr(pa, "future_land_use", None),
+                                "use_type": getattr(pa, "use_type", None),
+                                "land_use_code": getattr(pa, "land_use_code", None),
+                                "parser_version": getattr(pa, "parser_version", None),
+                                "source_url": getattr(pa, "source_url", None),
+                            }
+                        )
+
+                    norm_subset = {
+                        "living_area_sqft": fields.get("living_area_sqft"),
+                        "lot_size_sqft": fields.get("lot_size_sqft"),
+                        "lot_size_acres": fields.get("lot_size_acres"),
+                        "beds": fields.get("beds"),
+                        "baths": fields.get("baths"),
+                        "zoning": fields.get("zoning"),
+                        "zoning_norm": fields.get("zoning_norm"),
+                        "future_land_use_norm": fields.get("future_land_use_norm"),
+                        "property_type": fields.get("property_type"),
+                    }
+
+                    field_stats["sample_candidate"] = {
+                        "raw": raw_subset,
+                        "normalized": norm_subset,
+                    }
+                except Exception:
+                    pass
 
             if not apply_filters(fields, filters):
                 continue
@@ -1096,9 +1673,7 @@ if app:
                 owner_name = "; ".join([n for n in (pa.owner_names or []) if n]) or owner_name
                 situs_address = pa.situs_address or situs_address
                 zoning = (pa.zoning or "").strip()
-                future_land_use = (pa.future_land_use or "").strip() or (
-                    (pa.use_type or pa.land_use_code or "").strip()
-                )
+                future_land_use = (pa.future_land_use or "").strip()
                 land_use = (pa.use_type or pa.land_use_code or "").strip()
                 property_class = (pa.property_class or "").strip()
                 living_area_sqft = float(pa.living_sf or 0) or None
@@ -1246,8 +1821,20 @@ if app:
         if live_error_reason:
             warnings.append(f"live_error_reason: {live_error_reason}")
 
+        _append_search_debug(
+            {
+                "event": "result",
+                "county": county_key,
+                "candidate_count": len(intersecting),
+                "filtered_count": len(records),
+                "warnings": warnings,
+                "field_stats": field_stats,
+            }
+        )
+
         return JSONResponse(
             {
+                "search_id": search_id,
                 # Backwards-compatible keys
                 "county": county_key,
                 "count": len(results),
@@ -1257,11 +1844,14 @@ if app:
                 "future_land_use_options": future_land_use_options,
                 "summary": {
                     "count": len(records),
+                    "candidate_count": len(intersecting),
+                    "filtered_count": len(records),
                     "source_counts": source_counts,
                     "source_counts_legacy": legacy_source_counts,
                 },
                 "records": records,
                 "warnings": warnings,
+                "field_stats": field_stats,
                 "error_reason": live_error_reason,
             }
         )

@@ -111,6 +111,7 @@ def compile_filters(raw: Any) -> List[Condition]:
     - An object with range-style keys, e.g.
       {
         min_sqft, max_sqft,
+                min_acres, max_acres,
         min_year_built, max_year_built,
         min_beds, min_baths,
         min_value, max_value,
@@ -159,6 +160,10 @@ def compile_filters(raw: Any) -> List[Condition]:
 
         _add("living_area_sqft", ">=", _num(raw.get("min_sqft")))
         _add("living_area_sqft", "<=", _num(raw.get("max_sqft")))
+
+        # Explicit lot size acres (UI shorthand).
+        _add("lot_size_acres", ">=", _num(raw.get("min_acres")))
+        _add("lot_size_acres", "<=", _num(raw.get("max_acres")))
 
         # Lot size filters.
         # Preferred: explicit sqft keys.
@@ -281,7 +286,15 @@ def compile_triggers(raw: Any) -> List[Trigger]:
 
 
 def apply_filters(fields: Dict[str, Any], filters: Sequence[Condition]) -> bool:
+    missing_ok_raw = fields.get("__missing_ok_fields")
+    missing_ok: set[str] = set()
+    if isinstance(missing_ok_raw, (list, tuple, set)):
+        missing_ok = {str(x) for x in missing_ok_raw if str(x)}
+
     for f in filters:
+        present, _v = _get_field(fields, f.field)
+        if (not present) and f.field in missing_ok:
+            continue
         if not eval_condition(fields, f):
             return False
     return True

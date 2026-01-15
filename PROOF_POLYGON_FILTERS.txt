@@ -1,0 +1,137 @@
+== open http://127.0.0.1:8000/ ==
+leaflet_container_count: 1
+leaflet_draw_toolbar_count: 2
+leaflet_draw_polygon_button_count: 1
+== select polygon tool ==
+== draw polygon (5 clicks) ==
+== finish polygon ==
+== click Run (baseline) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
+observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
+observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
+[browser:log] [FILTERDBG] response {search_id: f75846120033, candidate_count: 1985, filtered_count: 25, zoning_options_len: 11, future_land_use_options_len: 8}
+baseline: {
+  search_id: 'f75846120033',
+  candidate_count: 1985,
+  filtered_count: 25,
+  zoning_options_len: 11,
+  future_land_use_options_len: 8
+}
+== set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
+auto_enrich_checked: true
+== click Run (filtered) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: true}
+observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
+observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
+payload_summary: {
+  county: 'orange',
+  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
+  min_sqft: 2000,
+  max_sqft: 2700,
+  min_acres: 0.5,
+  zoning_in:payload_summary: {
+  county: 'orange',
+  bbox: [ -81.44989, 28.501583, -[browser:log] [FILTERDBG] response {search_id: b67120d1c62d, candidate_count: 1985, filtered_count: 5, zoning_options_len: 12, future_land_use_options_len: 8}
+filtered: {
+  search_id: 'b67120d1c62d',
+  candidate_count: 1985,
+  filtered_count: 5,
+  zoning_options_len: 12,
+  future_land_use_options_len: 8,
+  warnings_len:filtereturned_record_coverage: {
+  total: 5,
+  living_area_sqft: { present: 5, coverage: 1 },
+  lot_size_acres: { present: 5, coverage: 1 },
+  zoning: { present: 5 },
+returned_record_coverage: {
+  total:sample_record_fields: {
+  parcel_id: '362229065601021',
+  living_area_sqft: 2264,
+  lot_size_acres: 0.5294306703397612,
+  zoning: 'ORL-R-1A/T/HP/AN',
+  future_lansample_record_fields: {
+  parceldebug_log_path: .fps_parcels_search_debug.jsonl
+debug_events_found: 2
+debug_request_summary: {
+  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
+  candidates_count: 1985,
+  intersecting_count: 1985,
+  has_filters: true,
+  fildebug_request_summary: {
+  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
+  candidates_count: 1985,
+  intersecting_count: 1985,
+  has_filters: true,
+  filter_keys: [
+    'min_sqft',           'max_sqft',
+    'min_acres',          'max_acres',
+    'min_lot_size_sqft',  'max_lot_size_sqft',
+    'lot_size_unit',      'min_lot_size',
+    'max_lot_size',       'min_beds',
+    'min_baths',          'min_year_built',
+    'max_year_built',     'property_type',
+    'zoning',             'zoning_in',
+    'future_land_use_in', 'min_value',
+    'max_value',          'min_land_value',
+    'max_land_value',     'min_building_value',
+    'max_building_value', 'last_sale_date_start',
+    'last_sale_date_end'
+  ]
+}
+debug_result_summary: {
+  candidate_count: 1985,
+  filtered_count: 5,
+  warnings: [
+    'coverage:living_area_sqft:53/1985',
+    'coverage:lot_size_acres:1985/1985',
+    'coverage:lot_size_sqft:1985/1985'
+  ]
+}
+debug_field_stats_present: {
+  living_area_sqft: 53,
+  lot_size_sqft: 1985,
+  lot_size_acres: 1985,
+  zoning: 53,
+  future_land_use: 29
+}
+debug_coverage_candidates: {
+  living_area_sqft: { present: 53, total: 1985, coverage: 0.026700251889168764 },
+  lot_size_sqft: { present: 1985, total: 1985, coverage: 1 },
+  lot_size_acres: { present: 1985, total: 1985, coveragdebug_sample_candidate: {
+  raw: {
+    parcel_id: '332229459704010',
+    land_sf: 5269,
+    land_acres: 0,
+    living_sf: 0,
+    building_sf: 0,
+    bedrooms: 0,
+debug_sample_candidate: {
+  raw: {
+    parcel_id: '332229459704010',
+    land_sf: 5269,
+    land_acres: 0,
+    living_sf: 0,
+    building_sf: 0,
+    bedrooms: 0,
+    bathrooms: 0,
+    year_built: 0,
+    zoning: '',
+    future_land_use: '',
+    use_type: '089',
+    land_use_code: '089',
+    parser_version: 'orange_ocpa:v1',
+    source_url: 'https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292233459704010'
+  },
+  normalized: {
+    living_area_sqft: null,
+    lot_size_sqft: 5269,
+    lot_size_acres: 0.12095959595959596,
+    beds: null,
+    baths: null,
+    zoning: '',
+    zoning_norm: 'UNKNOWN',
+    future_land_use_norm: 'UNKNOWN',
+    property_type: '089'
+  }
+}
+PASS

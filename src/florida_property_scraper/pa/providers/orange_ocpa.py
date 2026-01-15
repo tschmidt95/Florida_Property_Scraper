@@ -327,6 +327,61 @@ def _extract_land_use_and_zoning(html: str) -> tuple[Optional[str], Optional[str
     return land_use or None, zoning or None
 
 
+def _extract_future_land_use(html: str) -> Optional[str]:
+    """Best-effort extraction of Future Land Use (FLU) from OCPA detail HTML."""
+
+    if not html:
+        return None
+
+    # Common table pattern: <th>Future Land Use</th><td>VALUE</td>
+    m = re.search(
+        r"<t[hd][^>]*>\s*Future\s+Land\s+Use[^<]*</t[hd]>[\s\S]*?"
+        r"<t[hd][^>]*>(?P<val>[\s\S]*?)</t[hd]>",
+        html,
+        flags=re.I,
+    )
+    if m:
+        v = _strip_tags(m.group("val"))
+        if v:
+            return v
+
+    # Label/value inline text patterns.
+    txt = _strip_tags(html)
+    # Examples: "Future Land Use: Residential" or "Future Land Use Residential"
+    m = re.search(
+        r"\bFuture\s+Land\s+Use\b\s*(?:[:\-]\s*)?(?P<val>[A-Za-z][A-Za-z0-9\s\-/]{1,80})",
+        txt,
+        flags=re.I,
+    )
+    if m:
+        v = _norm_ws(m.group("val"))
+        if v:
+            return v
+
+    # Some pages abbreviate as FLU.
+    m = re.search(
+        r"\bFLU\b\s*(?:[:\-]\s*)?(?P<val>[A-Za-z][A-Za-z0-9\s\-/]{1,80})",
+        txt,
+        flags=re.I,
+    )
+    if m:
+        v = _norm_ws(m.group("val"))
+        if v:
+            return v
+
+    return None
+
+
+def _looks_like_code_value(v: str) -> bool:
+    t = _norm_ws(v)
+    if not t:
+        return True
+    # Codes like "01/001", "089", "01-001" are not user-friendly labels.
+    if re.fullmatch(r"[0-9\s\-/\.]+", t):
+        return True
+    return False
+
+
 def _extract_tax_year_values(html: str) -> tuple[Optional[float], Optional[float], Optional[float]]:
     """Return (land_value, building_value, market_value) for the latest year."""
     lower = (html or "").lower()
@@ -729,9 +784,19 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
         _set("property_type", v, lab)
 
     # Zoning
-    _set_from_norm("zoning", ["zoning", "zoningcode"], lambda x: _norm_ws(x))
+    _set_from_norm(
+        "zoning",
+        [
+            "zoning",
+            "zoningcode",
+            "municipalzoning",
+            "cityzoning",
+            "jurisdictionalzoning",
+        ],
+        lambda x: _norm_ws(x),
+    )
     if not out.get("zoning"):
-        v, lab = _pick(pairs, ["zoning"])
+        v, lab = _pick(pairs, ["zoning", "municipal zoning", "city zoning", "jurisdictional zoning"])
         _set("zoning", v, lab)
 
     # Future Land Use (FLU) (best-effort; not always present on OCPA)
@@ -759,6 +824,11 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
             ],
         )
         _set("future_land_use", v, lab)
+
+    # HTML regex fallback (covers pages where the label/value is not in a simple pair layout).
+    if not out.get("future_land_use"):
+        v = _extract_future_land_use(detail_html)
+        _set("future_land_use", v, "Future Land Use")
 
     # Fallback: land_use + zoning appear in the Land grid.
     land_use, zoning = _extract_land_use_and_zoning(detail_html)
@@ -789,11 +859,35 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
 
     _set_from_norm(
         "living_area_sqft",
-        ["livingarea", "heatedarea", "livingareasf", "livingareasqft"],
+        [
+            "livingarea",
+            "heatedarea",
+            "livingareasf",
+            "livingareasqft",
+            "totallivingarea",
+            "totalheatedarea",
+            "grosslivingarea",
+            "grossarea",
+            "buildingsqft",
+            "buildingsf",
+        ],
         lambda x: _as_float(x),
     )
     if not out.get("living_area_sqft"):
-        v, lab = _pick(pairs, ["living area", "heated area", "living sq", "gross living"])
+        v, lab = _pick(
+            pairs,
+            [
+                "living area",
+                "heated area",
+                "living sq",
+                "gross living",
+                "total living area",
+                "total heated area",
+                "building sq",
+                "building sf",
+                "gross area",
+            ],
+        )
         _set("living_area_sqft", _as_float(v) if v is not None else None, lab)
 
     _set_from_norm("land_value", ["landvalue"], lambda x: _as_float(x))
@@ -881,6 +975,17 @@ def enrich_parcel(parcel_id: str) -> Dict[str, Any]:
     v, lab = _pick_mortgage(["mortg", "date"])  # mortgage date
     if v:
         _set("mortgage_date", _as_date_iso(v) or _norm_ws(v), lab)
+
+    # If FLU isn't explicitly present on the page, fall back to a descriptive
+    # PA value (property_type or land_use) so the UI can still offer a useful
+    # multi-select option list.
+    if not out.get("future_land_use"):
+        pt = str(out.get("property_type") or "").strip()
+        lu = str(out.get("land_use") or "").strip()
+        if pt and not _looks_like_code_value(pt):
+            _set("future_land_use", pt, "Property Type")
+        elif lu and not _looks_like_code_value(lu):
+            _set("future_land_use", lu, "Land Use")
 
     # Emit provenance in required shape
     out["field_provenance"] = {

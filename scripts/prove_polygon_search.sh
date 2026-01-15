@@ -5,6 +5,36 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 
 export BASE_URL
 
+build_frontend_if_needed() {
+  if [[ ! -f web/dist/index.html ]]; then
+    return 0
+  fi
+
+  # Rebuild if any source file is newer than the built index.
+  if find web/src web/public -type f -newer web/dist/index.html -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if [[ -f web/package.json ]] && [[ web/package.json -nt web/dist/index.html ]]; then
+    return 0
+  fi
+  if [[ -f web/package-lock.json ]] && [[ web/package-lock.json -nt web/dist/index.html ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+if build_frontend_if_needed; then
+  if [[ ! -d web/node_modules ]]; then
+    echo "$ (cd web && npm ci)"
+    npm --prefix web ci
+  fi
+  echo "$ (cd web && npm run build)"
+  npm --prefix web run build
+else
+  echo "$ (cd web && npm run build)  # skipped (dist is up-to-date)"
+fi
+
 python -u - <<'PY'
 import json
 import os
@@ -63,6 +93,9 @@ def post_search_filters(poly: dict, filters: dict) -> dict:
     'include_geometry': False,
     'polygon_geojson': poly,
     'filters': filters,
+    # Keep this proof deterministic/fast: disable enrichment.
+    'enrich': False,
+    'enrich_limit': 0,
   }
   req = urllib.request.Request(
     f'{BASE_URL}/api/parcels/search',
@@ -160,3 +193,9 @@ PY
 echo
 echo "== UI smoke (Playwright): polygon + filters payload =="
 node web/scripts/smoke_polygon_run.mjs
+
+echo
+echo "== UI proof (Playwright): acceptance filters (min_sqft=2000,max_sqft=2700,min_acres=0.5) =="
+export FPS_SEARCH_DEBUG_LOG="${FPS_SEARCH_DEBUG_LOG:-.fps_parcels_search_debug.jsonl}"
+: > "$FPS_SEARCH_DEBUG_LOG" || true
+node web/scripts/smoke_polygon_filters.mjs 2>&1 | tee PROOF_POLYGON_FILTERS.txt

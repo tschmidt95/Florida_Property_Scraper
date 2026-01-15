@@ -52,6 +52,9 @@ export type ParcelSearchRequestV2 = {
 export type ParcelAttributeFilters = {
   min_sqft?: number | null;
   max_sqft?: number | null;
+  // Convenience keys: if present, backend should treat as lot_size_acres filters.
+  min_acres?: number | null;
+  max_acres?: number | null;
   lot_size_unit?: 'sqft' | 'acres' | null;
   min_lot_size?: number | null;
   max_lot_size?: number | null;

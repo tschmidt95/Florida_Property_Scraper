@@ -13,9 +13,7 @@ import './lib/leafletIcons';
 
 try {
   ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>,
+    <App />,
   );
 } catch (e) {
   // If React crashes before rendering, ensure we still show something.

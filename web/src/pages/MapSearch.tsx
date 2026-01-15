@@ -668,10 +668,14 @@ export default function MapSearch({
     };
     const minLotSizeSqft = hasLotSize ? toSqft(minLotSize) : null;
     const maxLotSizeSqft = hasLotSize ? toSqft(maxLotSize) : null;
+    const minAcres = hasLotSize && lotSizeUnit === 'acres' ? minLotSize : null;
+    const maxAcres = hasLotSize && lotSizeUnit === 'acres' ? maxLotSize : null;
 
     const filters: ParcelAttributeFilters = {
       min_sqft: toIntOrNull(filterForm.minSqft),
       max_sqft: toIntOrNull(filterForm.maxSqft),
+      min_acres: minAcres,
+      max_acres: maxAcres,
       min_lot_size_sqft: minLotSizeSqft,
       max_lot_size_sqft: maxLotSizeSqft,
       lot_size_unit: null,
@@ -696,7 +700,10 @@ export default function MapSearch({
     };
     const hasAnyFilters = Object.values(filters).some((v) => v !== null && v !== undefined && v !== '');
 
-    const enrich = hasAnyFilters ? autoEnrichMissing : false;
+    // If the user wants auto-enrichment, honor it even for baseline runs.
+    // This is especially important for counties where zoning/FLU options come
+    // from live enrichment.
+    const enrich = autoEnrichMissing;
 
     const payload: any = {
       county,
@@ -705,7 +712,7 @@ export default function MapSearch({
       include_geometry: false,
       filters: hasAnyFilters ? filters : undefined,
       enrich,
-      enrich_limit: enrich ? 25 : undefined,
+      enrich_limit: enrich ? 10 : undefined,
     };
 
     if (poly) {
@@ -878,6 +885,70 @@ export default function MapSearch({
     const payload = built.payload;
     setLastRequest(payload);
     console.log('[Run] payload', payload);
+
+    try {
+      const poly = (payload as any)?.polygon_geojson;
+      const coords = poly?.coordinates?.[0];
+      const ringLen = Array.isArray(coords) ? coords.length : 0;
+
+      let bbox: any = null;
+      if (Array.isArray(coords) && coords.length) {
+        let minLng = Infinity;
+        let minLat = Infinity;
+        let maxLng = -Infinity;
+        let maxLat = -Infinity;
+        for (const p of coords) {
+          if (!Array.isArray(p) || p.length < 2) continue;
+          const lng = Number(p[0]);
+          const lat = Number(p[1]);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+          minLng = Math.min(minLng, lng);
+          minLat = Math.min(minLat, lat);
+          maxLng = Math.max(maxLng, lng);
+          maxLat = Math.max(maxLat, lat);
+        }
+        if (
+          Number.isFinite(minLng) &&
+          Number.isFinite(minLat) &&
+          Number.isFinite(maxLng) &&
+          Number.isFinite(maxLat)
+        ) {
+          bbox = {
+            minLng: Number(minLng.toFixed(6)),
+            minLat: Number(minLat.toFixed(6)),
+            maxLng: Number(maxLng.toFixed(6)),
+            maxLat: Number(maxLat.toFixed(6)),
+          };
+        }
+      }
+
+      const f = (payload as any)?.filters || null;
+      const filtersSummary = f
+        ? {
+            min_sqft: f.min_sqft ?? null,
+            max_sqft: f.max_sqft ?? null,
+            min_acres: f.min_acres ?? null,
+            max_acres: f.max_acres ?? null,
+            lot_size_unit: f.lot_size_unit ?? null,
+            min_lot_size: f.min_lot_size ?? null,
+            max_lot_size: f.max_lot_size ?? null,
+            zoning_in_len: Array.isArray(f.zoning_in) ? f.zoning_in.length : 0,
+            flu_in_len: Array.isArray(f.future_land_use_in) ? f.future_land_use_in.length : 0,
+          }
+        : null;
+
+      // Keep polygon coords out of the console; only log summary.
+      console.log('[FILTERDBG] request', {
+        county: (payload as any)?.county,
+        polygonRingLen: ringLen,
+        bbox,
+        filters: filtersSummary,
+        enrich: (payload as any)?.enrich,
+        enrich_limit: (payload as any)?.enrich_limit,
+      });
+    } catch {
+      // ignore
+    }
     setLoading(true);
 
     const reqId = ++activeReq.current;
@@ -903,6 +974,26 @@ export default function MapSearch({
       const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
 
       console.log('[Run] response', { recordsLen: recs.length });
+
+      try {
+        const searchId = (resp as any).search_id;
+        const summary = (resp as any).summary || {};
+        console.log('[FILTERDBG] response', {
+          search_id: searchId,
+          candidate_count: summary.candidate_count,
+          filtered_count: summary.filtered_count,
+          zoning_options_len: Array.isArray((resp as any).zoning_options)
+            ? (resp as any).zoning_options.length
+            : 0,
+          future_land_use_options_len: Array.isArray((resp as any).future_land_use_options)
+            ? (resp as any).future_land_use_options.length
+            : 0,
+          warnings_len: Array.isArray((resp as any).warnings) ? (resp as any).warnings.length : 0,
+          field_stats: (resp as any).field_stats || null,
+        });
+      } catch {
+        // ignore
+      }
       const warnings = (resp as any).warnings as string[] | undefined;
       setLastResponseCount(list.length || recs.length);
 
