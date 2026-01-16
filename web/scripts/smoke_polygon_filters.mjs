@@ -1,9 +1,59 @@
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 
 import { chromium } from 'playwright';
 
 const BASE_URL = (process.env.BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const VITE_URL = (process.env.VITE_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
 const DEBUG_LOG = process.env.FPS_SEARCH_DEBUG_LOG || '.fps_parcels_search_debug.jsonl';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(url, { method = 'GET', headers, body, timeoutMs = 3000 } = {}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { method, headers, body, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function ensureViteUp() {
+  // If Vite is already up, do nothing.
+  try {
+    const r = await fetchWithTimeout(`${VITE_URL}/`, { timeoutMs: 1500 });
+    if (r && r.status) return { ok: true, started: false, pid: null };
+  } catch {
+    // ignore
+  }
+
+  // Start Vite in the background with output suppressed (no files).
+  let child = null;
+  try {
+    child = spawn('bash', ['-lc', 'cd web && npm run dev -- --host 127.0.0.1 --port 5173'], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.unref();
+  } catch {
+    // ignore
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < 25_000) {
+    try {
+      const r = await fetchWithTimeout(`${VITE_URL}/`, { timeoutMs: 1500 });
+      if (r && r.status) return { ok: true, started: true, pid: child && child.pid ? child.pid : null };
+    } catch {
+      // ignore
+    }
+    await sleep(250);
+  }
+  return { ok: false, started: true, pid: child && child.pid ? child.pid : null };
+}
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -287,20 +337,22 @@ async function main() {
     limit: 250,
   };
 
-  async function apiSearch({ filters, sort }) {
+  async function apiSearchVia(baseUrl, { filters, sort, debug, timeoutMs }) {
     const req = {
       ...baseReq,
       filters: filters && Object.keys(filters).length ? filters : undefined,
       sort: sort || 'relevance',
+      debug: debug === true,
     };
-    const resp = await fetch(`${BASE_URL}/api/parcels/search`, {
+    const resp = await fetchWithTimeout(`${baseUrl}/api/parcels/search`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
+      timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : 130_000,
     });
     const txt = await resp.text().catch(() => '');
     if (!resp.ok) {
-      console.log('apiSearch_fail:', { status: resp.status, statusText: resp.statusText, req });
+      console.log('apiSearch_fail:', { baseUrl, status: resp.status, statusText: resp.statusText, req });
       console.log('apiSearch_body:', String(txt || '').slice(0, 800));
       assert(false, `FAIL: apiSearch HTTP ${resp.status} ${resp.statusText}: ${String(txt || '').slice(0, 200)}`);
     }
@@ -318,6 +370,10 @@ async function main() {
     return { json: j, records: recs, warnings, filteredCount, candidateCount, req };
   }
 
+  async function apiSearch({ filters, sort, debug, timeoutMs }) {
+    return apiSearchVia(BASE_URL, { filters, sort, debug, timeoutMs });
+  }
+
   const baselineApi = await apiSearch({ filters: {}, sort: 'relevance' });
   const baselineApiFiltered = baselineApi.filteredCount;
   const baselineApiCandidate = baselineApi.candidateCount;
@@ -326,6 +382,33 @@ async function main() {
     filtered_count: baselineApiFiltered,
   });
   assert(baselineApiFiltered > 0, 'FAIL: expected API baseline filtered_count > 0');
+
+  // --- Vite proxy path regression check (exercises :5173 -> /api proxy -> :8000) ---
+  const vite = await ensureViteUp();
+  console.log('vite_up:', { ok: vite.ok, started: vite.started, pid: vite.pid });
+  assert(vite.ok, 'FAIL: Vite dev server not reachable on :5173');
+
+  const viteT0 = Date.now();
+  const viteBaseline = await apiSearchVia(VITE_URL, { filters: {}, sort: 'relevance', debug: true, timeoutMs: 130_000 });
+  const viteElapsedMs = Date.now() - viteT0;
+  const hasTiming = !!(viteBaseline.json && typeof viteBaseline.json === 'object' && viteBaseline.json.debug_timing_ms);
+  console.log('vite_proxy_baseline:', {
+    elapsed_ms: viteElapsedMs,
+    candidate_count: viteBaseline.candidateCount,
+    filtered_count: viteBaseline.filteredCount,
+    has_debug_timing_ms: hasTiming,
+  });
+
+  assert(viteBaseline.filteredCount > 0, 'FAIL: expected Vite proxy baseline filtered_count > 0');
+  assert(hasTiming, 'FAIL: expected debug_timing_ms in Vite proxy response (debug=true)');
+  if (viteBaseline.json && viteBaseline.json.debug_timing_ms) {
+    // Require at least one known stage key.
+    const keys = Object.keys(viteBaseline.json.debug_timing_ms || {});
+    assert(
+      keys.includes('candidate_query') || keys.includes('parse_payload'),
+      'FAIL: debug_timing_ms missing expected stage keys'
+    );
+  }
 
   // 0) Empty filters must be a no-op (all keys present but blank/null/empty).
   const emptyFilters = {
@@ -812,6 +895,14 @@ async function main() {
     fs.unlinkSync(DEBUG_LOG);
   } catch {
     // ignore
+  }
+  // Try to avoid leaving a stray Vite process around if we started one.
+  if (vite && vite.started && vite.pid) {
+    try {
+      process.kill(-vite.pid, 'SIGTERM');
+    } catch {
+      // ignore
+    }
   }
 }
 

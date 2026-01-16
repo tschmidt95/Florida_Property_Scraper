@@ -334,6 +334,40 @@ if app:
 
         search_id = uuid.uuid4().hex[:12]
 
+        debug_response_enabled = payload.get("debug") is True
+        debug_timing_ms: dict[str, int] | None = None
+        debug_counts: dict[str, Any] | None = None
+        _timing_mark = None
+        _timing_last = None
+        if debug_response_enabled:
+            try:
+                import time as _time
+
+                debug_timing_ms = {}
+                debug_counts = {}
+                _timing_mark = _time.perf_counter()
+                _timing_last = _timing_mark
+
+                def _mark(stage: str) -> None:
+                    nonlocal _timing_last
+                    if debug_timing_ms is None or _timing_last is None:
+                        return
+                    now = _time.perf_counter()
+                    debug_timing_ms[str(stage)] = int(round((now - _timing_last) * 1000.0))
+                    _timing_last = now
+            except Exception:
+                debug_timing_ms = None
+                debug_counts = None
+                _timing_mark = None
+                _timing_last = None
+
+                def _mark(stage: str) -> None:
+                    return
+        else:
+
+            def _mark(stage: str) -> None:
+                return
+
         pre_warnings: list[str] = []
 
         def _parse_date_any(v: object) -> date | None:
@@ -417,8 +451,6 @@ if app:
         if isinstance(payload.get("filters"), dict) and not payload.get("filters"):
             payload.pop("filters", None)
 
-        debug_response_enabled = payload.get("debug") is True
-
         normalized_filters: dict[str, Any] | None = None
         if debug_response_enabled:
             nf: dict[str, Any] = {}
@@ -435,6 +467,8 @@ if app:
                 "filters": nf,
                 "swapped_last_sale_date_range": bool(swapped_last_sale_range),
             }
+
+        _mark("normalize_filters")
 
         debug_enabled = bool(payload.get("debug", False)) or (
             str(os.getenv("FPS_SEARCH_DEBUG", "")).strip().lower() in {"1", "true", "yes"}
@@ -502,9 +536,28 @@ if app:
         if limit <= 0:
             limit = 200
 
+        # Guardrail: never allow unbounded result sets.
+        if limit > 250:
+            limit = 250
+
         # Guardrail: live mode can be expensive if/when implemented.
         if live and limit > 250:
             limit = 250
+
+        _mark("parse_payload")
+
+        if debug_counts is not None:
+            debug_counts.update(
+                {
+                    "county": county_key,
+                    "live": bool(live),
+                    "limit": int(limit),
+                    "include_geometry": bool(include_geometry),
+                    "has_filters": isinstance(payload.get("filters"), dict) and bool(payload.get("filters")),
+                    "enrich": payload.get("enrich", None),
+                    "enrich_limit": payload.get("enrich_limit", None),
+                }
+            )
 
         # Accept multiple input shapes.
         # - geometry: GeoJSON geometry
@@ -518,6 +571,8 @@ if app:
         radius = payload.get("radius")
         radius_m = payload.get("radius_m")
         center_obj = payload.get("center")
+
+        _mark("parse_geometry")
 
         if geometry and radius:
             raise HTTPException(
@@ -619,8 +674,12 @@ if app:
                     # Keep the original error warning and proceed with empty candidates.
                     pass
 
+                _mark("candidate_query")
+
         # Filter to true intersections when possible.
         intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
+
+        _mark("geometry_filter")
 
         _append_search_debug(
             {
@@ -692,6 +751,15 @@ if app:
             explicit_enrich = payload.get("enrich", None)
             enrich_requested = bool(explicit_enrich) if explicit_enrich is not None else False
 
+            enrich_disabled_by_candidate_cap = False
+            try:
+                if enrich_requested and len(intersecting) > 1500:
+                    enrich_requested = False
+                    enrich_disabled_by_candidate_cap = True
+                    warnings.append("enrich_disabled_candidate_cap")
+            except Exception:
+                enrich_disabled_by_candidate_cap = False
+
             # Baseline (unfiltered) option lists must be computed from the polygon/radius
             # candidates, regardless of any attribute filters.
             baseline_parcel_ids = list(parcel_ids)
@@ -717,6 +785,15 @@ if app:
 
             if explicit_enrich is None and filters_present:
                 enrich_requested = True
+
+            try:
+                if enrich_requested and len(intersecting) > 1500:
+                    enrich_requested = False
+                    enrich_disabled_by_candidate_cap = True
+                    if "enrich_disabled_candidate_cap" not in warnings:
+                        warnings.append("enrich_disabled_candidate_cap")
+            except Exception:
+                pass
 
             if live:
                 from florida_property_scraper.pa.schema import PAProperty
@@ -1529,9 +1606,13 @@ if app:
         finally:
             store.close()
 
+        _mark("enrich")
+
         # Compile filters (supports both list-form and object-form).
         raw_filters = payload.get("filters")
         filters = compile_filters(raw_filters)
+
+        _mark("compile_filters")
 
         # Opt-in debug summary for filter parsing/normalization.
         if debug_enabled:
@@ -2070,6 +2151,8 @@ if app:
             if len(results) >= limit:
                 break
 
+        _mark("apply_filters")
+
         if live_error_reason:
             warnings.append(f"live_error_reason: {live_error_reason}")
 
@@ -2145,6 +2228,37 @@ if app:
             except Exception:
                 pass
 
+        _mark("sort")
+
+        # Flag whether we stopped early due to the limit.
+        records_truncated = bool(len(results) >= limit and len(intersecting) > len(results))
+
+        debug_flags: dict[str, Any] | None = None
+        if debug_response_enabled:
+            debug_flags = {
+                "county": county_key,
+                "limit": int(limit),
+                "include_geometry": bool(include_geometry),
+                "sort": str(payload.get("sort") or ""),
+                "enrich_enabled": bool(payload.get("enrich", False)) if payload.get("enrich", None) is not None else False,
+                "records_truncated": bool(records_truncated),
+            }
+
+        if debug_counts is not None:
+            try:
+                debug_counts.update(
+                    {
+                        "candidate_count": int(len(intersecting)),
+                        "filtered_count": int(len(records)),
+                        "returned_count": int(len(records)),
+                        "records_truncated": bool(records_truncated),
+                    }
+                )
+            except Exception:
+                pass
+
+        _mark("serialize")
+
         _append_search_debug(
             {
                 "event": "result",
@@ -2175,11 +2289,21 @@ if app:
                     "source_counts_legacy": legacy_source_counts,
                 },
                 "records": records,
+                "records_truncated": bool(records_truncated),
                 "warnings": warnings,
                 "field_stats": field_stats,
                 "filter_stage_counts": filter_stage_counts,
                 "error_reason": live_error_reason,
                 **({"normalized_filters": normalized_filters} if debug_response_enabled else {}),
+                **(
+                    {
+                        "debug_timing_ms": debug_timing_ms or {},
+                        "debug_counts": debug_counts or {},
+                        "debug_flags": debug_flags or {},
+                    }
+                    if debug_response_enabled
+                    else {}
+                ),
             }
         )
 

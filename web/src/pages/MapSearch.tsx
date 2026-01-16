@@ -474,7 +474,7 @@ export default function MapSearch({
   };
 
   const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilterForm);
-  const [autoEnrichMissing, setAutoEnrichMissing] = useState(true);
+  const [autoEnrichMissing, setAutoEnrichMissing] = useState(false);
 
   const [sortKey, setSortKey] = useState<
     'relevance' | 'last_sale_date_desc' | 'year_built_desc' | 'sqft_desc'
@@ -515,11 +515,16 @@ export default function MapSearch({
         requestJson: string;
         responseMeta: {
           search_id?: string;
+          request_origin?: string;
+          response_url?: string;
           candidate_count?: number | null;
           filtered_count?: number | null;
           warnings?: string[];
         };
         normalized_filters?: any;
+        debug_timing_ms?: any;
+        debug_counts?: any;
+        debug_flags?: any;
       }
     | null
   >(null);
@@ -1018,12 +1023,20 @@ export default function MapSearch({
 
     const payload = built.payload;
     const hadFilters = !!(payload as any)?.filters;
+    const requestOrigin = (() => {
+      try {
+        return typeof window !== 'undefined' ? String(window.location.origin || '') : '';
+      } catch {
+        return '';
+      }
+    })();
+    const requestVia = requestOrigin.includes(':5173') ? 'vite-proxy' : 'direct';
     setLastRequest(payload);
     if (debugUiEnabled) {
       try {
-        setDebugEvidence({ requestJson: JSON.stringify(payload, null, 2), responseMeta: {} });
+        setDebugEvidence({ requestJson: JSON.stringify(payload, null, 2), responseMeta: { request_origin: requestOrigin } });
       } catch {
-        setDebugEvidence({ requestJson: String(payload), responseMeta: {} });
+        setDebugEvidence({ requestJson: String(payload), responseMeta: { request_origin: requestOrigin } });
       }
     }
     console.log('[Run] payload', payload);
@@ -1104,6 +1117,8 @@ export default function MapSearch({
           const warnings = Array.isArray((resp as any).warnings) ? ((resp as any).warnings as string[]) : [];
           const meta = {
             search_id: (resp as any).search_id,
+            request_origin: requestOrigin,
+            response_url: (resp as any)?.debug_flags?.response_url || undefined,
             candidate_count:
               typeof summary.candidate_count === 'number'
                 ? summary.candidate_count
@@ -1122,6 +1137,9 @@ export default function MapSearch({
             requestJson: prev?.requestJson ?? JSON.stringify(payload, null, 2),
             responseMeta: meta,
             normalized_filters: (resp as any).normalized_filters,
+            debug_timing_ms: (resp as any).debug_timing_ms,
+            debug_counts: (resp as any).debug_counts,
+            debug_flags: (resp as any).debug_flags,
           }));
         } catch {
           // ignore
@@ -1243,7 +1261,7 @@ export default function MapSearch({
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
       setLastError(msg);
-      setErrorBanner(`Request failed: ${msg}`);
+      setErrorBanner(`Request failed (${requestVia}): ${msg}`);
       setParcels([]);
       setRecords([]);
       setParcelLinesFC(null);
@@ -1610,6 +1628,9 @@ export default function MapSearch({
                                   end: debugEvidence.normalized_filters.last_sale_date_end ?? null,
                                 }
                               : null,
+                            debug_flags: debugEvidence.debug_flags ?? null,
+                            debug_counts: debugEvidence.debug_counts ?? null,
+                            debug_timing_ms: debugEvidence.debug_timing_ms ?? null,
                           },
                           null,
                           2

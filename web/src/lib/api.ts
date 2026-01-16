@@ -526,34 +526,35 @@ export async function parcelsSearch(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ ...payload, include_geometry: payload.include_geometry ?? true }),
-  })
+  });
 
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    const detail = text ? `: ${text}` : ''
-    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`)
+    const text = await resp.text().catch(() => '');
+    const head = String(text || '').slice(0, 800);
+    const detail = head ? `: ${head}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText} url=${resp.url}${detail}`);
   }
 
-  const data: unknown = await resp.json()
+  const data: unknown = await resp.json();
   if (!data || typeof data !== 'object') {
-    throw new Error('Unexpected response: expected JSON object')
+    throw new Error('Unexpected response: expected JSON object');
   }
 
   // Stabilize the contract for callers:
   // - Modern API returns {records: ParcelRecord[]}
   // - Legacy/alt API may return {results: [...]}
   // Always return `records` as an array (possibly empty) and keep any back-compat fields.
-  const obj = data as any
+  const obj = data as any;
   const out: ParcelSearchResponse = {
     ...obj,
     records: Array.isArray(obj.records) ? (obj.records as ParcelRecord[]) : [],
-  }
+  };
 
   if (!Array.isArray(out.records) && !Array.isArray((out as any).results)) {
-    throw new Error('Unexpected response: expected {records:[...]} or {results:[...]}' )
+    throw new Error('Unexpected response: expected {records:[...]} or {results:[...]}');
   }
 
-  return out
+  return out;
 }
 
 export async function parcelsSearchNormalized(
