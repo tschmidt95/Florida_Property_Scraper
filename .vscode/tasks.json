@@ -7,24 +7,20 @@
       "command": "bash",
       "args": [
         "-lc",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -euo pipefail; source .venv/bin/activate; export LEADS_SQLITE_PATH=/workspaces/Florida_Property_Scraper/leads.sqlite; export PA_DB=\"${PA_DB:-$LEADS_SQLITE_PATH}\"; export FPS_USE_FDOR_CENTROIDS=\"${FPS_USE_FDOR_CENTROIDS:-1}\"; : > .uvicorn_8000.log; nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 > .uvicorn_8000.log 2>&1 & echo $! > .uvicorn_8000.pid; sleep 0.2; kill -0 $(cat .uvicorn_8000.pid)"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "isBackground": true,
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "dedicated",
-          "clear": false
-        }
+        "bash scripts/up.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
       },
-      {
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": false
+      }
+    },
+    {
         "label": "Stop: Kill 8000",
         "type": "shell",
         "command": "bash",
@@ -528,24 +524,7 @@ git status --porcelain=v1 && echo && git status"
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; \
-rm -f .fps_parcels_search_debug.jsonl || true; \
-git add \
-  web/src/pages/MapSearch.tsx \
-  web/scripts/smoke_polygon_filters.mjs \
-  PROOF_POLYGON_UI.txt \
-  PROOF_POLYGON_SEARCH.txt \
-  PROOF_POLYGON_FILTERS.txt; \
-git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; \
-git push; \
-git checkout -- .vscode/tasks.json .gitignore; \
-echo; \
-git --no-pager log -1 --oneline; \
-echo; \
-echo HEAD_SHA=$(git rev-parse HEAD); \
-echo ORIGIN_SHA=$(git rev-parse origin/$(git branch --show-current)); \
-echo; \
-git status --porcelain=v1"
+        "set -euo pipefail; rm -f .fps_parcels_search_debug.jsonl || true; git add web/src/pages/MapSearch.tsx web/scripts/smoke_polygon_filters.mjs PROOF_POLYGON_UI.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_FILTERS.txt; git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; git push; git checkout -- .vscode/tasks.json .gitignore; echo; git --no-pager log -1 --oneline; echo; echo HEAD_SHA=$(git rev-parse HEAD); echo ORIGIN_SHA=$(git rev-parse origin/$(git branch --show-current)); echo; git status --porcelain=v1"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -563,41 +542,7 @@ git status --porcelain=v1"
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; \
-git update-index --no-skip-worktree --no-assume-unchanged \
-  .vscode/tasks.json \
-  PROOF_POLYGON_FILTERS.txt \
-  PROOF_POLYGON_SEARCH.txt \
-  PROOF_POLYGON_UI.txt \
-  scripts/prove_polygon_filters.sh \
-  scripts/prove_polygon_search.sh \
-  src/florida_property_scraper/api/app.py \
-  src/florida_property_scraper/api/rules.py \
-  src/florida_property_scraper/pa/providers/orange_ocpa.py \
-  web/scripts/smoke_polygon_filters.mjs \
-  web/src/lib/api.ts \
-  web/src/main.tsx \
-  web/src/pages/MapSearch.tsx 2>/dev/null || true; \
-git add \
-  .vscode/tasks.json \
-  PROOF_POLYGON_FILTERS.txt \
-  PROOF_POLYGON_SEARCH.txt \
-  PROOF_POLYGON_UI.txt \
-  scripts/prove_polygon_filters.sh \
-  scripts/prove_polygon_search.sh \
-  src/florida_property_scraper/api/app.py \
-  src/florida_property_scraper/api/rules.py \
-  src/florida_property_scraper/pa/providers/orange_ocpa.py \
-  web/scripts/smoke_polygon_filters.mjs \
-  web/src/lib/api.ts \
-  web/src/main.tsx \
-  web/src/pages/MapSearch.tsx; \
-git commit -m \"fix: strict polygon filters + real zoning/FLU options (Orange) + proofs\"; \
-git push; \
-echo; \
-git --no-pager log -1 --oneline; \
-echo; \
-git status --porcelain=v1 && echo && git status"
+        "set -euo pipefail; git checkout feature/address-lookup-ui; git restore .vscode/tasks.json .gitignore || true; rm -f .fps_parcels_search_debug.jsonl || true; echo; echo '== status (pre) =='; git status --porcelain=v1; echo; bash scripts/prove_polygon_search.sh; bash scripts/prove_polygon_ui.sh; bash scripts/prove_polygon_filters.sh; echo; git add web/src/pages/MapSearch.tsx web/scripts/smoke_polygon_filters.mjs PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt PROOF_POLYGON_FILTERS.txt; git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; git push; rm -f .fps_parcels_search_debug.jsonl || true; echo; echo CLEAN TREE: $(test -z \"$(git status --porcelain=v1)\" && echo YES || echo NO); echo Latest commit SHA: $(git rev-parse HEAD); echo Origin matches HEAD: $(test \"$(git rev-parse origin/$(git branch --show-current))\" = \"$(git rev-parse HEAD)\" && echo YES || echo NO); python -c \"import re, pathlib; t=pathlib.Path('PROOF_POLYGON_FILTERS.txt').read_text(errors='ignore'); m=re.search(r'PROOF_SUMMARY:\\s*\\{[^}]*candidate_count:\\s*(\\d+)[^}]*filtered_count:\\s*(\\d+)[^}]*zoning_options_len:\\s*(\\d+)[^}]*future_land_use_options_len:\\s*(\\d+)[^}]*\\}', t, re.S); print(f'Proof summary: candidate_count={m.group(1)}, filtered_count={m.group(2)}, zoning_options_len={m.group(3)}, future_land_use_options_len={m.group(4)}' if m else 'Proof summary: <missing>')\""
       ],
       "options": {
         "cwd": "${workspaceFolder}"
