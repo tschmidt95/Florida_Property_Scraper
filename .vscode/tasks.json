@@ -273,7 +273,7 @@
       }
     },
     {
-      "label": "Git: Commit+Push (Fix Polygon Search)",
+      "label": "Git: Commit+Push (Final Proofs)",
       "type": "shell",
       "command": "bash",
       "args": [
