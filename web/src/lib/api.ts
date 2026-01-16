@@ -22,6 +22,7 @@ export type ParcelSearchRequest =
       enrich_limit?: number;
       limit?: number;
       include_geometry?: boolean;
+      sort?: string;
     }
   | {
       county: string;
@@ -34,6 +35,7 @@ export type ParcelSearchRequest =
       enrich_limit?: number;
       limit?: number;
       include_geometry?: boolean;
+      sort?: string;
     };
 
 export type ParcelSearchRequestV2 = {
@@ -47,6 +49,7 @@ export type ParcelSearchRequestV2 = {
   enrich_limit?: number;
   limit?: number;
   include_geometry?: boolean;
+  sort?: string;
 };
 
 export type ParcelAttributeFilters = {
@@ -92,6 +95,7 @@ export type ParcelMapSearchRequest =
       limit?: number;
       include_geometry?: boolean;
       filters?: ParcelAttributeFilters;
+      sort?: string;
     }
   | {
       county: string;
@@ -104,6 +108,7 @@ export type ParcelMapSearchRequest =
       limit?: number;
       include_geometry?: boolean;
       filters?: ParcelAttributeFilters;
+      sort?: string;
     };
 
 export type ParcelRecord = {
@@ -501,6 +506,19 @@ export async function advancedSearch(payload: AdvancedSearchRequest): Promise<Se
 export async function parcelsSearch(
   payload: ParcelSearchRequest | ParcelSearchRequestV2 | ParcelMapSearchRequest,
 ): Promise<ParcelSearchResponse> {
+  try {
+    const enabled =
+      typeof window !== 'undefined' &&
+      (window as any)?.localStorage?.getItem?.('FPS_DEBUG_PAYLOAD') === '1';
+    if (enabled) {
+      const outPayload = { ...payload, include_geometry: payload.include_geometry ?? true };
+      // One-line, opt-in payload logging.
+      console.log('[FPS_DEBUG_PAYLOAD]', JSON.stringify(outPayload));
+    }
+  } catch {
+    // ignore
+  }
+
   const resp = await fetch('/api/parcels/search', {
     method: 'POST',
     headers: {

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 
@@ -53,46 +55,109 @@ def eval_condition(fields: Dict[str, Any], cond: Condition) -> bool:
         return False
 
     op = (cond.op or "").strip().lower()
+
+    # Date comparisons (sale date filters): accept ISO dates, MM/DD/YYYY, and ISO timestamps.
+    def _as_date(v_any: Any) -> date | None:
+        if v_any is None:
+            return None
+        if isinstance(v_any, date) and not isinstance(v_any, datetime):
+            return v_any
+        if isinstance(v_any, datetime):
+            try:
+                return v_any.date()
+            except Exception:
+                return None
+        if not isinstance(v_any, str):
+            return None
+        s = v_any.strip()
+        if not s:
+            return None
+        # ISO datetime
+        if "T" in s:
+            try:
+                ss = s.replace("Z", "+00:00")
+                return datetime.fromisoformat(ss).date()
+            except Exception:
+                return None
+        # ISO date
+        try:
+            return date.fromisoformat(s)
+        except Exception:
+            pass
+        # M/D/YYYY or MM/DD/YYYY
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+        if m:
+            try:
+                mm = int(m.group(1))
+                dd = int(m.group(2))
+                yy = int(m.group(3))
+                return date(yy, mm, dd)
+            except Exception:
+                return None
+        return None
+
+    cv: Any = cond.value
+    if cond.field in {"last_sale_date", "sale_date"} and op in {
+        "=",
+        "==",
+        "equals",
+        "!=",
+        "not_equals",
+        ">",
+        "gt",
+        ">=",
+        "gte",
+        "<",
+        "lt",
+        "<=",
+        "lte",
+    }:
+        v_d = _as_date(v)
+        c_d = _as_date(cv)
+        if v_d is not None and c_d is not None:
+            v = v_d
+            cv = c_d
+
     if op in ("=", "==", "equals"):
-        return v == cond.value
+        return v == cv
     if op in ("!=", "not_equals"):
-        return v != cond.value
+        return v != cv
     if op in (">", "gt"):
         try:
-            return v > cond.value
+            return v > cv
         except TypeError:
             try:
-                return float(v) > float(cond.value)
+                return float(v) > float(cv)
             except Exception:
                 return False
     if op in (">=", "gte"):
         try:
-            return v >= cond.value
+            return v >= cv
         except TypeError:
             try:
-                return float(v) >= float(cond.value)
+                return float(v) >= float(cv)
             except Exception:
                 return False
     if op in ("<", "lt"):
         try:
-            return v < cond.value
+            return v < cv
         except TypeError:
             try:
-                return float(v) < float(cond.value)
+                return float(v) < float(cv)
             except Exception:
                 return False
     if op in ("<=", "lte"):
         try:
-            return v <= cond.value
+            return v <= cv
         except TypeError:
             try:
-                return float(v) <= float(cond.value)
+                return float(v) <= float(cv)
             except Exception:
                 return False
     if op in ("contains",):
-        return _contains(v, cond.value)
+        return _contains(v, cv)
     if op in ("in", "in_list"):
-        return _in_list(v, cond.value)
+        return _in_list(v, cv)
     if op in ("is_true",):
         return bool(v) is True
     if op in ("is_false",):
@@ -205,6 +270,42 @@ def compile_filters(raw: Any) -> List[Condition]:
                 return
             out.append(Condition(field=field, op=op, value=value))
 
+        def _date(v: Any) -> date | None:
+            if v is None:
+                return None
+            if isinstance(v, date) and not isinstance(v, datetime):
+                return v
+            if isinstance(v, datetime):
+                try:
+                    return v.date()
+                except Exception:
+                    return None
+            if not isinstance(v, str):
+                return None
+            s = v.strip()
+            if not s:
+                return None
+            if "T" in s:
+                try:
+                    ss = s.replace("Z", "+00:00")
+                    return datetime.fromisoformat(ss).date()
+                except Exception:
+                    return None
+            try:
+                return date.fromisoformat(s)
+            except Exception:
+                pass
+            m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+            if m:
+                try:
+                    mm = int(m.group(1))
+                    dd = int(m.group(2))
+                    yy = int(m.group(3))
+                    return date(yy, mm, dd)
+                except Exception:
+                    return None
+            return None
+
         _add("living_area_sqft", ">=", _num(raw.get("min_sqft")))
         _add("living_area_sqft", "<=", _num(raw.get("max_sqft")))
 
@@ -283,12 +384,13 @@ def compile_filters(raw: Any) -> List[Condition]:
             if items:
                 _add("property_type", "in_list", items)
 
-        d0 = raw.get("last_sale_date_start")
-        d1 = raw.get("last_sale_date_end")
-        if isinstance(d0, str) and d0.strip():
-            _add("last_sale_date", ">=", d0.strip())
-        if isinstance(d1, str) and d1.strip():
-            _add("last_sale_date", "<=", d1.strip())
+        d0 = _date(raw.get("last_sale_date_start"))
+        d1 = _date(raw.get("last_sale_date_end"))
+        if d0 is not None and d1 is not None and d0 > d1:
+            # UX: if the user flips start/end, auto-swap.
+            d0, d1 = d1, d0
+        _add("last_sale_date", ">=", d0)
+        _add("last_sale_date", "<=", d1)
 
         return [c for c in out if c.field and c.op]
 

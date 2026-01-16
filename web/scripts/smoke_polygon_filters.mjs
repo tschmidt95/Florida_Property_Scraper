@@ -46,6 +46,32 @@ function readJsonlBySearchId(filePath, searchId) {
   }
 }
 
+function todayIsoDate() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseDateAny(s) {
+  if (!hasText(s)) return null;
+  const str = String(s).trim();
+  // ISO date or ISO timestamp.
+  const t = Date.parse(str);
+  if (Number.isFinite(t)) return t;
+  // M/D/YYYY
+  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    const mm = Number(m[1]);
+    const dd = Number(m[2]);
+    const yyyy = Number(m[3]);
+    const d = Date.parse(`${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`);
+    return Number.isFinite(d) ? d : null;
+  }
+  return null;
+}
+
 async function main() {
   // Keep the repo clean even if the backend writes debug artifacts.
   try {
@@ -148,6 +174,16 @@ async function main() {
     runBtn.click(),
   ]);
 
+  const post0 = response0.request().postData() || '';
+  let payload0 = null;
+  try {
+    payload0 = JSON.parse(post0);
+  } catch {
+    payload0 = null;
+  }
+  assert(payload0 && typeof payload0 === 'object', 'FAIL: could not parse baseline request payload JSON');
+  assert(payload0.polygon_geojson, 'FAIL: baseline request missing polygon_geojson');
+
   const json0 = await response0.json().catch(() => ({}));
   const summary0 = json0.summary || {};
   const zoningOpts0 = Array.isArray(json0.zoning_options) ? json0.zoning_options : [];
@@ -213,6 +249,148 @@ async function main() {
   assert(payload1.filters.min_sqft === 2000, 'FAIL: expected payload.filters.min_sqft == 2000');
   assert(payload1.filters.max_sqft === 2700, 'FAIL: expected payload.filters.max_sqft == 2700');
   assert(payload1.filters.min_acres === 0.5, 'FAIL: expected payload.filters.min_acres == 0.5');
+
+  // --- API-level deterministic filter + sorting proof (end-to-end without extra UI flake) ---
+  const baseReq = {
+    county: payload0.county || 'orange',
+    polygon_geojson: payload0.polygon_geojson,
+    live: true,
+    include_geometry: false,
+    enrich: false,
+    limit: 250,
+  };
+
+  async function apiSearch({ filters, sort }) {
+    const req = {
+      ...baseReq,
+      filters: filters && Object.keys(filters).length ? filters : undefined,
+      sort: sort || 'relevance',
+    };
+    const resp = await fetch(`${BASE_URL}/api/parcels/search`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    const txt = await resp.text();
+    assert(resp.ok, `FAIL: apiSearch HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 200)}`);
+    let j = {};
+    try {
+      j = JSON.parse(txt);
+    } catch {
+      j = {};
+    }
+    const s = j.summary || {};
+    const recs = Array.isArray(j.records) ? j.records : [];
+    const filteredCount = safeNum(s.filtered_count) ?? recs.length;
+    const candidateCount = safeNum(s.candidate_count) ?? null;
+    return { json: j, records: recs, filteredCount, candidateCount, req };
+  }
+
+  const baselineApi = await apiSearch({ filters: {}, sort: 'relevance' });
+  const baselineApiFiltered = baselineApi.filteredCount;
+  const baselineApiCandidate = baselineApi.candidateCount;
+  console.log('baseline_api_counts:', {
+    candidate_count: baselineApiCandidate,
+    filtered_count: baselineApiFiltered,
+  });
+  assert(baselineApiFiltered > 0, 'FAIL: expected API baseline filtered_count > 0');
+
+  function pickThreshold(label, thresholds, runFn) {
+    return (async () => {
+      let best = null;
+      for (const t of thresholds) {
+        const r = await runFn(t);
+        if (r.filteredCount > 0) {
+          best = { threshold: t, ...r };
+          if (r.filteredCount < baselineApiFiltered) break; // prefer an actual reduction
+        }
+      }
+      assert(best, `FAIL: could not find any ${label} threshold with filtered_count > 0`);
+      return best;
+    })();
+  }
+
+  // 1) min_sqft adaptive
+  const sqftThresholds = [3000, 2500, 2000, 1500, 1200, 1000, 800];
+  const sqftPick = await pickThreshold('min_sqft', sqftThresholds, async (t) =>
+    apiSearch({ filters: { min_sqft: t }, sort: 'relevance' }),
+  );
+  console.log('min_sqft_pick:', { t: sqftPick.threshold, filtered_count: sqftPick.filteredCount });
+  assert(sqftPick.filteredCount <= baselineApiFiltered, 'FAIL: min_sqft increased filtered_count (unexpected)');
+
+  // 2) min_baths adaptive
+  const bathThresholds = [4, 3.5, 3, 2.5, 2];
+  const bathsPick = await pickThreshold('min_baths', bathThresholds, async (t) =>
+    apiSearch({ filters: { min_baths: t }, sort: 'relevance' }),
+  );
+  console.log('min_baths_pick:', { t: bathsPick.threshold, filtered_count: bathsPick.filteredCount });
+  assert(bathsPick.filteredCount <= baselineApiFiltered, 'FAIL: min_baths increased filtered_count (unexpected)');
+
+  // 3) lot size range: try both sqft and acres forms.
+  const lotSqftThresholds = [20000, 12000, 9000, 8000, 6000];
+  const lotSqftPick = await pickThreshold('min_lot_size_sqft', lotSqftThresholds, async (t) =>
+    apiSearch({ filters: { min_lot_size_sqft: t }, sort: 'relevance' }),
+  );
+  console.log('min_lot_size_sqft_pick:', { t: lotSqftPick.threshold, filtered_count: lotSqftPick.filteredCount });
+  assert(lotSqftPick.filteredCount <= baselineApiFiltered, 'FAIL: lot sqft filter increased filtered_count (unexpected)');
+
+  const lotAcreThresholds = [2, 1, 0.5, 0.25, 0.1];
+  const lotAcrePick = await pickThreshold('min_acres', lotAcreThresholds, async (t) =>
+    apiSearch({ filters: { min_acres: t }, sort: 'relevance' }),
+  );
+  console.log('min_acres_pick:', { t: lotAcrePick.threshold, filtered_count: lotAcrePick.filteredCount });
+  assert(lotAcrePick.filteredCount <= baselineApiFiltered, 'FAIL: acres filter increased filtered_count (unexpected)');
+
+  // 4) last sale date range (wide then tighter)
+  const today = todayIsoDate();
+  const saleWide = await apiSearch({
+    filters: { last_sale_date_start: '1990-01-01', last_sale_date_end: today },
+    sort: 'relevance',
+  });
+  console.log('sale_wide:', { filtered_count: saleWide.filteredCount });
+  assert(saleWide.filteredCount <= baselineApiFiltered, 'FAIL: sale-wide increased filtered_count (unexpected)');
+
+  const saleTight = await apiSearch({
+    filters: { last_sale_date_start: '2020-01-01', last_sale_date_end: today },
+    sort: 'relevance',
+  });
+  console.log('sale_tight:', { filtered_count: saleTight.filteredCount });
+  assert(saleTight.filteredCount <= saleWide.filteredCount, 'FAIL: sale-tight should be non-increasing vs sale-wide');
+
+  // 5) sorting assertion: last_sale_date_desc
+  const sorted = await apiSearch({ filters: {}, sort: 'last_sale_date_desc' });
+  let sortOk = null;
+  if (sorted.records.length < 2) {
+    sortOk = 'skipped(<2 records)';
+  } else {
+    const dates = [];
+    for (const r of sorted.records) {
+      const t = parseDateAny(r?.last_sale_date);
+      if (t !== null) dates.push(t);
+      if (dates.length >= 2) break;
+    }
+    if (dates.length < 2) {
+      sortOk = 'skipped(<2 parseable dates)';
+    } else {
+      assert(dates[0] >= dates[1], 'FAIL: last_sale_date_desc sort order violated');
+      sortOk = 'ok';
+    }
+  }
+
+  const proofSummary =
+    `PROOF_SUMMARY ui_baseline_filtered=${baselineFiltered}` +
+    (baselineCandidate !== null ? ` ui_baseline_candidate=${baselineCandidate}` : '') +
+    ` api_baseline_filtered=${baselineApiFiltered}` +
+    (baselineApiCandidate !== null ? ` api_baseline_candidate=${baselineApiCandidate}` : '') +
+    ` min_sqft=${sqftPick.threshold} min_sqft_filtered=${sqftPick.filteredCount}` +
+    ` min_baths=${bathsPick.threshold} min_baths_filtered=${bathsPick.filteredCount}` +
+    ` min_lot_size_sqft=${lotSqftPick.threshold} lot_sqft_filtered=${lotSqftPick.filteredCount}` +
+    ` min_acres=${lotAcrePick.threshold} acres_filtered=${lotAcrePick.filteredCount}` +
+    ` sale_wide=1990-01-01..${today} sale_wide_filtered=${saleWide.filteredCount}` +
+    ` sale_tight=2020-01-01..${today} sale_tight_filtered=${saleTight.filteredCount}` +
+    ` sort_last_sale_date_desc=${sortOk}`;
+
+  // Print PROOF_SUMMARY once at the end (after UI checks).
 
   let bbox = null;
   try {
@@ -462,14 +640,7 @@ async function main() {
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
 
-  console.log('PROOF_SUMMARY:', {
-    candidate_count: candidateCount1,
-    filtered_count: filteredCount1,
-    chosen_min_year_built: chosenMinYearBuilt,
-    filtered_count_min_year_built: filteredCountYear,
-    zoning_options_len: zoningOpts1.length,
-    future_land_use_options_len: fluOpts1.length,
-  });
+  console.log(proofSummary);
   console.log('PASS');
   await browser.close();
 

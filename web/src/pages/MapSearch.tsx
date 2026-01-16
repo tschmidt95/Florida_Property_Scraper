@@ -476,6 +476,10 @@ export default function MapSearch({
   const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilterForm);
   const [autoEnrichMissing, setAutoEnrichMissing] = useState(true);
 
+  const [sortKey, setSortKey] = useState<
+    'relevance' | 'last_sale_date_desc' | 'year_built_desc' | 'sqft_desc'
+  >('relevance');
+
   const [lastCounts, setLastCounts] = useState<{
     candidateCount: number | null;
     filteredCount: number | null;
@@ -736,14 +740,14 @@ export default function MapSearch({
     }
 
     const toIntOrNull = (v: string): number | null => {
-      const s = v.trim();
+      const s = v.trim().replace(/,/g, '');
       if (!s) return null;
       const n = Number(s);
       if (!Number.isFinite(n)) return null;
       return Math.trunc(n);
     };
     const toFloatOrNull = (v: string): number | null => {
-      const s = v.trim();
+      const s = v.trim().replace(/,/g, '');
       if (!s) return null;
       const n = Number(s);
       if (!Number.isFinite(n)) return null;
@@ -766,8 +770,8 @@ export default function MapSearch({
     const maxAcres = hasLotSize && lotSizeUnit === 'acres' ? maxLotSize : null;
 
     const filters: ParcelAttributeFilters = {
-      min_sqft: toIntOrNull(filterForm.minSqft),
-      max_sqft: toIntOrNull(filterForm.maxSqft),
+      min_sqft: toFloatOrNull(filterForm.minSqft),
+      max_sqft: toFloatOrNull(filterForm.maxSqft),
       min_acres: minAcres,
       max_acres: maxAcres,
       min_lot_size_sqft: minLotSizeSqft,
@@ -807,6 +811,7 @@ export default function MapSearch({
       filters: hasAnyFilters ? filters : undefined,
       enrich,
       enrich_limit: enrich ? 10 : undefined,
+      sort: sortKey,
     };
 
     if (poly) {
@@ -1233,6 +1238,24 @@ export default function MapSearch({
                 onChange={(e) => setFilterForm((p) => ({ ...p, maxSqft: e.target.value }))}
                 placeholder=""
               />
+            </label>
+
+            <label className="space-y-1">
+              <div className="text-cre-muted">Sort</div>
+              <select
+                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
+                value={sortKey}
+                onChange={(e) =>
+                  setSortKey(
+                    (e.target.value as any) || 'relevance'
+                  )
+                }
+              >
+                <option value="relevance">Relevance (default)</option>
+                <option value="last_sale_date_desc">Last sale date (newest)</option>
+                <option value="year_built_desc">Year built (newest)</option>
+                <option value="sqft_desc">Living sqft (largest)</option>
+              </select>
             </label>
 
             <label className="space-y-1">

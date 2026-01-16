@@ -340,23 +340,31 @@ if app:
         def _append_search_debug(event: dict) -> None:
             """Append a single JSON event line to a local debug log.
 
-            Uses a file instead of stdout to keep interactive runs readable.
+            Default behavior: log to stdout (uvicorn logs) to avoid leaving untracked
+            debug artifacts in the repo.
+
+            Optional: set FPS_SEARCH_DEBUG_LOG to a filepath to also append JSONL.
             """
 
             if not debug_enabled:
                 return
 
             try:
-                log_path = os.getenv(
-                    "FPS_SEARCH_DEBUG_LOG", ".fps_parcels_search_debug.jsonl"
-                )
+                import logging
+
+                logger = logging.getLogger("fps.search")
+                log_path = str(os.getenv("FPS_SEARCH_DEBUG_LOG", "") or "").strip()
                 event_out = {
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "search_id": search_id,
                     **(event or {}),
                 }
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(event_out, ensure_ascii=False) + "\n")
+                line = json.dumps(event_out, ensure_ascii=False, default=str)
+                logger.info(line)
+
+                if log_path:
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(line + "\n")
             except Exception:
                 return
 
@@ -1418,6 +1426,36 @@ if app:
         raw_filters = payload.get("filters")
         filters = compile_filters(raw_filters)
 
+        # Opt-in debug summary for filter parsing/normalization.
+        if debug_enabled:
+            try:
+                raw_filter_keys = None
+                if isinstance(raw_filters, dict):
+                    raw_filter_keys = sorted([str(k) for k in raw_filters.keys()])
+                compiled_summary = []
+                for f in (filters or []):
+                    try:
+                        compiled_summary.append(
+                            {
+                                "field": getattr(f, "field", None),
+                                "op": getattr(f, "op", None),
+                                "value": getattr(f, "value", None),
+                            }
+                        )
+                    except Exception:
+                        continue
+                _append_search_debug(
+                    {
+                        "event": "filters",
+                        "sort": payload.get("sort"),
+                        "raw_filter_keys": raw_filter_keys,
+                        "raw_filters": raw_filters if isinstance(raw_filters, dict) else None,
+                        "compiled_filters": compiled_summary,
+                    }
+                )
+            except Exception:
+                pass
+
         raw_triggers = payload.get("triggers") if flags.triggers else None
         triggers = compile_triggers(raw_triggers)
 
@@ -1927,6 +1965,78 @@ if app:
 
         if live_error_reason:
             warnings.append(f"live_error_reason: {live_error_reason}")
+
+        # Deterministic post-filter sorting for the UI record list.
+        sort_key = str(payload.get("sort") or "").strip().lower()
+        if sort_key:
+            try:
+                from datetime import date as _date, datetime as _datetime
+                import re as _re
+
+                def _as_date(v: object) -> _date | None:
+                    if v is None:
+                        return None
+                    if isinstance(v, _date) and not isinstance(v, _datetime):
+                        return v
+                    if isinstance(v, _datetime):
+                        try:
+                            return v.date()
+                        except Exception:
+                            return None
+                    if not isinstance(v, str):
+                        return None
+                    s = v.strip()
+                    if not s:
+                        return None
+                    if "T" in s:
+                        try:
+                            return _datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+                        except Exception:
+                            return None
+                    try:
+                        return _date.fromisoformat(s)
+                    except Exception:
+                        pass
+
+                    m = _re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+                    if m:
+                        try:
+                            mm = int(m.group(1))
+                            dd = int(m.group(2))
+                            yy = int(m.group(3))
+                            return _date(yy, mm, dd)
+                        except Exception:
+                            return None
+
+                    return None
+
+                if sort_key == "last_sale_date_desc":
+                    def _k(r: dict) -> tuple[bool, int]:
+                        d = _as_date(r.get("last_sale_date"))
+                        if d is None:
+                            return True, 0
+                        try:
+                            return False, -int(d.toordinal())
+                        except Exception:
+                            return True, 0
+
+                    records.sort(key=_k)
+                elif sort_key == "year_built_desc":
+                    records.sort(
+                        key=lambda r: (
+                            r.get("year_built") is None,
+                            -int(r.get("year_built") or 0),
+                        )
+                    )
+                elif sort_key == "sqft_desc":
+                    records.sort(
+                        key=lambda r: (
+                            r.get("living_area_sqft") is None,
+                            -float(r.get("living_area_sqft") or 0.0),
+                        )
+                    )
+            except Exception:
+                pass
 
         _append_search_debug(
             {
