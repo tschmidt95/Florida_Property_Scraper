@@ -19,7 +19,7 @@ $ BASE_URL=<forwarded> node web/scripts/diag_runtime_report.mjs
 {'baseUrl': 'https://urban-tribble-9p457599q79h9xrx-8000.app.github.dev/', 'ok': True, 'errors': [], 'polygonRunOk': True, 'polygonResponseStatus': 200, 'polygonRequestSeen': True, 'consoleErrorsCount': 0, 'consoleLinesCount': 4}
 
 $ curl -sS http://127.0.0.1:8000/api/debug/ping (stable fields)
-{"env": {"APP_GIT_BRANCH": "", "APP_GIT_SHA": ""}, "git": {"branch": "feature/address-lookup-ui", "sha": "7a969ba"}, "ok": true}
+{"env": {"APP_GIT_BRANCH": "feature/address-lookup-ui", "APP_GIT_SHA": "13e6c8f"}, "git": {"branch": "feature/address-lookup-ui", "sha": "13e6c8f"}, "ok": true}
 
 $ curl -sS http://127.0.0.1:8000/health
 {"status":"ok"}
@@ -62,8 +62,8 @@ $ (cd web && npm run build)  # skipped (dist is up-to-date)
 == POST /api/parcels/search (lng,lat) ==
 records_count: 25
 warnings: []
-zoning_options_len: 8
-future_land_use_options_len: 7
+zoning_options_len: 26
+future_land_use_options_len: 17
 
 == POST /api/parcels/search (filters: lot size sqft) ==
 min_lot_size_sqft: 21854.5
@@ -123,7 +123,7 @@ control_anchors: [
 run0_payload_has_filters: false
 [browser:log] [Run] response {recordsLen: 25}
 response0 counts: { recordsLen0: 25, parcelsLen0: 0 }
-response0 option_lens: { zoning: 10, futureLandUse: 8 }
+response0 option_lens: { zoning: 31, futureLandUse: 19 }
 == set parcel size filter (sqft) ==
 auto_enrich_checked: false
 == click Run (filtered) and assert payload.filters contains min/max lot_size_sqft ==
@@ -159,139 +159,42 @@ PASS
 
 == UI proof (Playwright): acceptance filters (min_sqft=2000,max_sqft=2700,min_acres=0.5) ==
 == open http://127.0.0.1:8000/ ==
-leaflet_container_count: 1
-leaflet_draw_toolbar_count: 2
-leaflet_draw_polygon_button_count: 1
+draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-[browser:log] [FILTERDBG] response {search_id: dbe6dae832c0, candidate_count: 1985, filtered_count: 25, zoning_options_len: 10, future_land_use_options_len: 8}
-baseline: {
-  search_id: 'dbe6dae832c0',
-  candidate_count: 1985,
-  filtered_count: 25,
-  zoning_options_len: 10,
-  future_land_use_options_len: 8
-}
+[browser:log] [FILTERDBG] response {search_id: 7733b7231551, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
-auto_enrich_checked: true
+auto_enrich_checked: false
 == click Run (filtered) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-payload_summary: {
-  county: 'orange',
-  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
-  min_sqft: 2000,
-  max_sqft: 2700,
-  min_acres: 0.5,
-  zoning_in: null,
-  future_land_use_in: null,
-  enrich: true,
-  enrich_limit: 10
-}
-[browser:log] [FILTERDBG] response {search_id: ec40a246471d, candidate_count: 1985, filtered_count: 2, zoning_options_len: 11, future_land_use_options_len: 8}
-filtered: {
-  search_id: 'ec40a246471d',
-  candidate_count: 1985,
-  filtered_count: 2,
-  zoning_options_len: 11,
-  future_land_use_options_len: 8,
-  warnings_len: 4
-}
-returned_record_coverage: {
-  total: 2,
-  living_area_sqft: { present: 2, coverage: 1 },
-  lot_size_acres: { present: 2, coverage: 1 },
-  zoning: { present: 2 },
-  future_land_use: { present: 2 }
-}
-sample_record_fields: {
-  parcel_id: '362229065601021',
-  living_area_sqft: 2264,
-  lot_size_acres: 0.5294306703397612,
-  zoning: 'ORL-R-1A/T/HP/AN',
-  future_land_use: '0100 - Single Family'
-}
-debug_log_path: .fps_parcels_search_debug.jsonl
-debug_events_found: 2
-debug_request_summary: {
-  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
-  candidates_count: 1985,
-  intersecting_count: 1985,
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+filtered_payload_keys: {
   has_filters: true,
-  filter_keys: [
-    'min_sqft',           'max_sqft',
-    'min_acres',          'max_acres',
-    'min_lot_size_sqft',  'max_lot_size_sqft',
-    'lot_size_unit',      'min_lot_size',
-    'max_lot_size',       'min_beds',
-    'min_baths',          'min_year_built',
-    'max_year_built',     'property_type',
-    'zoning',             'zoning_in',
-    'future_land_use_in', 'min_value',
-    'max_value',          'min_land_value',
-    'max_land_value',     'min_building_value',
-    'max_building_value', 'last_sale_date_start',
-    'last_sale_date_end'
-  ]
+  has_zoning_in: false,
+  has_future_land_use_in: false,
+  enrich: false,
+  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
 }
-debug_result_summary: {
-  candidate_count: 1985,
-  filtered_count: 2,
-  warnings: [
-    'inline_enrich_budget_exhausted',
-    'coverage:living_area_sqft:49/1985',
-    'coverage:lot_size_acres:1985/1985',
-    'coverage:lot_size_sqft:1985/1985'
-  ]
-}
-debug_field_stats_present: {
-  living_area_sqft: 49,
-  lot_size_sqft: 1985,
-  lot_size_acres: 1985,
-  zoning: 49,
-  future_land_use: 25
-}
-debug_coverage_candidates: {
-  living_area_sqft: { present: 49, total: 1985, coverage: 0.02468513853904282 },
-  lot_size_sqft: { present: 1985, total: 1985, coverage: 1 },
-  lot_size_acres: { present: 1985, total: 1985, coverage: 1 },
-  zoning: { present: 49, total: 1985, coverage: 0.02468513853904282 },
-  future_land_use: { present: 25, total: 1985, coverage: 0.012594458438287154 }
-}
-debug_sample_candidate: {
-  raw: {
-    parcel_id: '332229459704010',
-    land_sf: 5269,
-    land_acres: 0,
-    living_sf: 0,
-    building_sf: 0,
-    bedrooms: 0,
-    bathrooms: 0,
-    year_built: 0,
-    zoning: '',
-    future_land_use: '',
-    use_type: '089',
-    land_use_code: '089',
-    parser_version: 'orange_ocpa:v1',
-    source_url: 'https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292233459704010'
-  },
-  normalized: {
-    living_area_sqft: null,
-    lot_size_sqft: 5269,
-    lot_size_acres: 0.12095959595959596,
-    beds: null,
-    baths: null,
-    zoning: '',
-    zoning_norm: 'UNKNOWN',
-    future_land_use_norm: 'UNKNOWN',
-    property_type: '089'
-  }
+[browser:log] [FILTERDBG] response {search_id: 5347f8879213, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+filtered_counts: { candidate_count: 15, filtered_count: 11 }
+== select first zoning option ==
+zoning_selected_label: 01/01/1993
+== click Run (zoning selected) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+== select first future land use option ==
+[browser:log] [FILTERDBG] response {search_id: 814bba85660e, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+flu_selected_label: 0030 — VACANT WATER
+== click Run (FLU selected) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 4c99f748e37d, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+PROOF_SUMMARY: {
+  candidate_count: 15,
+  filtered_count: 11,
+  zoning_options_len: 31,
+  future_land_use_options_len: 19
 }
 PASS
 

@@ -51,27 +51,6 @@ async function main() {
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  page.on('request', (req) => {
-    try {
-      if (!req.url().includes('/api/parcels/search')) return;
-      if (req.method() !== 'POST') return;
-      console.log('observed_request:', { url: req.url(), method: req.method() });
-    } catch {
-      // ignore
-    }
-  });
-
-  page.on('response', (resp) => {
-    try {
-      const req = resp.request();
-      if (!resp.url().includes('/api/parcels/search')) return;
-      if (req.method() !== 'POST') return;
-      console.log('observed_response:', { url: resp.url(), status: resp.status() });
-    } catch {
-      // ignore
-    }
-  });
-
   async function waitRunReady() {
     const runBtn = page.getByRole('button', { name: /^Run$/ });
     await runBtn.waitFor({ state: 'visible', timeout: 30_000 });
@@ -109,15 +88,13 @@ async function main() {
   await maps.first().waitFor({ state: 'visible', timeout: 30_000 });
 
   const mapCount = await maps.count();
-  console.log('leaflet_container_count:', mapCount);
   assert(mapCount === 1, `FAIL: expected exactly 1 .leaflet-container, saw ${mapCount}`);
 
   // Leaflet.draw usually renders multiple toolbars (draw + edit/remove), so do not
   // assert toolbarCount. Instead, ensure we only have one polygon tool.
   const toolbarCount = await page.locator('.leaflet-draw-toolbar').count();
   const polygonBtnCount = await page.locator('a.leaflet-draw-draw-polygon').count();
-  console.log('leaflet_draw_toolbar_count:', toolbarCount);
-  console.log('leaflet_draw_polygon_button_count:', polygonBtnCount);
+  console.log('draw_ui:', { toolbarCount, polygonBtnCount });
   assert(polygonBtnCount === 1, `FAIL: expected exactly 1 polygon draw button, saw ${polygonBtnCount}`);
 
   const map = maps.first();
@@ -172,17 +149,11 @@ async function main() {
 
   const baselineFiltered = safeNum(summary0.filtered_count) ?? (Array.isArray(json0.records) ? json0.records.length : 0);
   const baselineCandidate = safeNum(summary0.candidate_count) ?? null;
-  console.log('baseline:', {
-    search_id: json0.search_id,
-    candidate_count: baselineCandidate,
-    filtered_count: baselineFiltered,
-    zoning_options_len: zoningOpts0.length,
-    future_land_use_options_len: fluOpts0.length,
-  });
+  console.log('baseline_counts:', { candidate_count: baselineCandidate, filtered_count: baselineFiltered });
   assert(baselineFiltered > 0, 'FAIL: expected baseline filtered_count > 0');
 
   if (baselineCandidate !== null) {
-    const expected = `Showing ${baselineFiltered} of ${baselineCandidate}`;
+    const expected = `Showing ${baselineFiltered} of ${baselineCandidate} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
 
@@ -212,6 +183,8 @@ async function main() {
     console.log('auto_enrich_checked:', await enrichToggle.isChecked());
   }
 
+  await page.getByText('Filters active').waitFor({ state: 'visible', timeout: 10_000 });
+
   console.log('== click Run (filtered) ==');
   await waitRunReady();
   const [response1] = await Promise.all([
@@ -233,10 +206,7 @@ async function main() {
   assert(payload1.filters, 'FAIL: filtered run did not include payload.filters');
   assert(payload1.filters.min_sqft === 2000, 'FAIL: expected payload.filters.min_sqft == 2000');
   assert(payload1.filters.max_sqft === 2700, 'FAIL: expected payload.filters.max_sqft == 2700');
-  assert(
-    payload1.filters.min_acres === 0.5 || payload1.filters.min_lot_size_sqft != null,
-    'FAIL: expected payload.filters.min_acres == 0.5 (or sqft equivalent)'
-  );
+  assert(payload1.filters.min_acres === 0.5, 'FAIL: expected payload.filters.min_acres == 0.5');
 
   let bbox = null;
   try {
@@ -264,16 +234,12 @@ async function main() {
     bbox = null;
   }
 
-  console.log('payload_summary:', {
-    county: payload1.county,
-    bbox,
-    min_sqft: payload1.filters.min_sqft,
-    max_sqft: payload1.filters.max_sqft,
-    min_acres: payload1.filters.min_acres,
-    zoning_in: payload1.filters.zoning_in || null,
-    future_land_use_in: payload1.filters.future_land_use_in || null,
+  console.log('filtered_payload_keys:', {
+    has_filters: !!payload1.filters,
+    has_zoning_in: !!payload1.filters.zoning_in,
+    has_future_land_use_in: !!payload1.filters.future_land_use_in,
     enrich: payload1.enrich,
-    enrich_limit: payload1.enrich_limit,
+    bbox,
   });
 
   const json1 = await response1.json().catch(() => ({}));
@@ -285,23 +251,22 @@ async function main() {
   const filteredCount1 = safeNum(summary1.filtered_count) ?? (Array.isArray(json1.records) ? json1.records.length : 0);
   const candidateCount1 = safeNum(summary1.candidate_count) ?? null;
 
-  console.log('filtered:', {
-    search_id: json1.search_id,
-    candidate_count: candidateCount1,
-    filtered_count: filteredCount1,
-    zoning_options_len: zoningOpts1.length,
-    future_land_use_options_len: fluOpts1.length,
-    warnings_len: Array.isArray(json1.warnings) ? json1.warnings.length : 0,
-  });
+  console.log('filtered_counts:', { candidate_count: candidateCount1, filtered_count: filteredCount1 });
 
   assert(filteredCount1 > 0, 'FAIL: expected filtered_count > 0 for acceptance filter set');
   assert(zoningOpts1.length > 0, 'FAIL: expected zoning_options to be non-empty');
   assert(fluOpts1.length > 0, 'FAIL: expected future_land_use_options to be non-empty');
 
   if (candidateCount1 !== null) {
-    const expected = `Showing ${filteredCount1} of ${candidateCount1}`;
+    const expected = `Showing ${filteredCount1} of ${candidateCount1} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
+
+  // UI should always include the Showing...counts text once we have a polygon.
+  await page.getByText(/Showing\s+\d+\s+of\s+\d+\s+in polygon/).waitFor({
+    state: 'visible',
+    timeout: 30_000,
+  });
 
   // Select the first zoning option and ensure it appears in the request payload.
   console.log('== select first zoning option ==');
@@ -311,9 +276,21 @@ async function main() {
     .first();
   if ((await zoningBox.count()) === 0) throw new Error('FAIL: zoning multi-select box not found');
 
-  const zoningFirstCheckbox = zoningBox.locator('div.mt-2.max-h-64 label input[type="checkbox"]').first();
-  if ((await zoningFirstCheckbox.count()) === 0) throw new Error('FAIL: no zoning options found to select');
-  await zoningFirstCheckbox.click();
+  const zoningLabels = zoningBox.locator('div.mt-2.max-h-64 label');
+  const zoningLabelCount = await zoningLabels.count();
+  assert(zoningLabelCount > 0, 'FAIL: no zoning options found to select');
+  let zoningSelectedText = null;
+  for (let i = 0; i < Math.min(zoningLabelCount, 25); i++) {
+    const lbl = zoningLabels.nth(i);
+    const t = (await lbl.innerText().catch(() => '')).trim();
+    if (hasText(t)) {
+      zoningSelectedText = t;
+      await lbl.click();
+      break;
+    }
+  }
+  assert(zoningSelectedText, 'FAIL: could not find a non-empty zoning option label to select');
+  console.log('zoning_selected_label:', zoningSelectedText);
 
   console.log('== click Run (zoning selected) ==');
   await waitRunReady();
@@ -345,9 +322,21 @@ async function main() {
     .first();
   if ((await fluBox.count()) === 0) throw new Error('FAIL: FLU multi-select box not found');
 
-  const fluFirstCheckbox = fluBox.locator('div.mt-2.max-h-64 label input[type="checkbox"]').first();
-  if ((await fluFirstCheckbox.count()) === 0) throw new Error('FAIL: no FLU options found to select');
-  await fluFirstCheckbox.click();
+  const fluLabels = fluBox.locator('div.mt-2.max-h-64 label');
+  const fluLabelCount = await fluLabels.count();
+  assert(fluLabelCount > 0, 'FAIL: no FLU options found to select');
+  let fluSelectedText = null;
+  for (let i = 0; i < Math.min(fluLabelCount, 25); i++) {
+    const lbl = fluLabels.nth(i);
+    const t = (await lbl.innerText().catch(() => '')).trim();
+    if (hasText(t)) {
+      fluSelectedText = t;
+      await lbl.click();
+      break;
+    }
+  }
+  assert(fluSelectedText, 'FAIL: could not find a non-empty FLU option label to select');
+  console.log('flu_selected_label:', fluSelectedText);
 
   console.log('== click Run (FLU selected) ==');
   await waitRunReady();
@@ -376,7 +365,7 @@ async function main() {
   const candidateCount3 = safeNum(summary3.candidate_count) ?? null;
   const filteredCount3 = safeNum(summary3.filtered_count) ?? (Array.isArray(json3.records) ? json3.records.length : 0);
   if (candidateCount3 !== null) {
-    const expected = `Showing ${filteredCount3} of ${candidateCount3}`;
+    const expected = `Showing ${filteredCount3} of ${candidateCount3} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
 

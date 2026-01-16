@@ -1612,7 +1612,7 @@ export default function MapSearch({
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cre-border/40 bg-cre-bg px-3 py-2">
             <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">
               {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null
-                ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}`
+                ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}${drawnPolygon ? ' in polygon' : ''}`
                 : `Results: ${rows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
             </div>
 

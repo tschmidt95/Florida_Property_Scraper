@@ -1,60 +1,41 @@
 == open http://127.0.0.1:8000/ ==
-leaflet_container_count: 1
-leaflet_draw_toolbar_count: 2
-leaflet_draw_polygon_button_count: 1
+draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-[browser:log] [FILTERDBG] response {search_id: 1a15aa109a6d, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
-baseline: {
-  search_id: '1a15aa109a6d',
-  candidate_count: 1985,
-  filtered_count: 25,
-  zoning_options_len: 31,
-  future_land_use_options_len: 19
-}
+[browser:log] [FILTERDBG] response {search_id: a166bbff24c6, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
 == click Run (filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-payload_summary: {
-  county: 'orange',
-  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
-  min_sqft: 2000,
-  max_sqft: 2700,
-  min_acres: 0.5,
-  zoning_in: null,
-  future_land_use_in: null,
+filtered_payload_keys: {
+  has_filters: true,
+  has_zoning_in: false,
+  has_future_land_use_in: false,
   enrich: false,
-  enrich_limit: undefined
-}
-[browser:log] [FILTERDBG] response {search_id: 4f1b11c3a46a, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
-filtered: {
-  search_id: '4f1b11c3a46a',
+  bbox: [ -81.44989, 28.501583, -81.308098filtered_payload[browser:log] [FILTERDBG] response {search_id: 7683c54df9a0, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+filtered_counts: { candidate_count: 15, filtered_count: 11 }
+== select first zoning option ==
+zoning_selected_label: 01/01/1993
+== click Run (zoning selected) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+== select first future land use option ==
+[browser:log] [FILTERDBG] response {search_id: a51e456e2c54, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+flu_selected_label: 0030 — VACANT WATER
+== click Run (FLU selected) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 3d790656caf5, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+PROOF_SUMMARY: {
   candidate_count: 15,
   filtered_count: 11,
   zoning_options_len: 31,
-  future_land_use_options_len: 19,
-  warnings_len: 3
+  future_land_use_options_len: 19
 }
-== select first zoning option ==
-== click Run (zoning selected) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-== select first future land use option ==
-[browser:log] [FILTERDBG] response {search_id: a3e13becd6bc, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
-== click Run (FLU selected) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-[browser:log] [FILTERDBG] response {search_id: b868bf81d025, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+PASS
+future_land_use_options_len: 19}
 PROOF_SUMMARY: {
   candidate_count: 15,
   filtered_count: 11,

@@ -1,9 +1,27 @@
-$ (cd web && npm run build)  # skipped (dist is up-to-date)
+$ (cd web && npm run build)
+
+> florida-property-scraper-web@0.0.0 build
+> tsc -p tsconfig.json --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+node_modules/react-leaflet-draw/dist/esm/EditControl.js (8:7): "default" is not exported by "node_modules/leaflet-draw/dist/leaflet.draw.js", imported by "node_modules/react-leaflet-draw/dist/esm/EditControl.js".
+✓ 94 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                         0.73 kB │ gzip:   0.39 kB
+dist/assets/spritesheet-DpIxuf5L.svg    5.55 kB │ gzip:   1.67 kB
+dist/assets/index-l2ki0fwL.css         41.95 kB │ gzip:  16.27 kB
+dist/assets/SafeMap-CKiFuDc8.js         0.60 kB │ gzip:   0.43 kB
+dist/assets/TileLayer-DiXNoncC.js       3.47 kB │ gzip:   1.36 kB
+dist/assets/MapSearch-DzWFoQq_.js      43.51 kB │ gzip:  10.61 kB
+dist/assets/index-BhUbCnW3.js         392.31 kB │ gzip: 116.05 kB
+✓ built in 3.25s
 == POST /api/parcels/search (lng,lat) ==
 records_count: 25
 warnings: []
-zoning_options_len: 21
-future_land_use_options_len: 15
+zoning_options_len: 26
+future_land_use_options_len: 17
 
 == POST /api/parcels/search (filters: lot size sqft) ==
 min_lot_size_sqft: 21854.5
@@ -63,7 +81,7 @@ control_anchors: [
 run0_payload_has_filters: false
 [browser:log] [Run] response {recordsLen: 25}
 response0 counts: { recordsLen0: 25, parcelsLen0: 0 }
-response0 option_lens: { zoning: 25, futureLandUse: 17 }
+response0 option_lens: { zoning: 31, futureLandUse: 19 }
 == set parcel size filter (sqft) ==
 auto_enrich_checked: false
 == click Run (filtered) and assert payload.filters contains min/max lot_size_sqft ==
@@ -99,66 +117,41 @@ PASS
 
 == UI proof (Playwright): acceptance filters (min_sqft=2000,max_sqft=2700,min_acres=0.5) ==
 == open http://127.0.0.1:8000/ ==
-leaflet_container_count: 1
-leaflet_draw_toolbar_count: 2
-leaflet_draw_polygon_button_count: 1
+draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-[browser:log] [FILTERDBG] response {search_id: d81cbdf59df1, candidate_count: 1985, filtered_count: 25, zoning_options_len: 25, future_land_use_options_len: 17}
-baseline: {
-  search_id: 'd81cbdf59df1',
-  candidate_count: 1985,
-  filtered_count: 25,
-  zoning_options_len: 25,
-  future_land_use_options_len: 17
-}
+[browser:log] [FILTERDBG] response {search_id: ce0b76325416, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
-auto_enrich_checked: true
+auto_enrich_checked: false
 == click Run (filtered) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-payload_summary: {
-  county: 'orange',
-  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ],
-  min_sqft: 2000,
-  max_sqft: 2700,
-  min_acres: 0.5,
-  zoning_in: null,
-  future_land_use_in: null,
-  enrich: true,
-  enrich_limit: 10
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+filtered_payload_keys: {
+  has_filters: true,
+  has_zoning_in: false,
+  has_future_land_use_in: false,
+  enrich: false,
+  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
 }
-[browser:log] [FILTERDBG] response {search_id: f3073b331bd4, candidate_count: 1985, filtered_count: 11, zoning_options_len: 26, future_land_use_options_len: 17}
-filtered: {
-  search_id: 'f3073b331bd4',
-  candidate_count: 1985,
-  filtered_count: 11,
-  zoning_options_len: 26,
-  future_land_use_options_len: 17,
-  warnings_len: 5
-}
+[browser:log] [FILTERDBG] response {search_id: 6a8771ec4638, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+filtered_counts: { candidate_count: 15, filtered_count: 11 }
 == select first zoning option ==
+zoning_selected_label: 01/01/1993
 == click Run (zoning selected) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
 == select first future land use option ==
-[browser:log] [FILTERDBG] response {search_id: cfb0fed283a4, candidate_count: 1985, filtered_count: 0, zoning_options_len: 28, future_land_use_options_len: 18}
+[browser:log] [FILTERDBG] response {search_id: e9c38571e5b6, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
-[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: true}
-observed_request: { url: 'http://127.0.0.1:8000/api/parcels/search', method: 'POST' }
-observed_response: { url: 'http://127.0.0.1:8000/api/parcels/search', status: 200 }
-[browser:log] [FILTERDBG] response {search_id: 0a3da2c0af78, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 1ceda401013f, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 PROOF_SUMMARY: {
-  candidate_count: 1985,
+  candidate_count: 15,
   filtered_count: 11,
-  zoning_options_len: 26,
-  future_land_use_options_len: 17
+  zoning_options_len: 31,
+  future_land_use_options_len: 19
 }
 PASS
