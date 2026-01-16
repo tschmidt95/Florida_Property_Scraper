@@ -139,17 +139,27 @@ def compile_filters(raw: Any) -> List[Condition]:
                 return "UNKNOWN"
             return " ".join(s.upper().split())
 
-        def _num(v: Any) -> Any:
-            # Keep ints/floats; attempt to parse numeric strings.
+        def _num(v: Any) -> float | None:
+            """Best-effort numeric parsing.
+
+            Policy: always parse strings via float() (parseFloat semantics) so
+            decimal inputs like "0.5" are preserved.
+            """
+
             if v is None:
                 return None
             if isinstance(v, (int, float)):
-                return v
+                try:
+                    out_v = float(v)
+                except Exception:
+                    return None
+                return out_v if out_v == out_v else None  # NaN guard
             try:
                 s = str(v).strip().replace(",", "")
                 if not s:
                     return None
-                return float(s) if ("." in s) else int(s)
+                out_v = float(s)
+                return out_v if out_v == out_v else None
             except Exception:
                 return None
 
@@ -161,29 +171,36 @@ def compile_filters(raw: Any) -> List[Condition]:
         _add("living_area_sqft", ">=", _num(raw.get("min_sqft")))
         _add("living_area_sqft", "<=", _num(raw.get("max_sqft")))
 
-        # Explicit lot size acres (UI shorthand).
-        _add("lot_size_acres", ">=", _num(raw.get("min_acres")))
-        _add("lot_size_acres", "<=", _num(raw.get("max_acres")))
-
-        # Lot size filters.
+        # Lot size filters: normalize to sqft internally.
         # Preferred: explicit sqft keys.
         min_lot_sqft = _num(raw.get("min_lot_size_sqft"))
         max_lot_sqft = _num(raw.get("max_lot_size_sqft"))
-        if min_lot_sqft is not None or max_lot_sqft is not None:
-            _add("lot_size_sqft", ">=", min_lot_sqft)
-            _add("lot_size_sqft", "<=", max_lot_sqft)
-        else:
+
+        if min_lot_sqft is None and max_lot_sqft is None:
+            # UI shorthand (acres) - only if sqft keys are not present.
+            min_acres = _num(raw.get("min_acres"))
+            max_acres = _num(raw.get("max_acres"))
+            if min_acres is not None:
+                min_lot_sqft = float(min_acres) * 43560.0
+            if max_acres is not None:
+                max_lot_sqft = float(max_acres) * 43560.0
+
+        if min_lot_sqft is None and max_lot_sqft is None:
             # Legacy: unit + value.
             lot_unit = str(raw.get("lot_size_unit") or "sqft").strip().lower()
             min_lot = _num(raw.get("min_lot_size"))
             max_lot = _num(raw.get("max_lot_size"))
             if lot_unit == "acres":
-                _add("lot_size_acres", ">=", min_lot)
-                _add("lot_size_acres", "<=", max_lot)
+                if min_lot is not None:
+                    min_lot_sqft = float(min_lot) * 43560.0
+                if max_lot is not None:
+                    max_lot_sqft = float(max_lot) * 43560.0
             else:
-                # Default to sqft for unknown/missing unit.
-                _add("lot_size_sqft", ">=", min_lot)
-                _add("lot_size_sqft", "<=", max_lot)
+                min_lot_sqft = min_lot
+                max_lot_sqft = max_lot
+
+        _add("lot_size_sqft", ">=", min_lot_sqft)
+        _add("lot_size_sqft", "<=", max_lot_sqft)
 
         _add("year_built", ">=", _num(raw.get("min_year_built")))
         _add("year_built", "<=", _num(raw.get("max_year_built")))

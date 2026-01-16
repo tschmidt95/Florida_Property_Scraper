@@ -943,16 +943,9 @@ if app:
                             except Exception:
                                 pass
 
-                        if min_lot_sqft_v is not None or max_lot_sqft_v is not None:
-                            filtered_ids: list[str] = []
-                            for pid in eligible_ids:
-                                ls = _pa_lot_sqft(pid)
-                                if min_lot_sqft_v is not None and ls < float(min_lot_sqft_v):
-                                    continue
-                                if max_lot_sqft_v is not None and float(max_lot_sqft_v) > 0 and ls > float(max_lot_sqft_v):
-                                    continue
-                                filtered_ids.append(pid)
-                            eligible_ids = filtered_ids
+                        # NOTE: do NOT pre-filter eligible_ids here.
+                        # Filtering semantics are centralized in `compile_filters` + `apply_filters`
+                        # against normalized `fields` (to avoid divergent behavior between stages).
 
                         # Heuristic ordering: when sqft filters are present, prioritize parcels
                         # that look like improved residential (year_built present + lower land_use_code).
@@ -1303,7 +1296,7 @@ if app:
                         required_pa_fields.add("zoning")
                     elif f in {"future_land_use_norm"}:
                         required_pa_fields.add("future_land_use")
-                    elif f in {"living_area_sqft", "lot_size_sqft", "lot_size_acres"}:
+                    elif f in {"living_area_sqft", "lot_size_sqft"}:
                         required_pa_fields.add(f)
 
                 cov = field_stats.get("coverage_candidates") or {}
@@ -1324,7 +1317,11 @@ if app:
             # IMPORTANT: run this AFTER the best-effort live enrichment so we don't
             # accidentally filter away all candidates simply because they were not
             # yet cached at the moment the request started.
-            if isinstance(raw_filters, dict) and parcel_ids and not enrich_requested:
+            # IMPORTANT: numeric filtering semantics are centralized in
+            # `compile_filters` + `apply_filters` over normalized in-memory fields.
+            # Keep SQL prefiltering disabled to avoid drift (ex: living_sf vs building_sf,
+            # lot sqft computed from land_sf vs land_acres, etc.).
+            if False and isinstance(raw_filters, dict) and parcel_ids and not enrich_requested:
                 where_parts: list[str] = []
                 where_params: list[object] = []
 
@@ -1452,6 +1449,37 @@ if app:
             except Exception:
                 return "pa_db", ""
 
+        filter_stage_counts: dict[str, int] = {
+            "intersecting": len(intersecting),
+            "skipped_no_pa_fdor_live": 0,
+            "with_pa": 0,
+            "filter_failed": 0,
+            "trigger_failed": 0,
+            "emitted": 0,
+        }
+
+        def _conf_meta(
+            value: object,
+            *,
+            source: str | None,
+            missing_reason: str | None = None,
+        ) -> dict[str, object]:
+            present = value not in (None, "")
+            if not present:
+                return {
+                    "source": source,
+                    "confidence": 0.0,
+                    "reason": missing_reason or "missing",
+                }
+            # Keep scoring deliberately coarse for now.
+            if source in {"pa_db", "orange_ocpa", "fdor_centroids"}:
+                c = 0.9
+            elif source:
+                c = 0.6
+            else:
+                c = 0.5
+            return {"source": source, "confidence": float(c), "reason": None}
+
         for feat in intersecting:
             pa = pa_by_id.get(feat.parcel_id)
             pa_dict = pa.to_dict() if pa is not None else None
@@ -1461,7 +1489,11 @@ if app:
             if live and provider_is_live and fdor_enabled and pa_dict is None:
                 if live_error_reason is None:
                     live_error_reason = "fdor_no_attributes_for_some_parcels"
+                filter_stage_counts["skipped_no_pa_fdor_live"] += 1
                 continue
+
+            if pa_dict is not None:
+                filter_stage_counts["with_pa"] += 1
             computed = compute_ui_fields(pa_dict)
             hover = hover_by_id.get(feat.parcel_id) or {
                 "situs_address": "",
@@ -1614,10 +1646,12 @@ if app:
                     pass
 
             if not apply_filters(fields, filters):
+                filter_stage_counts["filter_failed"] += 1
                 continue
 
             reason_codes = eval_triggers(fields, triggers) if triggers else []
             if triggers and not reason_codes:
+                filter_stage_counts["trigger_failed"] += 1
                 continue
 
             row = {
@@ -1656,6 +1690,8 @@ if app:
 
             owner_name = hover.get("owner_name") or ""
             situs_address = hover.get("situs_address") or ""
+            owner_mailing_address = ""
+            homestead_flag = None
             zoning = ""
             land_use = ""
             future_land_use = ""
@@ -1672,6 +1708,18 @@ if app:
             if pa is not None:
                 owner_name = "; ".join([n for n in (pa.owner_names or []) if n]) or owner_name
                 situs_address = pa.situs_address or situs_address
+                owner_mailing_address = ", ".join(
+                    [
+                        str(getattr(pa, "mailing_address", "") or "").strip(),
+                        " ".join(
+                            [
+                                str(getattr(pa, "mailing_city", "") or "").strip(),
+                                str(getattr(pa, "mailing_state", "") or "").strip(),
+                                str(getattr(pa, "mailing_zip", "") or "").strip(),
+                            ]
+                        ).strip(),
+                    ]
+                ).replace(" ,", ",").strip(" ,")
                 zoning = (pa.zoning or "").strip()
                 future_land_use = (pa.future_land_use or "").strip()
                 land_use = (pa.use_type or pa.land_use_code or "").strip()
@@ -1691,6 +1739,13 @@ if app:
                 year_built = int(pa.year_built) if int(pa.year_built or 0) > 0 else None
                 last_sale_date = pa.last_sale_date or last_sale_date
                 last_sale_price = float(pa.last_sale_price or 0) or last_sale_price
+
+                try:
+                    ex = getattr(pa, "exemptions", None)
+                    if isinstance(ex, (list, tuple)):
+                        homestead_flag = any("HOMESTEAD" in str(x or "").upper() for x in ex)
+                except Exception:
+                    homestead_flag = None
 
                 land_value = float(pa.land_value or 0) or None
                 building_value = float(pa.improvement_value or 0) or None
@@ -1774,10 +1829,14 @@ if app:
                     mortgage_date = None
 
             rec = {
+                "record_version": 1,
                 "parcel_id": feat.parcel_id,
                 "county": county_key,
-                "situs_address": situs_address,
-                "owner_name": owner_name,
+                "situs_address": situs_address.strip() or None,
+                "owner_name": owner_name.strip() or None,
+                "owner_mailing_address": owner_mailing_address.strip() or None,
+                "homestead_flag": homestead_flag,
+                "property_type": land_use.strip() or None,
                 "land_use": land_use,
                 "future_land_use": future_land_use.strip() or None,
                 "beds": beds,
@@ -1811,9 +1870,42 @@ if app:
             lat, lng = _centroid_lat_lng(feat.geometry)
             rec["lat"] = lat
             rec["lng"] = lng
+
+            # Stable confidence metadata for the unified record contract.
+            try:
+                psrc, purl = _pa_field_source(pa) if pa is not None else (None, "")
+                conf_fields = {
+                    "parcel_id": _conf_meta(feat.parcel_id, source=psrc),
+                    "county": _conf_meta(county_key, source=psrc),
+                    "situs_address": _conf_meta(rec.get("situs_address"), source=psrc),
+                    "lat": _conf_meta(lat, source=psrc),
+                    "lng": _conf_meta(lng, source=psrc),
+                    "property_type": _conf_meta(rec.get("property_type"), source=psrc),
+                    "living_area_sqft": _conf_meta(living_area_sqft, source=psrc),
+                    "beds": _conf_meta(beds, source=psrc),
+                    "baths": _conf_meta(baths, source=psrc),
+                    "year_built": _conf_meta(year_built, source=psrc),
+                    "lot_size_sqft": _conf_meta(lot_size_sqft, source=psrc),
+                    "zoning": _conf_meta(zoning_out, source=psrc, missing_reason=zoning_reason),
+                    "future_land_use": _conf_meta(rec.get("future_land_use"), source=psrc),
+                    "owner_name": _conf_meta(rec.get("owner_name"), source=psrc),
+                    "owner_mailing_address": _conf_meta(
+                        rec.get("owner_mailing_address"),
+                        source=psrc,
+                    ),
+                    "homestead_flag": _conf_meta(homestead_flag, source=psrc),
+                    "last_sale_date": _conf_meta(last_sale_date, source=psrc),
+                    "last_sale_price": _conf_meta(last_sale_price, source=psrc),
+                }
+                rec["data_confidence"] = {"fields": conf_fields, "record_source_url": purl}
+            except Exception:
+                rec["data_confidence"] = {"fields": {}}
+
             if include_geometry:
                 rec["geometry"] = feat.geometry
             records.append(rec)
+
+            filter_stage_counts["emitted"] += 1
 
             if len(results) >= limit:
                 break
@@ -1829,6 +1921,7 @@ if app:
                 "filtered_count": len(records),
                 "warnings": warnings,
                 "field_stats": field_stats,
+                "filter_stage_counts": filter_stage_counts,
             }
         )
 
@@ -1852,6 +1945,7 @@ if app:
                 "records": records,
                 "warnings": warnings,
                 "field_stats": field_stats,
+                "filter_stage_counts": filter_stage_counts,
                 "error_reason": live_error_reason,
             }
         )

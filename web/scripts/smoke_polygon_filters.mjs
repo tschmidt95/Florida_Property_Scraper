@@ -260,11 +260,65 @@ async function main() {
   console.log('filtered_counts:', { candidate_count: candidateCount1, filtered_count: filteredCount1 });
 
   assert(filteredCount1 > 0, 'FAIL: expected filtered_count > 0 for acceptance filter set');
+
+  // Apply one NEW real filter end-to-end: year_built range.
+  // We choose a value that deterministically reduces results by using the max
+  // year_built observed in the current response.
+  let maxYearBuilt = 0;
+  try {
+    const recs = Array.isArray(json1.records) ? json1.records : [];
+    for (const r of recs) {
+      const y = safeNum(r && r.year_built);
+      if (typeof y === 'number' && Number.isFinite(y) && y > maxYearBuilt) maxYearBuilt = y;
+    }
+  } catch {
+    maxYearBuilt = 0;
+  }
+  const minYearBuilt = maxYearBuilt > 0 ? maxYearBuilt + 1 : 9999;
+
+  console.log('== set filter: min_year_built ==');
+  const minYearBuiltInput = page.locator('label', { hasText: 'Min Year Built' }).locator('input');
+  await minYearBuiltInput.fill(String(minYearBuilt));
+
+  console.log('== click Run (year_built filtered) ==');
+  await waitRunReady();
+  const [responseYear] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
+      timeout: 180_000,
+    }),
+    runBtn.click(),
+  ]);
+
+  const postYear = responseYear.request().postData() || '';
+  let payloadYear = null;
+  try {
+    payloadYear = JSON.parse(postYear);
+  } catch {
+    payloadYear = null;
+  }
+  assert(payloadYear && payloadYear.filters, 'FAIL: year_built run did not include payload.filters');
+  assert(
+    payloadYear.filters.min_year_built === minYearBuilt,
+    `FAIL: expected payload.filters.min_year_built == ${minYearBuilt}`
+  );
+
+  const jsonYear = await responseYear.json().catch(() => ({}));
+  const summaryYear = jsonYear.summary || {};
+  const filteredCountYear =
+    safeNum(summaryYear.filtered_count) ?? (Array.isArray(jsonYear.records) ? jsonYear.records.length : 0);
+  assert(
+    typeof filteredCountYear === 'number' && Number.isFinite(filteredCountYear),
+    'FAIL: year_built run did not return a numeric filtered_count'
+  );
+  assert(
+    filteredCountYear < filteredCount1,
+    `FAIL: expected year_built filtered_count (${filteredCountYear}) < prior filtered_count (${filteredCount1})`
+  );
   assert(zoningOpts1.length > 0, 'FAIL: expected zoning_options to be non-empty');
   assert(fluOpts1.length > 0, 'FAIL: expected future_land_use_options to be non-empty');
 
   if (candidateCount1 !== null) {
-    const expected = `Showing ${filteredCount1} of ${candidateCount1} in polygon`;
+    const expected = `Showing ${filteredCountYear} of ${candidateCount1} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
 
