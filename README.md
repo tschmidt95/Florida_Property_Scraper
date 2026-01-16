@@ -15,6 +15,39 @@ Scan properties and look up owner information in Florida
   - `CONTACT_PROVIDER` / `CONTACT_API_KEY` — enable contact enrichment (opt-in)
 
 
+## Trigger / Alert engine (framework)
+
+Goal: detect behavior-change signals (permits, sale, owner changes, zoning, etc.) without slowing polygon search.
+
+- Storage (SQLite, same DB as leads):
+  - `trigger_raw_events` — connector output (county-by-county polling)
+  - `trigger_events` — normalized, connector-agnostic taxonomy
+  - `trigger_alerts` — rule outputs (open/closed, severity, stacking)
+- Ingestion path (hourly polling-ready): `connector.poll(...)` → store raw → normalize → store triggers → evaluate rules → upsert alerts.
+- Serving path (fast, on-demand): UI calls `GET /api/triggers/by_parcel?county=...&parcel_id=...` to render Triggers/Alerts for a selected parcel.
+
+### Current connector(s)
+
+- `fake` connector: deterministic, offline connector for tests and local demos (no paid sources).
+
+### CLI
+
+- Run one poll+process cycle:
+  - `python -m florida_property_scraper triggers run --county orange --connector fake --limit 2`
+
+### Proof
+
+- `bash scripts/prove_triggers_engine.sh`
+
+### Incremental roadmap
+
+1) Add real connectors per county (permits, clerk sales, tax delinquency, zoning/FLU) using free/public sources.
+2) Expand taxonomy (`TriggerKey`) and normalized fields (effective dates, amounts, entity changes).
+3) Add rule packs per use-case (seller intent, redevelopment, inherited property) + tuning knobs.
+4) Add scheduling (hourly cron/worker) and alert delivery (email/webhook) with dedupe windows.
+5) Add UI filters and batch endpoints for “alerts across polygon results” (separate from search).
+
+
 ## Daily workflow
 
 ### Start

@@ -123,14 +123,17 @@ if app:
     from florida_property_scraper.api.routes.search import router as search_router
     from florida_property_scraper.api.routes.permits import router as permits_router
     from florida_property_scraper.api.routes.lookup import router as lookup_router
+    from florida_property_scraper.api.routes.triggers import router as triggers_router
 
     assert search_router is not None
     assert permits_router is not None
     assert lookup_router is not None
+    assert triggers_router is not None
 
     app.include_router(search_router, prefix="/api")
     app.include_router(permits_router, prefix="/api")
     app.include_router(lookup_router, prefix="/api")
+    app.include_router(triggers_router, prefix="/api")
 
     @app.get("/health")
     def health_route():

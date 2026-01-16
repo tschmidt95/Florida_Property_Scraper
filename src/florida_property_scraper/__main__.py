@@ -231,6 +231,10 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "pa-comps":
         run_pa_comps_command(sys.argv[2:])
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "triggers":
+        from florida_property_scraper.triggers.cli import main as triggers_main
+
+        raise SystemExit(triggers_main(sys.argv[2:]))
     parser = argparse.ArgumentParser(
         description="Florida property scraper CLI",
     )

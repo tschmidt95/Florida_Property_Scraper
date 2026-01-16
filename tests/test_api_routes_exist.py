@@ -20,3 +20,4 @@ def test_api_routes_when_fastapi_present():
     paths = {route.path for route in app.router.routes}
     assert "/health" in paths
     assert "/counties" in paths
+    assert "/api/triggers/by_parcel" in paths

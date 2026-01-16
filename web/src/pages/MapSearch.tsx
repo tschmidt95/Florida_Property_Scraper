@@ -9,10 +9,13 @@ import {
   parcelsGeometry,
   parcelsSearchNormalized,
   permitsByParcel,
+  triggersByParcel,
   type ParcelAttributeFilters,
   type ParcelRecord,
   type ParcelSearchListItem,
   type PermitRecord,
+  type TriggerAlertRecord,
+  type TriggerEventRecord,
 } from '../lib/api';
 
 type MapStatus = 'loading' | 'loaded' | 'failed';
@@ -424,6 +427,11 @@ export default function MapSearch({
   const [selectedPermitsLoading, setSelectedPermitsLoading] = useState(false);
   const [selectedPermitsError, setSelectedPermitsError] = useState<string | null>(null);
 
+  const [selectedTriggerEvents, setSelectedTriggerEvents] = useState<TriggerEventRecord[]>([]);
+  const [selectedAlerts, setSelectedAlerts] = useState<TriggerAlertRecord[]>([]);
+  const [selectedTriggersLoading, setSelectedTriggersLoading] = useState(false);
+  const [selectedTriggersError, setSelectedTriggersError] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(
     'Draw a polygon or circle, then click Run.',
@@ -675,6 +683,29 @@ export default function MapSearch({
         if (!cancelled) setSelectedPermitsLoading(false);
       }
 
+      setSelectedTriggersError(null);
+      setSelectedTriggersLoading(true);
+      try {
+        const resp = await triggersByParcel({
+          county,
+          parcel_id: parcelId,
+          limit_events: 100,
+          limit_alerts: 50,
+          status: 'open',
+        });
+        if (cancelled) return;
+        setSelectedTriggerEvents(resp.trigger_events || []);
+        setSelectedAlerts(resp.alerts || []);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setSelectedTriggersError(msg);
+        setSelectedTriggerEvents([]);
+        setSelectedAlerts([]);
+      } finally {
+        if (!cancelled) setSelectedTriggersLoading(false);
+      }
+
       // Best-effort: enrich the selected parcel into PA cache for richer fields.
       if (!['orange', 'seminole'].includes((county || '').toLowerCase())) return;
       try {
@@ -693,6 +724,10 @@ export default function MapSearch({
       setSelectedPermits([]);
       setSelectedPermitsLoading(false);
       setSelectedPermitsError(null);
+      setSelectedTriggerEvents([]);
+      setSelectedAlerts([]);
+      setSelectedTriggersLoading(false);
+      setSelectedTriggersError(null);
       return;
     }
 
@@ -1969,6 +2004,70 @@ export default function MapSearch({
                       </div>
                     ) : (
                       <div className="text-cre-muted">No permits found in DB for this parcel.</div>
+                    )}
+                  </div>
+
+                  <div className="pt-1">
+                    <div className="font-semibold">Triggers / Alerts</div>
+                    {selectedTriggersLoading ? (
+                      <div className="text-cre-muted">Loading triggers…</div>
+                    ) : selectedTriggersError ? (
+                      <div className="text-cre-muted">Triggers unavailable: {selectedTriggersError}</div>
+                    ) : selectedAlerts.length || selectedTriggerEvents.length ? (
+                      <div className="space-y-2">
+                        {selectedAlerts.length ? (
+                          <div className="space-y-1">
+                            <div className="text-[11px] text-cre-muted">{selectedAlerts.length} open alert(s)</div>
+                            {selectedAlerts.slice(0, 10).map((a) => (
+                              <div
+                                key={`${a.county}:${a.parcel_id}:${a.alert_key}:${a.id}`}
+                                className="rounded-lg border border-cre-border/40 bg-cre-surface p-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-mono text-[11px] text-cre-text">{a.alert_key}</div>
+                                  <div className="text-[11px] text-cre-muted">sev {a.severity}</div>
+                                </div>
+                                <div className="text-[11px] text-cre-muted">
+                                  First: {a.first_seen_at} · Last: {a.last_seen_at}
+                                </div>
+                              </div>
+                            ))}
+                            {selectedAlerts.length > 10 ? (
+                              <div className="text-[11px] text-cre-muted">Showing first 10 alerts.</div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="text-cre-muted">No open alerts for this parcel.</div>
+                        )}
+
+                        {selectedTriggerEvents.length ? (
+                          <div className="space-y-1">
+                            <div className="text-[11px] text-cre-muted">
+                              {selectedTriggerEvents.length} trigger event(s)
+                            </div>
+                            {selectedTriggerEvents.slice(0, 10).map((t) => (
+                              <div
+                                key={`${t.county}:${t.parcel_id}:${t.id}`}
+                                className="rounded-lg border border-cre-border/40 bg-cre-surface p-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-mono text-[11px] text-cre-text">{t.trigger_key}</div>
+                                  <div className="text-[11px] text-cre-muted">sev {t.severity}</div>
+                                </div>
+                                <div className="text-[11px] text-cre-muted">{t.trigger_at}</div>
+                                <div className="text-[11px] text-cre-muted">
+                                  {t.source_connector_key}:{t.source_event_type}
+                                </div>
+                              </div>
+                            ))}
+                            {selectedTriggerEvents.length > 10 ? (
+                              <div className="text-[11px] text-cre-muted">Showing first 10 triggers.</div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="text-cre-muted">No triggers found in DB for this parcel.</div>
                     )}
                   </div>
 

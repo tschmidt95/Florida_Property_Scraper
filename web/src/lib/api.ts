@@ -346,6 +346,68 @@ export async function permitsByParcel(params: {
   return data as PermitRecord[];
 }
 
+export type TriggerEventRecord = {
+  id: number;
+  county: string;
+  parcel_id: string;
+  trigger_key: string;
+  trigger_at: string;
+  severity: number;
+  source_connector_key: string;
+  source_event_type: string;
+  source_event_id?: number | null;
+  details_json: string;
+};
+
+export type TriggerAlertRecord = {
+  id: number;
+  county: string;
+  parcel_id: string;
+  alert_key: string;
+  severity: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  status: string;
+  trigger_event_ids_json: string;
+  details_json: string;
+};
+
+export type TriggersByParcelResponse = {
+  county: string;
+  parcel_id: string;
+  trigger_events: TriggerEventRecord[];
+  alerts: TriggerAlertRecord[];
+};
+
+export async function triggersByParcel(params: {
+  county: string;
+  parcel_id: string;
+  limit_events?: number;
+  limit_alerts?: number;
+  status?: string;
+}): Promise<TriggersByParcelResponse> {
+  const qs = new URLSearchParams({
+    county: params.county,
+    parcel_id: params.parcel_id,
+  });
+  if (typeof params.limit_events === 'number') qs.set('limit_events', String(params.limit_events));
+  if (typeof params.limit_alerts === 'number') qs.set('limit_alerts', String(params.limit_alerts));
+  if (typeof params.status === 'string' && params.status.trim()) qs.set('status', params.status.trim());
+
+  const resp = await fetch(`/api/triggers/by_parcel?${qs.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  return data as TriggersByParcelResponse;
+}
+
 export type AdvancedSearchFilters = {
   no_permits_in_years?: number | null;
   permit_status?: string[] | null;
