@@ -5,7 +5,7 @@ draw_ui: { toolbarCount: 1, polygonBtnCount: 1 }
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-[browser:log] [FILTERDBG] response {search_id: 116e6d3ad80a, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: e2142dac3bc8, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
@@ -18,25 +18,39 @@ filtered_payload_keys: {
   enrich: false,
   bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
 }
-[browser:log] [FILTERDBG] response {search_id: 82fc3660c171, candidate_count: 1985, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 3170d213a6f0, candidate_count: 1985, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
 filtered_counts: { candidate_count: 1985, filtered_count: 11 }
-== set filter: min_year_built ==
+== set filter: min_year_built=2005 ==
 == click Run (year_built filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: e654cea75c58, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: c590860e5940, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+== set filter: min_year_built=2000 ==
+== click Run (year_built filtered) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: d582b3147b8d, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+== set filter: min_year_built=1990 ==
+== click Run (year_built filtered) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: e5bd64fdc1da, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+== set filter: min_year_built=1980 ==
+== click Run (year_built filtered) ==
+[browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 9eceea5972d9, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first zoning option ==
 zoning_selected_label: ORL-AC-N
 == click Run (zoning selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 6bb5e6f6ffb5, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 7804ee96b6eb, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first future land use option ==
 flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 749d2473aa7b, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 981f94472486, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 PROOF_SUMMARY: {
   candidate_count: 1985,
   filtered_count: 11,
+  chosen_min_year_built: 1980,
+  filtered_count_min_year_built: 1,
   zoning_options_len: 31,
   future_land_use_options_len: 19
 }

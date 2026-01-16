@@ -333,11 +333,18 @@ if app:
 
         search_id = uuid.uuid4().hex[:12]
 
+        debug_enabled = bool(payload.get("debug", False)) or (
+            str(os.getenv("FPS_SEARCH_DEBUG", "")).strip().lower() in {"1", "true", "yes"}
+        )
+
         def _append_search_debug(event: dict) -> None:
             """Append a single JSON event line to a local debug log.
 
             Uses a file instead of stdout to keep interactive runs readable.
             """
+
+            if not debug_enabled:
+                return
 
             try:
                 log_path = os.getenv(
@@ -1551,6 +1558,11 @@ if app:
                 except Exception:
                     fields["baths"] = None
                 try:
+                    yb = int(pa.year_built or 0)
+                    fields["year_built"] = yb if yb > 0 else None
+                except Exception:
+                    fields["year_built"] = None
+                try:
                     lv = float(pa.land_value or 0)
                     fields["land_value"] = lv if lv > 0 else None
                 except Exception:
@@ -1596,6 +1608,8 @@ if app:
                     field_stats["present"]["lot_size_sqft"] += 1
                 if fields.get("lot_size_acres") not in (None, "", 0):
                     field_stats["present"]["lot_size_acres"] += 1
+                if fields.get("year_built") not in (None, "", 0):
+                    field_stats["present"]["year_built"] += 1
                 if str(fields.get("zoning") or "").strip():
                     field_stats["present"]["zoning"] += 1
                 if str(fields.get("future_land_use") or "").strip():
@@ -1632,6 +1646,7 @@ if app:
                         "lot_size_acres": fields.get("lot_size_acres"),
                         "beds": fields.get("beds"),
                         "baths": fields.get("baths"),
+                        "year_built": fields.get("year_built"),
                         "zoning": fields.get("zoning"),
                         "zoning_norm": fields.get("zoning_norm"),
                         "future_land_use_norm": fields.get("future_land_use_norm"),

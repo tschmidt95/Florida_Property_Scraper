@@ -261,58 +261,71 @@ async function main() {
 
   assert(filteredCount1 > 0, 'FAIL: expected filtered_count > 0 for acceptance filter set');
 
-  // Apply one NEW real filter end-to-end: year_built range.
-  // We choose a value that deterministically reduces results by using the max
-  // year_built observed in the current response.
-  let maxYearBuilt = 0;
-  try {
-    const recs = Array.isArray(json1.records) ? json1.records : [];
-    for (const r of recs) {
-      const y = safeNum(r && r.year_built);
-      if (typeof y === 'number' && Number.isFinite(y) && y > maxYearBuilt) maxYearBuilt = y;
-    }
-  } catch {
-    maxYearBuilt = 0;
-  }
-  const minYearBuilt = maxYearBuilt > 0 ? maxYearBuilt + 1 : 9999;
-
-  console.log('== set filter: min_year_built ==');
-  const minYearBuiltInput = page.locator('label', { hasText: 'Min Year Built' }).locator('input');
-  await minYearBuiltInput.fill(String(minYearBuilt));
-
-  console.log('== click Run (year_built filtered) ==');
-  await waitRunReady();
-  const [responseYear] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
-      timeout: 180_000,
-    }),
-    runBtn.click(),
-  ]);
-
-  const postYear = responseYear.request().postData() || '';
-  let payloadYear = null;
-  try {
-    payloadYear = JSON.parse(postYear);
-  } catch {
-    payloadYear = null;
-  }
-  assert(payloadYear && payloadYear.filters, 'FAIL: year_built run did not include payload.filters');
+  // UI should not send year_built unless the user sets it.
   assert(
-    payloadYear.filters.min_year_built === minYearBuilt,
-    `FAIL: expected payload.filters.min_year_built == ${minYearBuilt}`
+    payload1.filters.min_year_built == null,
+    'FAIL: expected payload.filters.min_year_built to be null/undefined before user input'
   );
 
-  const jsonYear = await responseYear.json().catch(() => ({}));
-  const summaryYear = jsonYear.summary || {};
-  const filteredCountYear =
-    safeNum(summaryYear.filtered_count) ?? (Array.isArray(jsonYear.records) ? jsonYear.records.length : 0);
+  // Apply one NEW real filter end-to-end: year_built.
+  // Adaptive strategy: start strict, relax until we reduce results but still keep >0.
+  const minYearBuiltInput = page.locator('label', { hasText: 'Min Year Built' }).locator('input');
+  const tryYears = [2005, 2000, 1990, 1980, 1970, 1950, 1900];
+  let chosenMinYearBuilt = null;
+  let filteredCountYear = null;
+
+  for (const y of tryYears) {
+    console.log(`== set filter: min_year_built=${y} ==`);
+    await minYearBuiltInput.fill(String(y));
+
+    console.log('== click Run (year_built filtered) ==');
+    await waitRunReady();
+    const [responseYear] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
+        timeout: 180_000,
+      }),
+      runBtn.click(),
+    ]);
+
+    const postYear = responseYear.request().postData() || '';
+    let payloadYear = null;
+    try {
+      payloadYear = JSON.parse(postYear);
+    } catch {
+      payloadYear = null;
+    }
+    assert(payloadYear && payloadYear.filters, 'FAIL: year_built run did not include payload.filters');
+    assert(
+      payloadYear.filters.min_year_built === y,
+      `FAIL: expected payload.filters.min_year_built == ${y}`
+    );
+
+    const jsonYear = await responseYear.json().catch(() => ({}));
+    const summaryYear = jsonYear.summary || {};
+    const fc = safeNum(summaryYear.filtered_count) ?? (Array.isArray(jsonYear.records) ? jsonYear.records.length : 0);
+    assert(typeof fc === 'number' && Number.isFinite(fc), 'FAIL: year_built run did not return a numeric filtered_count');
+
+    // Monotonicity: adding a min_year_built constraint should never increase results.
+    assert(
+      fc <= filteredCount1,
+      `FAIL: expected year_built filtered_count (${fc}) <= prior filtered_count (${filteredCount1})`
+    );
+
+    // Keep searching until we find a strict reduction that stays > 0.
+    if (fc > 0 && fc < filteredCount1) {
+      chosenMinYearBuilt = y;
+      filteredCountYear = fc;
+      break;
+    }
+  }
+
+  assert(
+    typeof chosenMinYearBuilt === 'number' && Number.isFinite(chosenMinYearBuilt),
+    `FAIL: could not find a min_year_built that strictly reduces results while staying > 0 (tried: ${tryYears.join(', ')})`
+  );
   assert(
     typeof filteredCountYear === 'number' && Number.isFinite(filteredCountYear),
-    'FAIL: year_built run did not return a numeric filtered_count'
-  );
-  assert(
-    filteredCountYear < filteredCount1,
-    `FAIL: expected year_built filtered_count (${filteredCountYear}) < prior filtered_count (${filteredCount1})`
+    'FAIL: chosen year_built run did not return a numeric filtered_count'
   );
   assert(zoningOpts1.length > 0, 'FAIL: expected zoning_options to be non-empty');
   assert(fluOpts1.length > 0, 'FAIL: expected future_land_use_options to be non-empty');
@@ -452,6 +465,8 @@ async function main() {
   console.log('PROOF_SUMMARY:', {
     candidate_count: candidateCount1,
     filtered_count: filteredCount1,
+    chosen_min_year_built: chosenMinYearBuilt,
+    filtered_count_min_year_built: filteredCountYear,
     zoning_options_len: zoningOpts1.length,
     future_land_use_options_len: fluOpts1.length,
   });

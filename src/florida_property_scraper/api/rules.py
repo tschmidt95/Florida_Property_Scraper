@@ -163,6 +163,43 @@ def compile_filters(raw: Any) -> List[Condition]:
             except Exception:
                 return None
 
+        def _year_int(v: Any) -> int | None:
+            """Parse year-like values as int.
+
+            Missing/blank returns None (never 0). Non-integer values are rejected.
+            """
+
+            if v is None:
+                return None
+            if isinstance(v, bool):
+                return None
+            if isinstance(v, int):
+                return v if v > 0 else None
+            if isinstance(v, float):
+                if not (v == v):
+                    return None
+                if float(int(v)) != float(v):
+                    return None
+                y = int(v)
+                return y if y > 0 else None
+            try:
+                s = str(v).strip().replace(",", "")
+                if not s:
+                    return None
+                try:
+                    y = int(s)
+                    return y if y > 0 else None
+                except Exception:
+                    f = float(s)
+                    if not (f == f):
+                        return None
+                    if float(int(f)) != float(f):
+                        return None
+                    y = int(f)
+                    return y if y > 0 else None
+            except Exception:
+                return None
+
         def _add(field: str, op: str, value: Any) -> None:
             if value is None:
                 return
@@ -202,8 +239,8 @@ def compile_filters(raw: Any) -> List[Condition]:
         _add("lot_size_sqft", ">=", min_lot_sqft)
         _add("lot_size_sqft", "<=", max_lot_sqft)
 
-        _add("year_built", ">=", _num(raw.get("min_year_built")))
-        _add("year_built", "<=", _num(raw.get("max_year_built")))
+        _add("year_built", ">=", _year_int(raw.get("min_year_built")))
+        _add("year_built", "<=", _year_int(raw.get("max_year_built")))
 
         _add("beds", ">=", _num(raw.get("min_beds")))
         _add("baths", ">=", _num(raw.get("min_baths")))
