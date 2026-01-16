@@ -289,6 +289,60 @@
         "panel": "dedicated",
         "clear": true
       }
+    },
+    {
+      "label": "Verify: Triggers Engine (pytest)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; pytest -q tests/test_triggers_engine.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Triggers Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_triggers_engine.sh 2>&1 | tee PROOF_TRIGGERS_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Permit Trigger Categories)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; git add .vscode/tasks.json PROOF_TRIGGERS_ENGINE.txt src/florida_property_scraper/triggers/taxonomy.py src/florida_property_scraper/triggers/engine.py src/florida_property_scraper/triggers/connectors/permits_db.py; git commit -m \\\"feat: categorize permits into tiered trigger types\\\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
   ]
 }

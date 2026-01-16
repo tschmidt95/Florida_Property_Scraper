@@ -117,8 +117,14 @@ def evaluate_and_upsert_alerts(
         for k, rid in items:
             ids_by_key[k].append(int(rid))
 
+        permit_keys = {k for k in keys if (k or "").startswith("permit_")}
+        permit_ids: list[int] = []
+        for pk in permit_keys:
+            permit_ids.extend(ids_by_key.get(pk, []))
+        permit_ids = sorted(set(int(x) for x in permit_ids if x))
+
         # 1) Simple alert: permit activity
-        if str(TriggerKey.PERMIT_ISSUED) in keys:
+        if permit_ids:
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
@@ -128,7 +134,7 @@ def evaluate_and_upsert_alerts(
                     first_seen_at=now_iso,
                     last_seen_at=now_iso,
                     status="open",
-                    trigger_event_ids=ids_by_key[str(TriggerKey.PERMIT_ISSUED)],
+                    trigger_event_ids=permit_ids,
                     details={"window_days": window_days},
                 )
             )
@@ -150,7 +156,7 @@ def evaluate_and_upsert_alerts(
             )
 
         # 3) Stacked alert: redevelopment signal
-        if str(TriggerKey.PERMIT_ISSUED) in keys and str(TriggerKey.OWNER_MAILING_CHANGED) in keys:
+        if permit_ids and str(TriggerKey.OWNER_MAILING_CHANGED) in keys:
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
@@ -162,7 +168,7 @@ def evaluate_and_upsert_alerts(
                     status="open",
                     trigger_event_ids=sorted(
                         set(
-                            ids_by_key[str(TriggerKey.PERMIT_ISSUED)]
+                            permit_ids
                             + ids_by_key[str(TriggerKey.OWNER_MAILING_CHANGED)]
                         )
                     ),

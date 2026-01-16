@@ -11,6 +11,54 @@ from ..models import RawEvent, TriggerEvent
 from ..taxonomy import TriggerKey, default_severity_for_trigger
 
 
+def _permit_text(payload: dict) -> str:
+    permit_type = str(payload.get("permit_type") or "")
+    description = str(payload.get("description") or "")
+    status = str(payload.get("status") or "")
+    return f"{permit_type} {description} {status}".strip().lower()
+
+
+def _classify_permit_trigger_key(payload: dict) -> TriggerKey:
+    """Best-effort categorization from free-text permit fields.
+
+    If no category matches, fall back to generic PERMIT_ISSUED.
+    """
+
+    t = _permit_text(payload)
+    if not t:
+        return TriggerKey.PERMIT_ISSUED
+
+    # Strong signals
+    if re.search(r"\bdemo(lition)?\b|\btear\s*down\b|\bdeconstruction\b", t):
+        return TriggerKey.PERMIT_DEMOLITION
+    if re.search(
+        r"\baddition\b|\bnew\s*construct(ion)?\b|\bbuild(ing)?\b|\bremodel\b|\brenovat(e|ion)\b|\bfoundation\b|\bframing\b",
+        t,
+    ):
+        return TriggerKey.PERMIT_STRUCTURAL
+    if re.search(r"\broof\b|\bre-?roof\b|\bshingle\b|\bmetal\s+roof\b|\btile\s+roof\b", t):
+        return TriggerKey.PERMIT_ROOF
+    if re.search(
+        r"\bhvac\b|\bair\s*cond(ition(ing)?)?\b|\bac\s*(unit|system)?\b|\bheat\s*pump\b|\bfurnace\b|\bduct\b",
+        t,
+    ):
+        return TriggerKey.PERMIT_HVAC
+    if re.search(r"\belectric(al)?\b|\bpanel\b|\brewire\b|\bwiring\b|\bservice\s*upgrade\b|\bgenerator\b", t):
+        return TriggerKey.PERMIT_ELECTRICAL
+    if re.search(r"\bplumb(ing)?\b|\brepipe\b|\bwater\s*heater\b|\bsewer\b|\bdrain\b", t):
+        return TriggerKey.PERMIT_PLUMBING
+
+    # Support signals
+    if re.search(r"\bwindow(s)?\b|\bimpact\s+window(s)?\b", t):
+        return TriggerKey.PERMIT_WINDOWS
+    if re.search(r"\bdoor(s)?\b|\bgarage\s*door\b", t):
+        return TriggerKey.PERMIT_DOORS
+    if re.search(r"\bsolar\b|\bphotovoltaic\b|\bpv\b", t):
+        return TriggerKey.PERMIT_SOLAR
+
+    return TriggerKey.PERMIT_ISSUED
+
+
 def _parse_date_any(s: str) -> date | None:
     raw = (s or "").strip()
     if not raw:
@@ -147,7 +195,7 @@ class PermitsDbConnector(TriggerConnector):
         if (raw.event_type or "").strip().lower() != "permits_db.permit":
             return None
 
-        trigger_key = TriggerKey.PERMIT_ISSUED
+        trigger_key = _classify_permit_trigger_key(raw.payload or {})
         severity = default_severity_for_trigger(trigger_key)
         return TriggerEvent(
             county=raw.county,
