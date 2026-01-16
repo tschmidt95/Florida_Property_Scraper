@@ -21,277 +21,142 @@
       }
     },
     {
-        "label": "Stop: Kill 8000",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -euo pipefail; if [ -f .uvicorn_8000.pid ]; then pid=$(cat .uvicorn_8000.pid 2>/dev/null || true); if [ -n \"$pid\" ]; then kill -TERM \"$pid\" 2>/dev/null || true; fi; fi; if command -v lsof >/dev/null 2>&1; then pids=$(lsof -tiTCP:8000 -sTCP:LISTEN 2>/dev/null || true); if [ -n \"$pids\" ]; then kill -TERM $pids 2>/dev/null || true; fi; fi"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
+      "label": "Stop: Kill 8000",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; if [ -f .uvicorn_8000.pid ]; then pid=$(cat .uvicorn_8000.pid 2>/dev/null || true); if [ -n \"$pid\" ]; then kill -TERM \"$pid\" 2>/dev/null || true; fi; fi; if command -v lsof >/dev/null 2>&1; then pids=$(lsof -tiTCP:8000 -sTCP:LISTEN 2>/dev/null || true); if [ -n \"$pids\" ]; then kill -TERM $pids 2>/dev/null || true; fi; fi"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
       },
-      {
-        "label": "Proof: Live Search (FDOR)",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_live_search.sh 2>&1 | tee PROOF_LIVE_SEARCH.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Orange Enrich (OCPA)",
-        "type": "shell",
-        git commit -m \"fix: last sale date filters (optional + formats) + debug evidence + stronger proofs\"; \
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_orange_enrich.sh 2>&1 | tee PROOF_ORANGE_ENRICH.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Orange Zoning+FLU Filters",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_orange_zoning_flu_filter.sh 2>&1 | tee PROOF_ORANGE_ZONING_FLU_FILTER.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Orange Parcel Size Filter",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_orange_lot_size_filter.sh 2>&1 | tee PROOF_ORANGE_LOT_SIZE_FILTER.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Polygon UI (Orange)",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_polygon_ui.sh 2>&1 | tee PROOF_POLYGON_UI.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Polygon Search (Orange)",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_polygon_search.sh 2>&1 | tee PROOF_POLYGON_SEARCH.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Proof: Polygon Filters (Orange)",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -o pipefail; bash scripts/prove_polygon_filters.sh 2>&1 | tee PROOF_POLYGON_FILTERS.txt"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Open: PROOF Polygon Search",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "tail -n 200 PROOF_POLYGON_SEARCH.txt || true"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Open: PROOF Polygon Filters",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "tail -n 240 PROOF_POLYGON_FILTERS.txt || true"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Open: PROOF Polygon UI",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "tail -n 220 PROOF_POLYGON_UI.txt || true"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Open: Debug Ping",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "curl -sS http://127.0.0.1:8000/api/debug/ping || true"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared",
-          "clear": true
-        }
-      },
-      {
-        "label": "Git: Restore Proof Artifacts",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -euo pipefail; git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh; echo; git status --porcelain=v1 && echo && git status"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "dedicated",
-          "clear": true
-        }
-      },
-      {
-        "label": "Git: Status",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "git status --porcelain=v1 && echo && git status"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "dedicated",
-          "clear": true
-        }
-      },
-      {
-        "label": "Git: Commit+Push (Fix Polygon Search)",
-        "type": "shell",
-        "command": "bash",
-        "args": [
-          "-lc",
-          "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt scripts/prove_polygon_filters.sh scripts/prove_polygon_search.sh src/florida_property_scraper/api/app.py src/florida_property_scraper/api/rules.py src/florida_property_scraper/pa/providers/orange_ocpa.py web/scripts/smoke_polygon_filters.mjs web/src/lib/api.ts web/src/main.tsx web/src/pages/MapSearch.tsx 2>/dev/null || true; git add .vscode/tasks.json PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt scripts/prove_polygon_filters.sh scripts/prove_polygon_search.sh src/florida_property_scraper/api/app.py src/florida_property_scraper/api/rules.py src/florida_property_scraper/pa/providers/orange_ocpa.py web/scripts/smoke_polygon_filters.mjs web/src/lib/api.ts web/src/main.tsx web/src/pages/MapSearch.tsx; git commit -m \"fix: strict polygon filters + real zoning/FLU options (Orange) + proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
-        ],
-        "options": {
-          "cwd": "${workspaceFolder}"
-        },
-        "problemMatcher": [],
-        "presentation": {
-          "reveal": "always",
-          "panel": "dedicated",
-          "clear": true
-        }
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
       }
-    ]
-  }
+    },
+    {
+      "label": "Proof: Live Search (FDOR)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_live_search.sh 2>&1 | tee PROOF_LIVE_SEARCH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Orange Enrich (OCPA)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_enrich.sh 2>&1 | tee PROOF_ORANGE_ENRICH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Orange Zoning+FLU Filters",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_zoning_flu_filter.sh 2>&1 | tee PROOF_ORANGE_ZONING_FLU_FILTER.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Orange Parcel Size Filter",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_orange_lot_size_filter.sh 2>&1 | tee PROOF_ORANGE_LOT_SIZE_FILTER.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Polygon UI (Orange)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_polygon_ui.sh 2>&1 | tee PROOF_POLYGON_UI.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Polygon Search (Orange)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_polygon_search.sh 2>&1 | tee PROOF_POLYGON_SEARCH.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Polygon Filters (Orange)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_polygon_filters.sh 2>&1 | tee PROOF_POLYGON_FILTERS.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -336,84 +201,12 @@
       }
     },
     {
-      "label": "Open: PROOF Live Search",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "tail -n 80 PROOF_LIVE_SEARCH.txt || true"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      }
-    },
-    {
-      "label": "Open: PROOF Orange Enrich",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "tail -n 120 PROOF_ORANGE_ENRICH.txt || true"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      }
-    },
-    {
-      "label": "Open: PROOF Orange Zoning+FLU",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "tail -n 160 PROOF_ORANGE_ZONING_FLU_FILTER.txt || true"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      }
-    },
-    {
-      "label": "Open: PROOF Orange Parcel Size",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "tail -n 200 PROOF_ORANGE_LOT_SIZE_FILTER.txt || true"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
       "label": "Open: PROOF Polygon UI",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
-        "tail -n 200 PROOF_POLYGON_UI.txt || true"
+        "tail -n 220 PROOF_POLYGON_UI.txt || true"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -431,7 +224,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "curl -sS http://127.0.0.1:8000/api/debug/ping | head -n 60"
+        "curl -sS http://127.0.0.1:8000/api/debug/ping || true"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -444,51 +237,12 @@
       }
     },
     {
-      "label": "Sanity: Parcel UI",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -o pipefail; bash scripts/sanity_parcel_ui.sh 2>&1 | tee PROOF_PARCEL_UI.txt"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Open: PROOF Parcel UI",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "tail -n 200 PROOF_PARCEL_UI.txt || true"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
       "label": "Git: Restore Proof Artifacts",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; \
-git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh; \
-echo; \
-git status --porcelain=v1 && echo && git status"
+        "set -euo pipefail; git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh; echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -519,191 +273,12 @@ git status --porcelain=v1 && echo && git status"
       }
     },
     {
-      "label": "Git: Commit+Push (Final UX)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; rm -f .fps_parcels_search_debug.jsonl || true; git add web/src/pages/MapSearch.tsx web/scripts/smoke_polygon_filters.mjs PROOF_POLYGON_UI.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_FILTERS.txt; git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; git push; git checkout -- .vscode/tasks.json .gitignore; echo; git --no-pager log -1 --oneline; echo; echo HEAD_SHA=$(git rev-parse HEAD); echo ORIGIN_SHA=$(git rev-parse origin/$(git branch --show-current)); echo; git status --porcelain=v1"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
       "label": "Git: Commit+Push (Fix Polygon Search)",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; git checkout feature/address-lookup-ui; git restore .vscode/tasks.json .gitignore || true; rm -f .fps_parcels_search_debug.jsonl || true; echo; echo '== status (pre) =='; git status --porcelain=v1; echo; bash scripts/prove_polygon_search.sh; bash scripts/prove_polygon_ui.sh; bash scripts/prove_polygon_filters.sh; echo; git add web/src/pages/MapSearch.tsx web/scripts/smoke_polygon_filters.mjs PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt PROOF_POLYGON_FILTERS.txt; git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; git push; rm -f .fps_parcels_search_debug.jsonl || true; echo; echo CLEAN TREE: $(test -z \"$(git status --porcelain=v1)\" && echo YES || echo NO); echo Latest commit SHA: $(git rev-parse HEAD); echo Origin matches HEAD: $(test \"$(git rev-parse origin/$(git branch --show-current))\" = \"$(git rev-parse HEAD)\" && echo YES || echo NO); python -c \"import re, pathlib; t=pathlib.Path('PROOF_POLYGON_FILTERS.txt').read_text(errors='ignore'); m=re.search(r'PROOF_SUMMARY:\\s*\\{[^}]*candidate_count:\\s*(\\d+)[^}]*filtered_count:\\s*(\\d+)[^}]*zoning_options_len:\\s*(\\d+)[^}]*future_land_use_options_len:\\s*(\\d+)[^}]*\\}', t, re.S); print(f'Proof summary: candidate_count={m.group(1)}, filtered_count={m.group(2)}, zoning_options_len={m.group(3)}, future_land_use_options_len={m.group(4)}' if m else 'Proof summary: <missing>')\""
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Commit+Push (Parcel UI)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  .vscode/tasks.json \
-  scripts/sanity_parcel_ui.sh \
-  PROOF_PARCEL_UI.txt \
-  src/florida_property_scraper/api/app.py \
-  src/florida_property_scraper/parcels/live/fdor_parcel_polygons.py \
-  web/src/lib/api.ts \
-  web/src/pages/MapSearch.tsx; \
-git commit -m 'feat: polygon owners list + parcel lines overlay'; \
-git push"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Commit+Push (Polygon UI/Search Proofs)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  web/src/pages/MapSearch.tsx \
-  PROOF_POLYGON_UI.txt \
-  PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
-git push"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Commit (2.6 Zoning/FLU)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  .vscode/tasks.json \
-  AGENT_CODEX_PROMPT.md \
-  PROOF_ORANGE_ZONING_FLU_FILTER.txt \
-  scripts/prove_orange_zoning_flu_filter.sh \
-  src/florida_property_scraper/api/app.py \
-  src/florida_property_scraper/api/rules.py \
-  src/florida_property_scraper/pa/normalize.py \
-  src/florida_property_scraper/pa/schema.py \
-  src/florida_property_scraper/pa/providers/orange_ocpa.py \
-  web/src/lib/api.ts \
-  web/src/pages/MapSearch.tsx; \
-git commit -m 'feat: Zoning/FLU multi-select filters'"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Push",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  src/florida_property_scraper/api/app.py \
-  web/src/pages/MapSearch.tsx \
-  web/scripts/smoke_polygon_filters.mjs \
-  PROOF_POLYGON_FILTERS.txt \
-  PROOF_POLYGON_UI.txt \
-  PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: last sale date filters (optional + formats) + debug evidence + stronger proofs'; \
-git push"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Commit+Push (Deterministic Polygon Debug UI)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  src/florida_property_scraper/api/app.py \
-  web/src/pages/MapSearch.tsx \
-  web/scripts/smoke_polygon_filters.mjs \
-  PROOF_POLYGON_FILTERS.txt \
-  PROOF_POLYGON_UI.txt \
-  PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: last sale date filters (optional + formats) + debug evidence + stronger proofs'; \
-git push"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Git: Commit (Polygon + proofs)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; \
-git add \
-  .vscode/tasks.json \
-  web/src/pages/MapSearch.tsx \
-  PROOF_ORANGE_ENRICH.txt \
-  PROOF_ORANGE_LOT_SIZE_FILTER.txt; \
-git commit -m 'fix: polygon drawing unlimited points + refresh proofs'"
+        "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json 2>/dev/null || true; git add scripts/prove_orange_zoning_flu_filter.sh PROOF_LIVE_SEARCH.txt PROOF_ORANGE_ENRICH.txt PROOF_ORANGE_LOT_SIZE_FILTER.txt PROOF_ORANGE_ZONING_FLU_FILTER.txt PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt .vscode/tasks.json; git commit -m \"fix: last sale date filters (optional + formats) + debug evidence + stronger proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

@@ -1,37 +1,29 @@
 == wait /health ==
-time_utc: 2026-01-14T18:47:29.895825+00:00
+time_utc: 2026-01-16T19:03:17.174426+00:00
 
 == /api/debug/ping ==
 {
   "ok": true,
-  "server_time": "2026-01-14T18:47:29.901425+00:00",
+  "server_time": "2026-01-16T19:03:17.175317+00:00",
   "git": {
-    "sha": "4a6d205",
+    "sha": "0a7fefb",
     "branch": "feature/address-lookup-ui"
   },
   "env": {
     "FPS_USE_FDOR_CENTROIDS": "1",
     "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
     "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
-    "APP_GIT_SHA": "",
-    "APP_GIT_BRANCH": ""
+    "APP_GIT_SHA": "0a7fefb",
+    "APP_GIT_BRANCH": "feature/address-lookup-ui"
   }
 }
 
 == POST /api/parcels/search (baseline) ==
 baseline_records_count: 200
-zoning_options_count: 3
-future_land_use_options_count: 42
-zoning_options_sample: ['ORL-P/T/AN', 'ORL-R-3B/T/AN', 'UNKNOWN']
-future_land_use_options_sample: ['000', '001', '002', '003', '004', '008', '009', '010', '0100 - SINGLE FAMILY', '011', '012', '017']
-
-== POST /api/parcels/enrich (seed) ==
-enrich_count: 10
-
-== POST /api/parcels/search (baseline again, for options) ==
-baseline2_records_count: 200
-zoning_options_count: 3
-future_land_use_options_count: 42
+zoning_options_count: 26
+future_land_use_options_count: 15
+zoning_options_sample: ['01/01/1993', 'ORL-C/HP/AN', 'ORL-I-G/T/AN/SP', 'ORL-O-1/T/HP/AN', 'ORL-O-1/T/SP/AN', 'ORL-O-2/T/AN', 'ORL-O-2/T/AN/SP', 'ORL-O-2/T/SP/AN', 'ORL-O-3/T', 'ORL-P/T/AN', 'ORL-PD/T/AN', 'ORL-PD/T/AN/SP']
+future_land_use_options_sample: ['0030 - VACANT WATER', '0100 - SINGLE FAMILY', '0130 - SFR - LAKE FRONT', '0135 - SFR - LAKE VIEW', '0300 - MULTI-FAMILY I', '0314 - MULTI-FAMILY MID-RIS', '0315 - MULTI-FAMILY HI-RISE', '0349 - MULTI-FAMILY 10-49', '0498 - COMM IMP CONDO ASSOC', '0805 - MULTI-FAM 5-9 CLS I', '1200 - STORE/OFFICE/RES I', '1700 - OFFICE ONE STORY']
 
 == POST /api/parcels/search (zoning_in) ==
 chosen_zoning: ORL-P/T/AN
@@ -39,66 +31,102 @@ zoning_filtered_count: 2
 zoning_mismatch_count: 0
 
 == POST /api/parcels/search (future_land_use_in) ==
-chosen_future_land_use: 000
-flu_filtered_count: 146
+chosen_future_land_use: 1800 - Office Low-Rise
+flu_filtered_count: 1
 flu_mismatch_count: 0
 
 example_record (flu):
 {
-  "parcel_id": "362229470801010",
+  "record_version": 1,
+  "parcel_id": "362229123300030",
   "county": "orange",
-  "situs_address": "1112 E SOUTH ST, Orlando 32801",
-  "owner_name": "TURCA FLIPS REAL ESTATE LLC",
-  "land_use": "000",
-  "future_land_use": "000",
+  "situs_address": "490 E SOUTH ST, Orlando 32801",
+  "owner_name": "Property Address",
+  "owner_mailing_address": "Physical Street Address 490 E South St Postal City and Zipcode Orlando, Fl 32801 Property Use 1800 - Office Low-Rise Municipality Orlando",
+  "homestead_flag": false,
+  "property_type": "1800 - Office Low-Rise",
+  "land_use": "1800 - Office Low-Rise",
+  "future_land_use": "1800 - Office Low-Rise",
   "beds": null,
   "baths": null,
-  "year_built": null,
-  "last_sale_date": null,
-  "last_sale_price": 0.0,
+  "year_built": 1989,
+  "last_sale_date": "2002-12-31",
+  "last_sale_price": 6626000.0,
   "source": "live",
-  "zoning": null,
-  "zoning_reason": "not_provided_by_source",
+  "zoning": "ORL-PD/T/AN",
+  "zoning_reason": null,
   "sqft": [
     {
+      "type": "living",
+      "value": 50259.0
+    },
+    {
       "type": "lot",
-      "value": 7496.0
+      "value": 184559.0
     }
   ],
-  "raw_source_url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false",
+  "raw_source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030",
   "data_sources": [
     {
       "name": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229123300030%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    {
+      "name": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
     }
   ],
   "provenance": {
     "situs_address": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
     },
     "owner_name": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
     },
     "land_use": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "zoning": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "year_built": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "sqft.living": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
     },
     "sqft.lot": {
-      "source": "fdor_centroids",
-      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229470801010%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "last_sale_date": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "last_sale_price": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "land_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "building_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
+    },
+    "total_value": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236123300030"
     }
   },
-  "field_provenance": {},
-  "land_value": null,
-  "building_value": null,
-  "total_value": null,
-  "address": "1112 E SOUTH ST, Orlando 32801",
-  "flu": "000",
-  "property_class": "",
-  "living_area_sqft": null,
-  "lot_size_sqft": 7496.0,
-  "lat": 28.53824011403353,
-  "lng": -81.36473140514703
-}
+  "field_provenance": {
+    "baths": {
+      "raw_label": "Baths:",
+      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/2

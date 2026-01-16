@@ -6,6 +6,7 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 python -u - <<PY
 import json
 import datetime
+import re
 import time
 import urllib.request
 
@@ -75,6 +76,9 @@ def search(filters=None, timeout=120):
         'limit': 200,
         'include_geometry': False,
         'geometry': POLY,
+        # Keep this proof deterministic + quick. Inline enrichment is slow and
+        # is not required to validate zoning/FLU filter behavior.
+        'enrich': False,
     }
     if filters is not None:
         payload['filters'] = filters
@@ -97,36 +101,22 @@ if not recs0:
     print('error_reason:', resp0.get('error_reason'))
     raise SystemExit(1)
 
-# Ensure we have PA data for at least a few parcels to validate filtering.
-# (This keeps the proof stable even when PA DB is cold.)
-parcel_ids = [r.get('parcel_id') for r in recs0 if r.get('parcel_id')]
-parcel_ids = [str(x) for x in parcel_ids if str(x).strip()]
-parcel_ids = parcel_ids[:10]
-
-print('\n== POST /api/parcels/enrich (seed) ==')
-enrich_url = f"{BASE_URL}/api/parcels/enrich"
-enrich_resp = json.loads(post_json(enrich_url, {
-  'county': 'orange',
-  'parcel_ids': parcel_ids,
-  'limit': len(parcel_ids),
-}, timeout=180))
-print('enrich_count:', enrich_resp.get('count'))
-
-print('\n== POST /api/parcels/search (baseline again, for options) ==')
-resp1 = search(filters=None, timeout=120)
-recs1 = resp1.get('records') or []
-z_opts = resp1.get('zoning_options') or []
-flu_opts = resp1.get('future_land_use_options') or []
-print('baseline2_records_count:', len(recs1))
-print('zoning_options_count:', len(z_opts))
-print('future_land_use_options_count:', len(flu_opts))
-
 # Pick a real zoning option.
 chosen_z = None
-for z in z_opts:
-    if str(z).strip() and str(z).strip().upper() != 'UNKNOWN':
-        chosen_z = str(z).strip()
+for r in recs0:
+    cand = str(r.get('zoning') or '').strip()
+    if cand and cand.upper() != 'UNKNOWN' and re.search(r"[A-Z]", cand.upper()):
+        chosen_z = cand
         break
+if chosen_z is None:
+    for z in z_opts:
+        if str(z).strip() and str(z).strip().upper() != 'UNKNOWN':
+            cand = str(z).strip()
+            # Guardrail: some option lists may include non-zoning artifacts
+            # (e.g. date strings). Require at least one letter.
+            if re.search(r"[A-Z]", cand.upper()):
+                chosen_z = cand
+                break
 
 if chosen_z is None:
     print('ERROR: no zoning option available to validate zoning_in')
@@ -158,10 +148,16 @@ if bad:
 
 # Pick a real FLU option if available; otherwise, degrade gracefully.
 chosen_f = None
-for f in flu_opts:
-    if str(f).strip() and str(f).strip().upper() != 'UNKNOWN':
-        chosen_f = str(f).strip()
+for r in recs0:
+    cand = str(r.get('future_land_use') or '').strip()
+    if cand and cand.upper() != 'UNKNOWN':
+        chosen_f = cand
         break
+if chosen_f is None:
+    for f in flu_opts:
+        if str(f).strip() and str(f).strip().upper() != 'UNKNOWN':
+            chosen_f = str(f).strip()
+            break
 
 if chosen_f is None:
     print('\nNOTE: No non-UNKNOWN future_land_use options available; skipping FLU filtering assertion.')

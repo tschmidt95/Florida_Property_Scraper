@@ -87,13 +87,13 @@ draw_ui: { toolbarCount: 1, polygonBtnCount: 1 }
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-[browser:log] [FILTERDBG] response {search_id: a1b4eb767b2d, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: f9ebba24f679, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
 == click Run (filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 664be7f9924b, candidate_count: 1985, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: ac94302b8bcf, candidate_count: 1985, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_api_counts: { candidate_count: 1985, filtered_count: 250 }
 min_sqft_pick: { t: 3000, filtered_count: 45 }
 min_baths_pick: { t: 4, filtered_count: 19 }
@@ -112,33 +112,33 @@ filtered_counts: { candidate_count: 1985, filtered_count: 11 }
 == set filter: min_year_built=2005 ==
 == click Run (year_built filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: cbabd625e88f, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 13e0c2a4b48f, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 == set filter: min_year_built=2000 ==
 == click Run (year_built filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: ee9b7b6d9604, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 5b82c434b0c2, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 == set filter: min_year_built=1990 ==
 == click Run (year_built filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: f4527ffa8712, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 550670ab4a88, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 == set filter: min_year_built=1980 ==
 == click Run (year_built filtered) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: be679605b902, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: df476807368f, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first zoning option ==
 zoning_selected_label: ORL-AC-N
 == click Run (zoning selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: abf83d84e00b, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 0cc8c88d0a5a, candidate_count: 1985, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first future land use option ==
 flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: cf9c19107bac, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 877832c53320, candidate_count: 1985, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 == clear filters for date swap check ==
 == set reversed last sale date range ==
 == click Run (reversed sale date range) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 3a54c3271ec5, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: de1576a7a81e, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 PROOF_SUMMARY ui_baseline_filtered=25 ui_baseline_candidate=1985 api_baseline_filtered=250 api_baseline_candidate=1985 empty_filters_noop=ok min_sqft=3000 min_sqft_filtered=45 min_baths=4 min_baths_filtered=19 min_lot_size_sqft=20000 lot_sqft_filtered=215 min_acres=2 acres_filtered=50 sale_wide=1990-01-01..2026-01-16 sale_wide_filtered=250 sale_tight=2020-01-01..2026-01-16 sale_tight_filtered=218 sale_date_blank_noop=ok sale_date_format_iso=ok sale_date_format_us=ok sale_swapped_filtered=250 sale_swapped_warn=yes sale_swapped_us_warn=yes sort_last_sale_date_desc=ok
 PASS

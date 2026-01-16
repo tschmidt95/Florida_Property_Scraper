@@ -1,3 +1,72 @@
 == wait /health ==
-ERROR: server not ready at http://127.0.0.1:8000 (GET /health failed)
-last_error: <urlopen error [Errno 111] Connection refused>
+== /api/debug/ping ==
+ok: True
+git: {'sha': '0a7fefb', 'branch': 'feature/address-lookup-ui'}
+env: {'FPS_USE_FDOR_CENTROIDS': '1', 'PA_DB': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'LEADS_SQLITE_PATH': '/workspaces/Florida_Property_Scraper/leads.sqlite', 'APP_GIT_SHA': '0a7fefb', 'APP_GIT_BRANCH': 'feature/address-lookup-ui'}
+
+== POST /api/parcels/search (live) ==
+count: 50
+source_counts: {'live': 50, 'cache': 0}
+first_record:
+{
+  "record_version": 1,
+  "parcel_id": "362229000000025",
+  "county": "orange",
+  "situs_address": "1300 E SOUTH ST, Orlando 32801",
+  "owner_name": "Property Address",
+  "owner_mailing_address": "Physical Street Address 1300 E South St Postal City and Zipcode Orlando, Fl 32801 Property Use 8900 - Municipal (Other) Municipality Orlando",
+  "homestead_flag": false,
+  "property_type": "8900 - Municipal (Other)",
+  "land_use": "8900 - Municipal (Other)",
+  "future_land_use": "8900 - Municipal (Other)",
+  "beds": null,
+  "baths": null,
+  "year_built": 1958,
+  "last_sale_date": null,
+  "last_sale_price": 0.0,
+  "source": "live",
+  "zoning": "ORL-P/T/AN",
+  "zoning_reason": null,
+  "sqft": [
+    {
+      "type": "living",
+      "value": 988.0
+    },
+    {
+      "type": "lot",
+      "value": 43709.0
+    }
+  ],
+  "raw_source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025",
+  "data_sources": [
+    {
+      "name": "fdor_centroids",
+      "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json&where=PARCEL_ID%3D%27362229000000025%27&outFields=PARCEL_ID%2COWN_NAME%2CPHY_ADDR1%2CPHY_ADDR2%2CPHY_CITY%2CPHY_ZIPCD%2CDOR_UC%2CLND_SQFOOT%2CACT_YR_BLT%2CSALE_PRC1%2CSALE_YR1%2CSALE_MO1&returnGeometry=false"
+    },
+    {
+      "name": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    }
+  ],
+  "provenance": {
+    "situs_address": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "owner_name": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "land_use": {
+      "source": "orange_ocpa",
+      "url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236000000025"
+    },
+    "zoning": {
+      "source": "orange_oc
+
+== POST /api/parcels/search (MapSearch payload: polygon_geojson) ==
+count: 25
+
+== POST /api/parcels/search (swapped coords demo; expected 0) ==
+count: 0
+warnings: ['No parcel candidates returned for bbox']

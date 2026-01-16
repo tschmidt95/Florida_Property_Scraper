@@ -1,19 +1,19 @@
 == wait /health ==
-time_utc: 2026-01-14T20:41:44.001797+00:00
+time_utc: 2026-01-16T18:51:22.788230+00:00
 
 == /api/debug/ping ==
 {
   "ok": true,
-  "server_time": "2026-01-14T20:41:44.002622+00:00",
+  "server_time": "2026-01-16T18:51:22.789062+00:00",
   "git": {
-    "sha": "85c514a",
+    "sha": "0a7fefb",
     "branch": "feature/address-lookup-ui"
   },
   "env": {
     "FPS_USE_FDOR_CENTROIDS": "1",
     "PA_DB": "/workspaces/Florida_Property_Scraper/leads.sqlite",
     "LEADS_SQLITE_PATH": "/workspaces/Florida_Property_Scraper/leads.sqlite",
-    "APP_GIT_SHA": "85c514a",
+    "APP_GIT_SHA": "0a7fefb",
     "APP_GIT_BRANCH": "feature/address-lookup-ui"
   }
 }
@@ -40,12 +40,16 @@ qualified_parcel_ids: ['362229470802010', '362229470802050', '362229470802061', 
 
 qualified_record: 362229470802010
 {
+  "record_version": 1,
   "parcel_id": "362229470802010",
   "county": "orange",
-  "situs_address": "",
+  "situs_address": null,
   "owner_name": "Property Address",
+  "owner_mailing_address": "Physical Street Address 1014 E South St Postal City and Zipcode Orlando, Fl 32801 Property Use 0349 - Multi-Family 10-49 Municipality Orlando",
+  "homestead_flag": false,
+  "property_type": "0349 - Multi-Family 10-49",
   "land_use": "0349 - Multi-Family 10-49",
-  "future_land_use": "0349 - Multi-Family 10-49",
+  "future_land_use": null,
   "beds": 2,
   "baths": 2.0,
   "year_built": 1967,
@@ -126,22 +130,21 @@ qualified_record: 362229470802010
       "raw_label": "Tax Year Values (Building)",
       "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802010"
     },
-    "land_use": {
-      "raw_label": "Land Use Code",
-      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802010"
-    },
-    "land_value": {
-      "raw_label": "Tax Year Values (Land)",
-      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSe
+    "future_land_use": {
+      "raw_label": "Pro
 
 qualified_record: 362229470802050
 {
+  "record_version": 1,
   "parcel_id": "362229470802050",
   "county": "orange",
-  "situs_address": "",
+  "situs_address": null,
   "owner_name": "Property Address",
+  "owner_mailing_address": "Physical Street Address 1004 E South St Postal City and Zipcode Orlando, Fl 32801 Property Use 0822 - Class Ii Duplex Municipality Orlando",
+  "homestead_flag": false,
+  "property_type": "0800 - Multi-Family",
   "land_use": "0800 - Multi-Family",
-  "future_land_use": "0800 - Multi-Family",
+  "future_land_use": null,
   "beds": 3,
   "baths": 2.0,
   "year_built": 1940,
@@ -222,10 +225,6 @@ qualified_record: 362229470802050
       "raw_label": "Tax Year Values (Building)",
       "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
     },
-    "land_use": {
-      "raw_label": "Land Use Code",
-      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292236470802050"
-    },
-    "land_value": {
-      "raw_label": "Tax Year Values (Land)",
-      "source_url": "https://ocpaservices.ocpafl.org/Searches/ParcelSearch.aspx/PID/292
+    "future_land_use": {
+      "raw_label": "Property Type",
+      "
