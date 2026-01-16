@@ -278,7 +278,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json 2>/dev/null || true; git add scripts/prove_orange_zoning_flu_filter.sh PROOF_LIVE_SEARCH.txt PROOF_ORANGE_ENRICH.txt PROOF_ORANGE_LOT_SIZE_FILTER.txt PROOF_ORANGE_ZONING_FLU_FILTER.txt PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt .vscode/tasks.json; git commit -m \"fix: last sale date filters (optional + formats) + debug evidence + stronger proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
+        "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json PROOF_LIVE_SEARCH.txt PROOF_ORANGE_ENRICH.txt PROOF_ORANGE_LOT_SIZE_FILTER.txt PROOF_ORANGE_ZONING_FLU_FILTER.txt PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt scripts/prove_orange_zoning_flu_filter.sh 2>/dev/null || true; git add scripts/prove_orange_zoning_flu_filter.sh PROOF_LIVE_SEARCH.txt PROOF_ORANGE_ENRICH.txt PROOF_ORANGE_LOT_SIZE_FILTER.txt PROOF_ORANGE_ZONING_FLU_FILTER.txt PROOF_POLYGON_FILTERS.txt PROOF_POLYGON_SEARCH.txt PROOF_POLYGON_UI.txt .vscode/tasks.json; git commit -m \"fix: last sale date filters (optional + formats) + debug evidence + stronger proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
