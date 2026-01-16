@@ -502,6 +502,7 @@ export default function MapSearch({
   const [lastRequest, setLastRequest] = useState<any | null>(null);
   const [lastResponseCount, setLastResponseCount] = useState<number>(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [softWarnings, setSoftWarnings] = useState<string[]>([]);
 
   const [ownersQuery, setOwnersQuery] = useState('');
 
@@ -971,6 +972,7 @@ export default function MapSearch({
 
   async function run() {
     setLastError(null);
+    setSoftWarnings([]);
     setErrorBanner(null);
 
     const built = buildSearchPayloadForMap();
@@ -1115,7 +1117,16 @@ export default function MapSearch({
       } catch {
         // ignore
       }
-      const warnings = (resp as any).warnings as string[] | undefined;
+      const warningsAll = (resp as any).warnings as string[] | undefined;
+
+      const isSoftWarning = (w: string): boolean => {
+        const s = String(w || '').toLowerCase();
+        return s.includes('swapped date range');
+      };
+
+      const soft = Array.isArray(warningsAll) ? warningsAll.filter(isSoftWarning) : [];
+      const otherWarnings = Array.isArray(warningsAll) ? warningsAll.filter((w) => !isSoftWarning(w)) : [];
+      setSoftWarnings(soft);
       setLastResponseCount(list.length || recs.length);
 
       const rawCounts = resp.summary?.source_counts || {};
@@ -1132,8 +1143,8 @@ export default function MapSearch({
 
         const msg = hint
           ? hint
-          : warnings?.length
-            ? `No results returned. ${warnings.join(' / ')}`
+          : warningsAll?.length
+            ? `No results returned. ${warningsAll.join(' / ')}`
             : 'No results returned from backend.';
         setLastError(msg);
         setErrorBanner(msg);
@@ -1144,8 +1155,8 @@ export default function MapSearch({
 
       if (hadFilters && candidateCount && candidateCount > 0 && filteredCount === 0) {
         setErrorBanner('0 matches your filters. Try widening ranges or clearing filters.');
-      } else if (warnings?.length) {
-        setErrorBanner(`Warnings: ${warnings.join(' / ')}`);
+      } else if (otherWarnings.length) {
+        setErrorBanner(`Warnings: ${otherWarnings.join(' / ')}`);
       }
 
       setParcels(list);
@@ -1464,6 +1475,12 @@ export default function MapSearch({
                 onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleEnd: e.target.value }))}
               />
             </label>
+
+            {softWarnings.length ? (
+              <div className="col-span-2 -mt-1 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+                {softWarnings.join(' / ')}
+              </div>
+            ) : null}
           </div>
 
           <label className="mt-3 flex items-center gap-2 text-xs text-cre-text">

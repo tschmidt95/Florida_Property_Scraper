@@ -281,9 +281,10 @@ async function main() {
     }
     const s = j.summary || {};
     const recs = Array.isArray(j.records) ? j.records : [];
+    const warnings = Array.isArray(j.warnings) ? j.warnings : [];
     const filteredCount = safeNum(s.filtered_count) ?? recs.length;
     const candidateCount = safeNum(s.candidate_count) ?? null;
-    return { json: j, records: recs, filteredCount, candidateCount, req };
+    return { json: j, records: recs, warnings, filteredCount, candidateCount, req };
   }
 
   const baselineApi = await apiSearch({ filters: {}, sort: 'relevance' });
@@ -294,6 +295,46 @@ async function main() {
     filtered_count: baselineApiFiltered,
   });
   assert(baselineApiFiltered > 0, 'FAIL: expected API baseline filtered_count > 0');
+
+  // 0) Empty filters must be a no-op (all keys present but blank/null/empty).
+  const emptyFilters = {
+    min_sqft: null,
+    max_sqft: '',
+    min_acres: '',
+    max_acres: null,
+    min_lot_size_sqft: '',
+    max_lot_size_sqft: null,
+    lot_size_unit: '',
+    min_lot_size: '',
+    max_lot_size: '',
+    min_beds: '',
+    min_baths: '',
+    min_year_built: '',
+    max_year_built: '',
+    property_type: '',
+    zoning: '',
+    zoning_in: [],
+    future_land_use_in: [],
+    min_value: '',
+    max_value: '',
+    min_land_value: '',
+    max_land_value: '',
+    min_building_value: '',
+    max_building_value: '',
+    last_sale_date_start: '',
+    last_sale_date_end: '',
+  };
+  const emptyNoop = await apiSearch({ filters: emptyFilters, sort: 'relevance' });
+  assert(
+    emptyNoop.filteredCount === baselineApiFiltered,
+    `FAIL: empty filters changed filtered_count (${emptyNoop.filteredCount}) vs baseline (${baselineApiFiltered})`
+  );
+  if (baselineApiCandidate !== null && emptyNoop.candidateCount !== null) {
+    assert(
+      emptyNoop.candidateCount === baselineApiCandidate,
+      `FAIL: empty filters changed candidate_count (${emptyNoop.candidateCount}) vs baseline (${baselineApiCandidate})`
+    );
+  }
 
   function pickThreshold(label, thresholds, runFn) {
     return (async () => {
@@ -357,6 +398,18 @@ async function main() {
   console.log('sale_tight:', { filtered_count: saleTight.filteredCount });
   assert(saleTight.filteredCount <= saleWide.filteredCount, 'FAIL: sale-tight should be non-increasing vs sale-wide');
 
+  // 4b) start>end normalization: backend should swap and warn.
+  const saleSwapped = await apiSearch({
+    filters: { last_sale_date_start: today, last_sale_date_end: '1990-01-01' },
+    sort: 'relevance',
+  });
+  const swapWarn = saleSwapped.warnings.some((w) => String(w || '').toLowerCase().includes('swapped date range'));
+  assert(swapWarn, 'FAIL: expected swapped date range warning in response.warnings');
+  assert(
+    saleSwapped.filteredCount === saleWide.filteredCount,
+    `FAIL: swapped date range filtered_count (${saleSwapped.filteredCount}) != wide filtered_count (${saleWide.filteredCount})`
+  );
+
   // 5) sorting assertion: last_sale_date_desc
   const sorted = await apiSearch({ filters: {}, sort: 'last_sale_date_desc' });
   let sortOk = null;
@@ -382,12 +435,14 @@ async function main() {
     (baselineCandidate !== null ? ` ui_baseline_candidate=${baselineCandidate}` : '') +
     ` api_baseline_filtered=${baselineApiFiltered}` +
     (baselineApiCandidate !== null ? ` api_baseline_candidate=${baselineApiCandidate}` : '') +
+    ` empty_filters_noop=${emptyNoop.filteredCount === baselineApiFiltered ? 'ok' : 'FAIL'}` +
     ` min_sqft=${sqftPick.threshold} min_sqft_filtered=${sqftPick.filteredCount}` +
     ` min_baths=${bathsPick.threshold} min_baths_filtered=${bathsPick.filteredCount}` +
     ` min_lot_size_sqft=${lotSqftPick.threshold} lot_sqft_filtered=${lotSqftPick.filteredCount}` +
     ` min_acres=${lotAcrePick.threshold} acres_filtered=${lotAcrePick.filteredCount}` +
     ` sale_wide=1990-01-01..${today} sale_wide_filtered=${saleWide.filteredCount}` +
     ` sale_tight=2020-01-01..${today} sale_tight_filtered=${saleTight.filteredCount}` +
+    ` sale_swapped_filtered=${saleSwapped.filteredCount} sale_swapped_warn=${swapWarn ? 'yes' : 'no'}` +
     ` sort_last_sale_date_desc=${sortOk}`;
 
   // Print PROOF_SUMMARY once at the end (after UI checks).
@@ -639,6 +694,39 @@ async function main() {
     const expected = `Showing ${filteredCount3} of ${candidateCount3} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
+
+  // --- UI-level date swap warning (non-blocking) ---
+  // Clear all other filters so this check is stable.
+  console.log('== clear filters for date swap check ==');
+  const clearBtn = page.getByRole('button', { name: /Clear filters/i });
+  if (await clearBtn.count()) {
+    await clearBtn.click();
+    await page.getByText('Filters active').waitFor({ state: 'detached', timeout: 10_000 }).catch(() => null);
+  }
+
+  const uiToday = todayIsoDate();
+  console.log('== set reversed last sale date range ==');
+  const lastSaleStartInput = page.locator('label', { hasText: 'Last Sale Start' }).locator('input');
+  const lastSaleEndInput = page.locator('label', { hasText: 'Last Sale End' }).locator('input');
+  await lastSaleStartInput.fill(uiToday);
+  await lastSaleEndInput.fill('1990-01-01');
+
+  console.log('== click Run (reversed sale date range) ==');
+  await waitRunReady();
+  const [responseSwapUi] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
+      timeout: 180_000,
+    }),
+    runBtn.click(),
+  ]);
+
+  const jsonSwapUi = await responseSwapUi.json().catch(() => ({}));
+  const warningsSwapUi = Array.isArray(jsonSwapUi.warnings) ? jsonSwapUi.warnings : [];
+  const hasSwapWarning = warningsSwapUi.some((w) => String(w || '').toLowerCase().includes('swapped date range'));
+  assert(hasSwapWarning, 'FAIL: expected swapped date range warning in UI run response.warnings');
+
+  // The UI should surface this as a small non-blocking warning.
+  await page.getByText(/Swapped date range/i).waitFor({ state: 'visible', timeout: 10_000 });
 
   console.log(proofSummary);
   console.log('PASS');

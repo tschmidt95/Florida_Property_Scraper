@@ -199,9 +199,10 @@ def compile_filters(raw: Any) -> List[Condition]:
         out: List[Condition] = []
 
         def _norm_choice(v: Any) -> str:
+            # For request-side filter inputs, blanks must be treated as unset.
             s = str(v or "").strip()
             if not s:
-                return "UNKNOWN"
+                return ""
             return " ".join(s.upper().split())
 
         def _num(v: Any) -> float | None:

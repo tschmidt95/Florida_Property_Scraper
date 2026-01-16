@@ -8,9 +8,10 @@ from pydantic import BaseModel
 import json
 import logging
 import os
+import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from florida_property_scraper.api.geojson import to_featurecollection
@@ -333,6 +334,77 @@ if app:
 
         search_id = uuid.uuid4().hex[:12]
 
+        pre_warnings: list[str] = []
+
+        def _parse_date_any(v: object) -> date | None:
+            if v is None:
+                return None
+            if isinstance(v, date) and not isinstance(v, datetime):
+                return v
+            if isinstance(v, datetime):
+                try:
+                    return v.date()
+                except Exception:
+                    return None
+            if not isinstance(v, str):
+                return None
+            s = v.strip()
+            if not s:
+                return None
+            if "T" in s:
+                try:
+                    return datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+                except Exception:
+                    return None
+            try:
+                return date.fromisoformat(s)
+            except Exception:
+                pass
+            m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+            if m:
+                try:
+                    mm = int(m.group(1))
+                    dd = int(m.group(2))
+                    yy = int(m.group(3))
+                    return date(yy, mm, dd)
+                except Exception:
+                    return None
+            return None
+
+        def _normalize_last_sale_date_range(filters_obj: object) -> tuple[object, bool]:
+            if not isinstance(filters_obj, dict):
+                return filters_obj, False
+
+            if "last_sale_date_start" not in filters_obj and "last_sale_date_end" not in filters_obj:
+                return filters_obj, False
+
+            d0_raw = filters_obj.get("last_sale_date_start")
+            d1_raw = filters_obj.get("last_sale_date_end")
+            d0 = _parse_date_any(d0_raw)
+            d1 = _parse_date_any(d1_raw)
+
+            swapped = False
+            if d0 is not None and d1 is not None and d0 > d1:
+                swapped = True
+                d0, d1 = d1, d0
+
+            out = dict(filters_obj)
+            if "last_sale_date_start" in out:
+                out["last_sale_date_start"] = d0.isoformat() if d0 is not None else None
+            if "last_sale_date_end" in out:
+                out["last_sale_date_end"] = d1.isoformat() if d1 is not None else None
+
+            if out == filters_obj:
+                return filters_obj, swapped
+            return out, swapped
+
+        raw_filters0 = payload.get("filters")
+        raw_filters_norm, swapped_last_sale_range = _normalize_last_sale_date_range(raw_filters0)
+        if swapped_last_sale_range:
+            pre_warnings.append("Swapped date range")
+        if raw_filters_norm is not raw_filters0:
+            payload["filters"] = raw_filters_norm
+
         debug_enabled = bool(payload.get("debug", False)) or (
             str(os.getenv("FPS_SEARCH_DEBUG", "")).strip().lower() in {"1", "true", "yes"}
         )
@@ -533,6 +605,8 @@ if app:
         warnings: list[str] = []
         if provider_warnings:
             warnings.extend(provider_warnings)
+        if pre_warnings:
+            warnings.extend(pre_warnings)
         if not candidates:
             warnings.append("No parcel candidates returned for bbox")
         if candidates and not intersecting:
