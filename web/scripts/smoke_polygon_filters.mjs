@@ -47,6 +47,13 @@ function readJsonlBySearchId(filePath, searchId) {
 }
 
 async function main() {
+  // Keep the repo clean even if the backend writes debug artifacts.
+  try {
+    fs.unlinkSync(DEBUG_LOG);
+  } catch {
+    // ignore
+  }
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -90,11 +97,10 @@ async function main() {
   const mapCount = await maps.count();
   assert(mapCount === 1, `FAIL: expected exactly 1 .leaflet-container, saw ${mapCount}`);
 
-  // Leaflet.draw usually renders multiple toolbars (draw + edit/remove), so do not
-  // assert toolbarCount. Instead, ensure we only have one polygon tool.
   const toolbarCount = await page.locator('.leaflet-draw-toolbar').count();
   const polygonBtnCount = await page.locator('a.leaflet-draw-draw-polygon').count();
   console.log('draw_ui:', { toolbarCount, polygonBtnCount });
+  assert(toolbarCount === 1, `FAIL: expected exactly 1 .leaflet-draw-toolbar, saw ${toolbarCount}`);
   assert(polygonBtnCount === 1, `FAIL: expected exactly 1 polygon draw button, saw ${polygonBtnCount}`);
 
   const map = maps.first();
@@ -283,7 +289,7 @@ async function main() {
   for (let i = 0; i < Math.min(zoningLabelCount, 25); i++) {
     const lbl = zoningLabels.nth(i);
     const t = (await lbl.innerText().catch(() => '')).trim();
-    if (hasText(t)) {
+    if (hasText(t) && !/^\d{2}\/\d{2}\/\d{4}$/.test(t) && !/^\d{2}\/\d{3}$/.test(t)) {
       zoningSelectedText = t;
       await lbl.click();
       break;
@@ -312,6 +318,18 @@ async function main() {
   assert(
     Array.isArray(payload2.filters.zoning_in) && payload2.filters.zoning_in.length > 0,
     'FAIL: expected payload.filters.zoning_in to be a non-empty array after selecting zoning'
+  );
+
+  const json2 = await response2.json().catch(() => ({}));
+  const summary2 = json2.summary || {};
+  const filteredCount2 = safeNum(summary2.filtered_count) ?? (Array.isArray(json2.records) ? json2.records.length : 0);
+  assert(
+    typeof filteredCount2 === 'number' && Number.isFinite(filteredCount2),
+    'FAIL: zoning run did not return a numeric filtered_count'
+  );
+  assert(
+    filteredCount2 <= filteredCount1,
+    `FAIL: expected zoning filtered_count (${filteredCount2}) <= prior filtered_count (${filteredCount1})`
   );
 
   // Select the first future land use option and ensure it appears in the request payload.
@@ -364,6 +382,14 @@ async function main() {
   const summary3 = json3.summary || {};
   const candidateCount3 = safeNum(summary3.candidate_count) ?? null;
   const filteredCount3 = safeNum(summary3.filtered_count) ?? (Array.isArray(json3.records) ? json3.records.length : 0);
+  assert(
+    typeof filteredCount3 === 'number' && Number.isFinite(filteredCount3),
+    'FAIL: FLU run did not return a numeric filtered_count'
+  );
+  assert(
+    filteredCount3 <= filteredCount2,
+    `FAIL: expected FLU filtered_count (${filteredCount3}) <= zoning filtered_count (${filteredCount2})`
+  );
   if (candidateCount3 !== null) {
     const expected = `Showing ${filteredCount3} of ${candidateCount3} in polygon`;
     await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
@@ -377,6 +403,13 @@ async function main() {
   });
   console.log('PASS');
   await browser.close();
+
+  // Best-effort cleanup (keep working tree clean).
+  try {
+    fs.unlinkSync(DEBUG_LOG);
+  } catch {
+    // ignore
+  }
 }
 
 main().catch((e) => {

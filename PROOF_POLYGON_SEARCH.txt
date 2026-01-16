@@ -1,22 +1,4 @@
-$ (cd web && npm run build)
-
-> florida-property-scraper-web@0.0.0 build
-> tsc -p tsconfig.json --noEmit && vite build
-
-vite v5.4.21 building for production...
-transforming...
-node_modules/react-leaflet-draw/dist/esm/EditControl.js (8:7): "default" is not exported by "node_modules/leaflet-draw/dist/leaflet.draw.js", imported by "node_modules/react-leaflet-draw/dist/esm/EditControl.js".
-✓ 94 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/index.html                         0.73 kB │ gzip:   0.39 kB
-dist/assets/spritesheet-DpIxuf5L.svg    5.55 kB │ gzip:   1.67 kB
-dist/assets/index-l2ki0fwL.css         41.95 kB │ gzip:  16.27 kB
-dist/assets/SafeMap-CKiFuDc8.js         0.60 kB │ gzip:   0.43 kB
-dist/assets/TileLayer-DiXNoncC.js       3.47 kB │ gzip:   1.36 kB
-dist/assets/MapSearch-DzWFoQq_.js      43.51 kB │ gzip:  10.61 kB
-dist/assets/index-BhUbCnW3.js         392.31 kB │ gzip: 116.05 kB
-✓ built in 3.25s
+$ (cd web && npm run build)  # skipped (dist is up-to-date)
 == POST /api/parcels/search (lng,lat) ==
 records_count: 25
 warnings: []
@@ -40,7 +22,7 @@ situs_address: 1300 E SOUTH ST, Orlando 32801
 
 == UI smoke (Playwright): polygon + filters payload ==
 == open http://127.0.0.1:8000/ ==
-maps: [ { idx: 0, w: 826, h: 486, toolbarCount: 2, polygonBtnCount: 1 } ]
+maps: [ { idx: 0, w: 826, h: 486, toolbarCount: 1, polygonBtnCount: 1 } ]
 selected_map: { idx: 0, w: 826, h: 486 }
 leaflet: {
   hasGlobalL: true,
@@ -48,7 +30,7 @@ leaflet: {
   hasDrawControl: true,
   hasDrawEvent: true
 }
-draw_dom: { toolbarCount: 2, polygonBtnCount: 1, anyLeafletControls: 6 }
+draw_dom: { toolbarCount: 1, polygonBtnCount: 1, anyLeafletControls: 5 }
 control_anchors: [
   { className: 'leaflet-control-zoom-in', title: 'Zoom in', text: '+' },
   {
@@ -60,11 +42,6 @@ control_anchors: [
     className: 'leaflet-draw-draw-polygon',
     title: 'Draw a polygon',
     text: 'Draw a polygon'
-  },
-  {
-    className: 'leaflet-draw-edit-remove leaflet-disabled',
-    title: 'No layers to delete',
-    text: 'Delete layers'
   },
   {
     className: '',
@@ -117,13 +94,13 @@ PASS
 
 == UI proof (Playwright): acceptance filters (min_sqft=2000,max_sqft=2700,min_acres=0.5) ==
 == open http://127.0.0.1:8000/ ==
-draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
+draw_ui: { toolbarCount: 1, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-[browser:log] [FILTERDBG] response {search_id: ce0b76325416, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 2132beb09fb5, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
@@ -136,18 +113,18 @@ filtered_payload_keys: {
   enrich: false,
   bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
 }
-[browser:log] [FILTERDBG] response {search_id: 6a8771ec4638, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 51b6e627f0e9, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
 filtered_counts: { candidate_count: 15, filtered_count: 11 }
 == select first zoning option ==
-zoning_selected_label: 01/01/1993
+zoning_selected_label: ORL-AC-N
 == click Run (zoning selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 6e1a9c9e9d35, candidate_count: 15, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first future land use option ==
-[browser:log] [FILTERDBG] response {search_id: e9c38571e5b6, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 1ceda401013f, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 6f262fa84eb7, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 PROOF_SUMMARY: {
   candidate_count: 15,
   filtered_count: 11,

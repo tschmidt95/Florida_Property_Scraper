@@ -1,11 +1,11 @@
 == open http://127.0.0.1:8000/ ==
-draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
+draw_ui: { toolbarCount: 1, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-[browser:log] [FILTERDBG] response {search_id: e77ba2558d9f, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 966fe8887b4c, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
@@ -16,20 +16,26 @@ filtered_payload_keys: {
   has_zoning_in: false,
   has_future_land_use_in: false,
   enrich: false,
-  bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
-}
-[browser:log] [FILTERDBG] response {search_id: b3e9c2e2a7a6, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+  bbox: [ -81.44989, 28.501583, -81.308098filtered_payload[browser:log] [FILTERDBG] response {search_id: f96c26fdd30a, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
 filtered_counts: { candidate_count: 15, filtered_count: 11 }
 == select first zoning option ==
-zoning_selected_label: 01/01/1993
+zoning_selected_label: ORL-AC-N
 == click Run (zoning selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 58b8ff1aa8ce, candidate_count: 15, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first future land use option ==
-[browser:log] [FILTERDBG] response {search_id: 29e671483d1f, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 8927206c4c30, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 718a32f7c21e, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+PROOF_SUMMARY: {
+  candidate_count: 15,
+  filtered_count: 11,
+  zoning_options_len: 31,
+  future_land_use_options_len: 19
+}
+PASS
+future_land_use_options_len: 19}
 PROOF_SUMMARY: {
   candidate_count: 15,
   filtered_count: 11,

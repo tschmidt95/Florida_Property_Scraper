@@ -84,11 +84,9 @@ function DrawControls({
         marker: false,
         circlemarker: false,
       },
-      edit: {
-        featureGroup: drawnItems,
-        edit: false,
-        remove: true,
-      },
+      // Keep the UI deterministic: one toolbar (polygon draw) only.
+      // Users can still clear shapes via the sidebar "Clear" button.
+      edit: false,
     } as const;
 
     const control = new L.Control.Draw(drawControlOptions as any);
@@ -1070,13 +1068,22 @@ export default function MapSearch({
         const set = new Set<string>();
         for (const v of arr) {
           if (typeof v !== 'string') continue;
-          const s = v.trim();
+          const s = v.trim().replace(/\s+/g, ' ');
           if (s) set.add(s);
         }
         return Array.from(set).sort((a, b) => a.localeCompare(b));
       };
 
-      setZoningOptions(uniqSorted((resp as any).zoning_options));
+      const isJunkZoningOption = (s: string): boolean => {
+        // Guard against known placeholders that show up in Orange zoning options.
+        // Examples seen: "01/01/1993", "01/001".
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return true;
+        if (/^\d{2}\/\d{3}$/.test(s)) return true;
+        return false;
+      };
+
+      const rawZoningOptions = uniqSorted((resp as any).zoning_options).filter((s) => !isJunkZoningOption(s));
+      setZoningOptions(rawZoningOptions);
       setFutureLandUseOptions(uniqSorted((resp as any).future_land_use_options));
 
       const recs = resp.records || [];

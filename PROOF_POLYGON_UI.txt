@@ -82,7 +82,7 @@ situs_address: 1300 E SOUTH ST, Orlando 32801
 
 == UI smoke (Playwright): polygon + filters payload ==
 == open http://127.0.0.1:8000/ ==
-maps: [ { idx: 0, w: 826, h: 486, toolbarCount: 2, polygonBtnCount: 1 } ]
+maps: [ { idx: 0, w: 826, h: 486, toolbarCount: 1, polygonBtnCount: 1 } ]
 selected_map: { idx: 0, w: 826, h: 486 }
 leaflet: {
   hasGlobalL: true,
@@ -90,7 +90,7 @@ leaflet: {
   hasDrawControl: true,
   hasDrawEvent: true
 }
-draw_dom: { toolbarCount: 2, polygonBtnCount: 1, anyLeafletControls: 6 }
+draw_dom: { toolbarCount: 1, polygonBtnCount: 1, anyLeafletControls: 5 }
 control_anchors: [
   { className: 'leaflet-control-zoom-in', title: 'Zoom in', text: '+' },
   {
@@ -102,11 +102,6 @@ control_anchors: [
     className: 'leaflet-draw-draw-polygon',
     title: 'Draw a polygon',
     text: 'Draw a polygon'
-  },
-  {
-    className: 'leaflet-draw-edit-remove leaflet-disabled',
-    title: 'No layers to delete',
-    text: 'Delete layers'
   },
   {
     className: '',
@@ -159,13 +154,13 @@ PASS
 
 == UI proof (Playwright): acceptance filters (min_sqft=2000,max_sqft=2700,min_acres=0.5) ==
 == open http://127.0.0.1:8000/ ==
-draw_ui: { toolbarCount: 2, polygonBtnCount: 1 }
+draw_ui: { toolbarCount: 1, polygonBtnCount: 1 }
 == select polygon tool ==
 == draw polygon (5 clicks) ==
 == finish polygon ==
 == click Run (baseline) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: null, enrich: true}
-[browser:log] [FILTERDBG] response {search_id: 7733b7231551, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: bbc42882a288, candidate_count: 1985, filtered_count: 25, zoning_options_len: 31, future_land_use_options_len: 19}
 baseline_counts: { candidate_count: 1985, filtered_count: 25 }
 == set filters: min_sqft=2000 max_sqft=2700 min_acres=0.5 ==
 auto_enrich_checked: false
@@ -178,18 +173,18 @@ filtered_payload_keys: {
   enrich: false,
   bbox: [ -81.44989, 28.501583, -81.308098, 28.567638 ]
 }
-[browser:log] [FILTERDBG] response {search_id: 5347f8879213, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: 81b79211d20e, candidate_count: 15, filtered_count: 11, zoning_options_len: 31, future_land_use_options_len: 19}
 filtered_counts: { candidate_count: 15, filtered_count: 11 }
 == select first zoning option ==
-zoning_selected_label: 01/01/1993
+zoning_selected_label: ORL-AC-N
 == click Run (zoning selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
+[browser:log] [FILTERDBG] response {search_id: 46596cb21da4, candidate_count: 15, filtered_count: 1, zoning_options_len: 31, future_land_use_options_len: 19}
 == select first future land use option ==
-[browser:log] [FILTERDBG] response {search_id: 814bba85660e, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 flu_selected_label: 0030 — VACANT WATER
 == click Run (FLU selected) ==
 [browser:log] [FILTERDBG] request {county: orange, polygonRingLen: 6, bbox: Object, filters: Object, enrich: false}
-[browser:log] [FILTERDBG] response {search_id: 4c99f748e37d, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
+[browser:log] [FILTERDBG] response {search_id: cbcc58d6abe8, candidate_count: 15, filtered_count: 0, zoning_options_len: 31, future_land_use_options_len: 19}
 PROOF_SUMMARY: {
   candidate_count: 15,
   filtered_count: 11,
