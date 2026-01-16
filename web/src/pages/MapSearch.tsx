@@ -34,6 +34,8 @@ function DrawControls({
   const onPolygonRef = useRef(onPolygon);
   const onDeletedRef = useRef(onDeleted);
   const onDrawingChangeRef = useRef(onDrawingChange);
+  const drawControlRef = useRef<L.Control.Draw | null>(null);
+  const drawLayerRef = useRef<L.FeatureGroup | null>(null);
 
   useEffect(() => {
     onPolygonRef.current = onPolygon;
@@ -48,8 +50,16 @@ function DrawControls({
   }, [onDrawingChange]);
 
   useEffect(() => {
+    // Guard against duplicate init (HMR / edge-case remounts).
+    // React StrictMode is disabled, but this keeps Leaflet.draw controls stable.
+    const anyMap = map as any;
+    if (anyMap && anyMap.__fpsDrawControlAttached) {
+      return;
+    }
+
     const drawnItems = new L.FeatureGroup();
     drawnItemsRef.current = drawnItems;
+    drawLayerRef.current = drawnItems;
     map.addLayer(drawnItems);
 
     const isDrawingRef = { current: false };
@@ -82,6 +92,12 @@ function DrawControls({
     } as const;
 
     const control = new L.Control.Draw(drawControlOptions as any);
+    drawControlRef.current = control;
+    try {
+      (map as any).__fpsDrawControlAttached = true;
+    } catch {
+      // ignore
+    }
     map.addControl(control);
 
     const handleDrawStart = () => {
@@ -200,7 +216,14 @@ function DrawControls({
       } catch {
         // ignore
       }
+      try {
+        delete (map as any).__fpsDrawControlAttached;
+      } catch {
+        // ignore
+      }
       if (drawnItemsRef.current === drawnItems) drawnItemsRef.current = null;
+      if (drawLayerRef.current === drawnItems) drawLayerRef.current = null;
+      if (drawControlRef.current === control) drawControlRef.current = null;
     };
   }, [drawnItemsRef, map]);
 
@@ -214,6 +237,7 @@ function MultiSelectFilter({
   query,
   onQuery,
   onSelected,
+  renderOption,
 }: {
   title: string;
   options: string[];
@@ -221,12 +245,23 @@ function MultiSelectFilter({
   query: string;
   onQuery: (q: string) => void;
   onSelected: (next: string[]) => void;
+  renderOption?: (v: string) => string;
 }) {
+  const render = useMemo(() => {
+    return typeof renderOption === 'function' ? renderOption : (v: string) => v;
+  }, [renderOption]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
     if (!q) return options;
-    return options.filter((o) => o.toUpperCase().includes(q));
-  }, [options, query]);
+    return options.filter((o) => {
+      try {
+        return render(o).toUpperCase().includes(q) || o.toUpperCase().includes(q);
+      } catch {
+        return o.toUpperCase().includes(q);
+      }
+    });
+  }, [options, query, render]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
@@ -296,7 +331,7 @@ function MultiSelectFilter({
               onClick={() => remove(v)}
               title="Click to remove"
             >
-              <span className="max-w-[240px] truncate">{v}</span>
+              <span className="max-w-[240px] truncate">{render(v)}</span>
               <span className="text-cre-muted">×</span>
             </button>
           ))}
@@ -326,14 +361,14 @@ function MultiSelectFilter({
                   <label
                     key={o}
                     className="flex cursor-pointer select-none items-center gap-2 rounded-md px-1 py-1 text-xs text-cre-text hover:bg-cre-bg"
-                    title={o}
+                    title={render(o)}
                   >
                     <input
                       type="checkbox"
                       checked={selectedSet.has(o)}
                       onChange={() => toggle(o)}
                     />
-                    <span className="truncate">{o}</span>
+                    <span className="truncate">{render(o)}</span>
                   </label>
                 ))}
                 {filtered.length > 250 ? (
@@ -418,7 +453,7 @@ export default function MapSearch({
     lastSaleEnd: string;
   };
 
-  const [filterForm, setFilterForm] = useState<FilterForm>({
+  const emptyFilterForm: FilterForm = {
     minSqft: '',
     maxSqft: '',
     lotSizeUnit: 'sqft',
@@ -438,8 +473,15 @@ export default function MapSearch({
     maxBuildingValue: '',
     lastSaleStart: '',
     lastSaleEnd: '',
-  });
+  };
+
+  const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilterForm);
   const [autoEnrichMissing, setAutoEnrichMissing] = useState(true);
+
+  const [lastCounts, setLastCounts] = useState<{
+    candidateCount: number | null;
+    filteredCount: number | null;
+  } | null>(null);
 
   const [zoningOptions, setZoningOptions] = useState<string[]>([]);
   const [futureLandUseOptions, setFutureLandUseOptions] = useState<string[]>([]);
@@ -507,6 +549,60 @@ export default function MapSearch({
     if (drawnCircle) return `Circle selected (${Math.round(drawnCircle.radius_m)} m)`;
     return 'No geometry selected';
   }, [drawnCircle, drawnPolygon]);
+
+  const filtersActive = useMemo(() => {
+    const hasText = (s: string) => s.trim().length > 0;
+    if (selectedZoning.length) return true;
+    if (selectedFutureLandUse.length) return true;
+    return (
+      hasText(filterForm.minSqft) ||
+      hasText(filterForm.maxSqft) ||
+      hasText(filterForm.minLotSize) ||
+      hasText(filterForm.maxLotSize) ||
+      hasText(filterForm.minBeds) ||
+      hasText(filterForm.minBaths) ||
+      hasText(filterForm.minYearBuilt) ||
+      hasText(filterForm.maxYearBuilt) ||
+      hasText(filterForm.propertyType) ||
+      hasText(filterForm.zoning) ||
+      hasText(filterForm.minValue) ||
+      hasText(filterForm.maxValue) ||
+      hasText(filterForm.minLandValue) ||
+      hasText(filterForm.maxLandValue) ||
+      hasText(filterForm.minBuildingValue) ||
+      hasText(filterForm.maxBuildingValue) ||
+      hasText(filterForm.lastSaleStart) ||
+      hasText(filterForm.lastSaleEnd)
+    );
+  }, [filterForm, selectedFutureLandUse, selectedZoning]);
+
+  const formatCodeLabel = useMemo(() => {
+    return (raw: string) => {
+      const s = String(raw || '').trim().replace(/\s+/g, ' ');
+      const idx = s.indexOf(' - ');
+      if (idx > 0) {
+        const code = s.slice(0, idx).trim();
+        const label = s.slice(idx + 3).trim();
+        if (code && label) return `${code} — ${label}`;
+      }
+      const idx2 = s.indexOf(' — ');
+      if (idx2 > 0) {
+        const code = s.slice(0, idx2).trim();
+        const label = s.slice(idx2 + 3).trim();
+        if (code && label) return `${code} — ${label}`;
+      }
+      return s;
+    };
+  }, []);
+
+  function clearFilters() {
+    setFilterForm({ ...emptyFilterForm });
+    setSelectedZoning([]);
+    setSelectedFutureLandUse([]);
+    setZoningQuery('');
+    setFutureLandUseQuery('');
+    setErrorBanner('Filters cleared. Click Run to refresh results.');
+  }
 
   function clearDrawings() {
     try {
@@ -883,6 +979,7 @@ export default function MapSearch({
     }
 
     const payload = built.payload;
+    const hadFilters = !!(payload as any)?.filters;
     setLastRequest(payload);
     console.log('[Run] payload', payload);
 
@@ -956,6 +1053,18 @@ export default function MapSearch({
       const resp = await parcelsSearchNormalized(payload);
       if (reqId !== activeReq.current) return;
 
+      const summary = (resp as any).summary || {};
+      const candidateCountRaw = typeof summary.candidate_count === 'number' ? summary.candidate_count : Number(summary.candidate_count);
+      const filteredCountRaw = typeof summary.filtered_count === 'number' ? summary.filtered_count : Number(summary.filtered_count);
+      const candidateCount = Number.isFinite(candidateCountRaw) ? candidateCountRaw : null;
+      const filteredCount = Number.isFinite(filteredCountRaw)
+        ? filteredCountRaw
+        : Array.isArray((resp as any).records)
+          ? (resp as any).records.length
+          : null;
+
+      setLastCounts({ candidateCount, filteredCount });
+
       const uniqSorted = (arr: unknown): string[] => {
         if (!Array.isArray(arr)) return [];
         const set = new Set<string>();
@@ -1004,9 +1113,16 @@ export default function MapSearch({
       });
 
       if (!list.length && !recs.length) {
-        const msg = warnings?.length
-          ? `No results returned. ${warnings.join(' / ')}`
-          : 'No results returned from backend.';
+        const hint =
+          hadFilters && candidateCount && candidateCount > 0 && filteredCount === 0
+            ? '0 matches your filters. Try widening ranges or clearing filters.'
+            : null;
+
+        const msg = hint
+          ? hint
+          : warnings?.length
+            ? `No results returned. ${warnings.join(' / ')}`
+            : 'No results returned from backend.';
         setLastError(msg);
         setErrorBanner(msg);
         setParcels([]);
@@ -1014,7 +1130,9 @@ export default function MapSearch({
         return;
       }
 
-      if (warnings?.length) {
+      if (hadFilters && candidateCount && candidateCount > 0 && filteredCount === 0) {
+        setErrorBanner('0 matches your filters. Try widening ranges or clearing filters.');
+      } else if (warnings?.length) {
         setErrorBanner(`Warnings: ${warnings.join(' / ')}`);
       }
 
@@ -1219,6 +1337,7 @@ export default function MapSearch({
               query={zoningQuery}
               onQuery={setZoningQuery}
               onSelected={setSelectedZoning}
+              renderOption={formatCodeLabel}
             />
             <MultiSelectFilter
               title="Future Land Use (multi-select)"
@@ -1227,6 +1346,7 @@ export default function MapSearch({
               query={futureLandUseQuery}
               onQuery={setFutureLandUseQuery}
               onSelected={setSelectedFutureLandUse}
+              renderOption={formatCodeLabel}
             />
             <div className="text-[11px] text-cre-muted">
               Tip: “Zoning contains” and multi-select both apply (AND).
@@ -1489,8 +1609,29 @@ export default function MapSearch({
         </div>
 
         <div className="mt-4 overflow-hidden rounded-xl border border-cre-border/40">
-          <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs font-semibold uppercase tracking-widest text-cre-muted">
-            Results: {rows.length} (live {sourceCounts.live} / cache {sourceCounts.cache})
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cre-border/40 bg-cre-bg px-3 py-2">
+            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">
+              {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null
+                ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}`
+                : `Results: ${rows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px]">
+              {filtersActive ? (
+                <span className="rounded-full border border-cre-border/40 bg-cre-surface px-2 py-1 text-cre-text">
+                  Filters active
+                </span>
+              ) : null}
+              {filtersActive ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-cre-text hover:bg-cre-bg"
+                  onClick={clearFilters}
+                >
+                  Clear filters
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-3 border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs text-cre-text">

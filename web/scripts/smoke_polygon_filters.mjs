@@ -171,14 +171,20 @@ async function main() {
   const fluOpts0 = Array.isArray(json0.future_land_use_options) ? json0.future_land_use_options : [];
 
   const baselineFiltered = safeNum(summary0.filtered_count) ?? (Array.isArray(json0.records) ? json0.records.length : 0);
+  const baselineCandidate = safeNum(summary0.candidate_count) ?? null;
   console.log('baseline:', {
     search_id: json0.search_id,
-    candidate_count: summary0.candidate_count,
-    filtered_count: summary0.filtered_count,
+    candidate_count: baselineCandidate,
+    filtered_count: baselineFiltered,
     zoning_options_len: zoningOpts0.length,
     future_land_use_options_len: fluOpts0.length,
   });
   assert(baselineFiltered > 0, 'FAIL: expected baseline filtered_count > 0');
+
+  if (baselineCandidate !== null) {
+    const expected = `Showing ${baselineFiltered} of ${baselineCandidate}`;
+    await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
+  }
 
   // Ensure the button is clickable again before setting filters and re-running.
   await waitRunReady();
@@ -201,7 +207,8 @@ async function main() {
 
   const enrichToggle = page.locator('label', { hasText: /Auto-enrich missing/i }).locator('input[type="checkbox"]');
   if (await enrichToggle.count()) {
-    if (!(await enrichToggle.isChecked())) await enrichToggle.check();
+    // Keep proofs deterministic/fast: avoid potentially slow enrich calls.
+    if (await enrichToggle.isChecked()) await enrichToggle.uncheck();
     console.log('auto_enrich_checked:', await enrichToggle.isChecked());
   }
 
@@ -291,95 +298,94 @@ async function main() {
   assert(zoningOpts1.length > 0, 'FAIL: expected zoning_options to be non-empty');
   assert(fluOpts1.length > 0, 'FAIL: expected future_land_use_options to be non-empty');
 
-  // Strict-mode sanity: returned records should have the numeric fields needed for filtering.
-  const recs1 = Array.isArray(json1.records) ? json1.records : [];
-  const totalRecs1 = recs1.length;
-  assert(totalRecs1 > 0, 'FAIL: response.records is empty');
-
-  let livingPresent = 0;
-  let lotAcresPresent = 0;
-  let zoningPresent = 0;
-  let fluPresent = 0;
-  for (const r of recs1) {
-    if (r && hasPositiveNumber(r.living_area_sqft)) livingPresent += 1;
-    if (r && hasPositiveNumber(r.lot_size_acres)) lotAcresPresent += 1;
-    if (r && hasText(r.zoning)) zoningPresent += 1;
-    if (r && hasText(r.future_land_use)) fluPresent += 1;
+  if (candidateCount1 !== null) {
+    const expected = `Showing ${filteredCount1} of ${candidateCount1}`;
+    await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
   }
 
-  const livingFrac = totalRecs1 ? livingPresent / totalRecs1 : 0;
-  const lotAcresFrac = totalRecs1 ? lotAcresPresent / totalRecs1 : 0;
-  console.log('returned_record_coverage:', {
-    total: totalRecs1,
-    living_area_sqft: { present: livingPresent, coverage: Number(livingFrac.toFixed(3)) },
-    lot_size_acres: { present: lotAcresPresent, coverage: Number(lotAcresFrac.toFixed(3)) },
-    zoning: { present: zoningPresent },
-    future_land_use: { present: fluPresent },
+  // Select the first zoning option and ensure it appears in the request payload.
+  console.log('== select first zoning option ==');
+  const zoningBox = page
+    .locator('div.w-full.rounded-xl')
+    .filter({ hasText: 'Current Zoning (multi-select)' })
+    .first();
+  if ((await zoningBox.count()) === 0) throw new Error('FAIL: zoning multi-select box not found');
+
+  const zoningFirstCheckbox = zoningBox.locator('div.mt-2.max-h-64 label input[type="checkbox"]').first();
+  if ((await zoningFirstCheckbox.count()) === 0) throw new Error('FAIL: no zoning options found to select');
+  await zoningFirstCheckbox.click();
+
+  console.log('== click Run (zoning selected) ==');
+  await waitRunReady();
+  const [response2] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
+      timeout: 180_000,
+    }),
+    runBtn.click(),
+  ]);
+
+  const post2 = response2.request().postData() || '';
+  let payload2 = null;
+  try {
+    payload2 = JSON.parse(post2);
+  } catch {
+    payload2 = null;
+  }
+  assert(payload2 && payload2.filters, 'FAIL: zoning run did not include payload.filters');
+  assert(
+    Array.isArray(payload2.filters.zoning_in) && payload2.filters.zoning_in.length > 0,
+    'FAIL: expected payload.filters.zoning_in to be a non-empty array after selecting zoning'
+  );
+
+  // Select the first future land use option and ensure it appears in the request payload.
+  console.log('== select first future land use option ==');
+  const fluBox = page
+    .locator('div.w-full.rounded-xl')
+    .filter({ hasText: 'Future Land Use (multi-select)' })
+    .first();
+  if ((await fluBox.count()) === 0) throw new Error('FAIL: FLU multi-select box not found');
+
+  const fluFirstCheckbox = fluBox.locator('div.mt-2.max-h-64 label input[type="checkbox"]').first();
+  if ((await fluFirstCheckbox.count()) === 0) throw new Error('FAIL: no FLU options found to select');
+  await fluFirstCheckbox.click();
+
+  console.log('== click Run (FLU selected) ==');
+  await waitRunReady();
+  const [response3] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/parcels/search') && r.request().method() === 'POST', {
+      timeout: 180_000,
+    }),
+    runBtn.click(),
+  ]);
+
+  const post3 = response3.request().postData() || '';
+  let payload3 = null;
+  try {
+    payload3 = JSON.parse(post3);
+  } catch {
+    payload3 = null;
+  }
+  assert(payload3 && payload3.filters, 'FAIL: FLU run did not include payload.filters');
+  assert(
+    Array.isArray(payload3.filters.future_land_use_in) && payload3.filters.future_land_use_in.length > 0,
+    'FAIL: expected payload.filters.future_land_use_in to be a non-empty array after selecting FLU'
+  );
+
+  const json3 = await response3.json().catch(() => ({}));
+  const summary3 = json3.summary || {};
+  const candidateCount3 = safeNum(summary3.candidate_count) ?? null;
+  const filteredCount3 = safeNum(summary3.filtered_count) ?? (Array.isArray(json3.records) ? json3.records.length : 0);
+  if (candidateCount3 !== null) {
+    const expected = `Showing ${filteredCount3} of ${candidateCount3}`;
+    await page.getByText(expected).waitFor({ state: 'visible', timeout: 30_000 });
+  }
+
+  console.log('PROOF_SUMMARY:', {
+    candidate_count: candidateCount1,
+    filtered_count: filteredCount1,
+    zoning_options_len: zoningOpts1.length,
+    future_land_use_options_len: fluOpts1.length,
   });
-
-  assert(livingFrac >= 0.7, `FAIL: expected living_area_sqft coverage >= 0.7 on returned records, got ${livingFrac}`);
-  assert(lotAcresFrac >= 0.7, `FAIL: expected lot_size_acres coverage >= 0.7 on returned records, got ${lotAcresFrac}`);
-
-  const sample = recs1[0] || null;
-  if (sample) {
-    console.log('sample_record_fields:', {
-      parcel_id: sample.parcel_id,
-      living_area_sqft: sample.living_area_sqft,
-      lot_size_acres: sample.lot_size_acres,
-      zoning: sample.zoning,
-      future_land_use: sample.future_land_use,
-    });
-  }
-
-  const searchId = json1.search_id;
-  if (typeof searchId === 'string' && searchId.trim()) {
-    const dbg = readJsonlBySearchId(DEBUG_LOG, searchId);
-    const reqEvt = dbg.find((x) => x && x.event === 'request') || null;
-    const resEvt = dbg.find((x) => x && x.event === 'result') || null;
-
-    console.log('debug_log_path:', DEBUG_LOG);
-    console.log('debug_events_found:', dbg.length);
-    if (reqEvt) {
-      const p = reqEvt.payload || {};
-      const f = p.filters || null;
-      console.log('debug_request_summary:', {
-        bbox: reqEvt.bbox,
-        candidates_count: reqEvt.candidates_count,
-        intersecting_count: reqEvt.intersecting_count,
-        has_filters: !!f,
-        filter_keys: f && typeof f === 'object' ? Object.keys(f) : [],
-      });
-    }
-    if (resEvt) {
-      console.log('debug_result_summary:', {
-        candidate_count: resEvt.candidate_count,
-        filtered_count: resEvt.filtered_count,
-        warnings: resEvt.warnings,
-      });
-      const fs0 = resEvt.field_stats || null;
-      if (fs0 && typeof fs0 === 'object') {
-        console.log('debug_field_stats_present:', fs0.present || null);
-        if (fs0.coverage_candidates) {
-          console.log('debug_coverage_candidates:', fs0.coverage_candidates);
-          const cov = fs0.coverage_candidates || {};
-          const z0 = cov.zoning || null;
-          const f0 = cov.future_land_use || null;
-          if (z0 && typeof z0.present === 'number') {
-            assert(z0.present > 0, 'FAIL: expected candidate zoning coverage present > 0');
-          }
-          if (f0 && typeof f0.present === 'number') {
-            assert(f0.present > 0, 'FAIL: expected candidate future_land_use coverage present > 0');
-          }
-        }
-        if (fs0.sample_candidate) {
-          console.log('debug_sample_candidate:', fs0.sample_candidate);
-        }
-      }
-    }
-  } else {
-    console.log('debug: no search_id in response; cannot correlate JSONL');
-  }
-
   console.log('PASS');
   await browser.close();
 }

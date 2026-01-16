@@ -529,14 +529,23 @@ git status --porcelain=v1 && echo && git status"
       "args": [
         "-lc",
         "set -euo pipefail; \
-git add web/src/pages/MapSearch.tsx; \
-git commit -m \"fix: polygon UI reliable (finish + owners + zoning + parcel lines)\"; \
+rm -f .fps_parcels_search_debug.jsonl || true; \
+git add \
+  web/src/pages/MapSearch.tsx \
+  web/scripts/smoke_polygon_filters.mjs \
+  PROOF_POLYGON_UI.txt \
+  PROOF_POLYGON_SEARCH.txt \
+  PROOF_POLYGON_FILTERS.txt; \
+git commit -m \"feat: map results UX + filter clarity + zoning/FLU dropdown polish + proofs\"; \
 git push; \
-git checkout -- .vscode/tasks.json; \
+git checkout -- .vscode/tasks.json .gitignore; \
 echo; \
 git --no-pager log -1 --oneline; \
 echo; \
-git status --porcelain"
+echo HEAD_SHA=$(git rev-parse HEAD); \
+echo ORIGIN_SHA=$(git rev-parse origin/$(git branch --show-current)); \
+echo; \
+git status --porcelain=v1"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
