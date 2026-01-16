@@ -54,6 +54,17 @@ function todayIsoDate() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function isoToUsDate(iso) {
+  if (!hasText(iso)) return '';
+  const m = String(iso).trim().match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+  if (!m) return '';
+  const yyyy = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  if (!yyyy || !mm || !dd) return '';
+  return `${mm}/${dd}/${yyyy}`;
+}
+
 function parseDateAny(s) {
   if (!hasText(s)) return null;
   const str = String(s).trim();
@@ -184,6 +195,22 @@ async function main() {
   assert(payload0 && typeof payload0 === 'object', 'FAIL: could not parse baseline request payload JSON');
   assert(payload0.polygon_geojson, 'FAIL: baseline request missing polygon_geojson');
 
+  // Baseline UI should NOT default last-sale dates.
+  const today = todayIsoDate();
+  const f0 = payload0.filters || null;
+  if (f0) {
+    assert(!hasText(f0.last_sale_date_start), 'FAIL: baseline UI sent last_sale_date_start unexpectedly');
+    assert(!hasText(f0.last_sale_date_end), 'FAIL: baseline UI sent last_sale_date_end unexpectedly');
+  }
+  assert(
+    !hasText(f0?.last_sale_date_start) && !hasText(f0?.last_sale_date_end),
+    'FAIL: baseline UI should not set last sale date range'
+  );
+  assert(
+    !(String(f0?.last_sale_date_start || '') === today || String(f0?.last_sale_date_end || '') === today),
+    'FAIL: baseline UI appears to default last sale date to today'
+  );
+
   const json0 = await response0.json().catch(() => ({}));
   const summary0 = json0.summary || {};
   const zoningOpts0 = Array.isArray(json0.zoning_options) ? json0.zoning_options : [];
@@ -271,8 +298,12 @@ async function main() {
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     });
-    const txt = await resp.text();
-    assert(resp.ok, `FAIL: apiSearch HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 200)}`);
+    const txt = await resp.text().catch(() => '');
+    if (!resp.ok) {
+      console.log('apiSearch_fail:', { status: resp.status, statusText: resp.statusText, req });
+      console.log('apiSearch_body:', String(txt || '').slice(0, 800));
+      assert(false, `FAIL: apiSearch HTTP ${resp.status} ${resp.statusText}: ${String(txt || '').slice(0, 200)}`);
+    }
     let j = {};
     try {
       j = JSON.parse(txt);
@@ -383,7 +414,6 @@ async function main() {
   assert(lotAcrePick.filteredCount <= baselineApiFiltered, 'FAIL: acres filter increased filtered_count (unexpected)');
 
   // 4) last sale date range (wide then tighter)
-  const today = todayIsoDate();
   const saleWide = await apiSearch({
     filters: { last_sale_date_start: '1990-01-01', last_sale_date_end: today },
     sort: 'relevance',
@@ -398,7 +428,34 @@ async function main() {
   console.log('sale_tight:', { filtered_count: saleTight.filteredCount });
   assert(saleTight.filteredCount <= saleWide.filteredCount, 'FAIL: sale-tight should be non-increasing vs sale-wide');
 
-  // 4b) start>end normalization: backend should swap and warn.
+  // 4a) blank last-sale dates must be a no-op.
+  const saleBlankNoop = await apiSearch({
+    filters: { last_sale_date_start: null, last_sale_date_end: null },
+    sort: 'relevance',
+  });
+  assert(
+    saleBlankNoop.filteredCount === baselineApiFiltered,
+    `FAIL: blank last_sale_date range changed filtered_count (${saleBlankNoop.filteredCount}) vs baseline (${baselineApiFiltered})`
+  );
+
+  // 4b) ISO vs US date formats should behave the same.
+  const todayUs = isoToUsDate(today);
+  assert(hasText(todayUs), 'FAIL: could not compute todayUs');
+
+  const saleTightIso = await apiSearch({
+    filters: { last_sale_date_start: '2020-01-01', last_sale_date_end: today },
+    sort: 'relevance',
+  });
+  const saleTightUs = await apiSearch({
+    filters: { last_sale_date_start: '01/01/2020', last_sale_date_end: todayUs },
+    sort: 'relevance',
+  });
+  const saleDateFormatIsoOk = saleTightIso.filteredCount === saleTight.filteredCount;
+  const saleDateFormatUsOk = saleTightUs.filteredCount === saleTightIso.filteredCount;
+  assert(saleDateFormatIsoOk, 'FAIL: ISO date format produced unexpected filtered_count');
+  assert(saleDateFormatUsOk, 'FAIL: US date format did not match ISO filtered_count');
+
+  // 4c) start>end normalization: backend should swap and warn (ISO).
   const saleSwapped = await apiSearch({
     filters: { last_sale_date_start: today, last_sale_date_end: '1990-01-01' },
     sort: 'relevance',
@@ -408,6 +465,18 @@ async function main() {
   assert(
     saleSwapped.filteredCount === saleWide.filteredCount,
     `FAIL: swapped date range filtered_count (${saleSwapped.filteredCount}) != wide filtered_count (${saleWide.filteredCount})`
+  );
+
+  // 4d) start>end normalization: backend should swap and warn (US).
+  const saleSwappedUs = await apiSearch({
+    filters: { last_sale_date_start: todayUs, last_sale_date_end: '01/01/1990' },
+    sort: 'relevance',
+  });
+  const swapWarnUs = saleSwappedUs.warnings.some((w) => String(w || '').toLowerCase().includes('swapped date range'));
+  assert(swapWarnUs, 'FAIL: expected swapped date range warning for US date inputs');
+  assert(
+    saleSwappedUs.filteredCount === saleWide.filteredCount,
+    `FAIL: swapped (US) filtered_count (${saleSwappedUs.filteredCount}) != wide filtered_count (${saleWide.filteredCount})`
   );
 
   // 5) sorting assertion: last_sale_date_desc
@@ -420,12 +489,14 @@ async function main() {
     for (const r of sorted.records) {
       const t = parseDateAny(r?.last_sale_date);
       if (t !== null) dates.push(t);
-      if (dates.length >= 2) break;
+      if (dates.length >= 5) break;
     }
     if (dates.length < 2) {
       sortOk = 'skipped(<2 parseable dates)';
     } else {
-      assert(dates[0] >= dates[1], 'FAIL: last_sale_date_desc sort order violated');
+      for (let i = 1; i < dates.length; i++) {
+        assert(dates[i - 1] >= dates[i], 'FAIL: last_sale_date_desc sort order violated');
+      }
       sortOk = 'ok';
     }
   }
@@ -442,7 +513,11 @@ async function main() {
     ` min_acres=${lotAcrePick.threshold} acres_filtered=${lotAcrePick.filteredCount}` +
     ` sale_wide=1990-01-01..${today} sale_wide_filtered=${saleWide.filteredCount}` +
     ` sale_tight=2020-01-01..${today} sale_tight_filtered=${saleTight.filteredCount}` +
+    ` sale_date_blank_noop=${saleBlankNoop.filteredCount === baselineApiFiltered ? 'ok' : 'FAIL'}` +
+    ` sale_date_format_iso=${saleDateFormatIsoOk ? 'ok' : 'FAIL'}` +
+    ` sale_date_format_us=${saleDateFormatUsOk ? 'ok' : 'FAIL'}` +
     ` sale_swapped_filtered=${saleSwapped.filteredCount} sale_swapped_warn=${swapWarn ? 'yes' : 'no'}` +
+    ` sale_swapped_us_warn=${swapWarnUs ? 'yes' : 'no'}` +
     ` sort_last_sale_date_desc=${sortOk}`;
 
   // Print PROOF_SUMMARY once at the end (after UI checks).

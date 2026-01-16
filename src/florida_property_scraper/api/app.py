@@ -360,7 +360,9 @@ if app:
                 return date.fromisoformat(s)
             except Exception:
                 pass
-            m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+            import re as _re
+
+            m = _re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
             if m:
                 try:
                     mm = int(m.group(1))
@@ -390,9 +392,15 @@ if app:
 
             out = dict(filters_obj)
             if "last_sale_date_start" in out:
-                out["last_sale_date_start"] = d0.isoformat() if d0 is not None else None
+                if d0 is not None:
+                    out["last_sale_date_start"] = d0.isoformat()
+                else:
+                    out.pop("last_sale_date_start", None)
             if "last_sale_date_end" in out:
-                out["last_sale_date_end"] = d1.isoformat() if d1 is not None else None
+                if d1 is not None:
+                    out["last_sale_date_end"] = d1.isoformat()
+                else:
+                    out.pop("last_sale_date_end", None)
 
             if out == filters_obj:
                 return filters_obj, swapped
@@ -404,6 +412,29 @@ if app:
             pre_warnings.append("Swapped date range")
         if raw_filters_norm is not raw_filters0:
             payload["filters"] = raw_filters_norm
+
+        # If normalization removed everything, drop filters entirely.
+        if isinstance(payload.get("filters"), dict) and not payload.get("filters"):
+            payload.pop("filters", None)
+
+        debug_response_enabled = payload.get("debug") is True
+
+        normalized_filters: dict[str, Any] | None = None
+        if debug_response_enabled:
+            nf: dict[str, Any] = {}
+            if isinstance(payload.get("filters"), dict):
+                for k, v in (payload.get("filters") or {}).items():
+                    if v is None:
+                        continue
+                    if isinstance(v, str) and not v.strip():
+                        continue
+                    if isinstance(v, list) and len(v) == 0:
+                        continue
+                    nf[str(k)] = v
+            normalized_filters = {
+                "filters": nf,
+                "swapped_last_sale_date_range": bool(swapped_last_sale_range),
+            }
 
         debug_enabled = bool(payload.get("debug", False)) or (
             str(os.getenv("FPS_SEARCH_DEBUG", "")).strip().lower() in {"1", "true", "yes"}
@@ -656,6 +687,8 @@ if app:
             # Only applies when the request is not asking us to enrich missing data.
             # If enrich=true, we need to consider parcels not yet cached.
             raw_filters = payload.get("filters")
+            if not isinstance(raw_filters, dict):
+                raw_filters = {}
             explicit_enrich = payload.get("enrich", None)
             enrich_requested = bool(explicit_enrich) if explicit_enrich is not None else False
 
@@ -2146,6 +2179,7 @@ if app:
                 "field_stats": field_stats,
                 "filter_stage_counts": filter_stage_counts,
                 "error_reason": live_error_reason,
+                **({"normalized_filters": normalized_filters} if debug_response_enabled else {}),
             }
         )
 

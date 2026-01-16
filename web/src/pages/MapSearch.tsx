@@ -499,7 +499,30 @@ export default function MapSearch({
   const [showLive, setShowLive] = useState(true);
   const [showCache, setShowCache] = useState(true);
 
+  const debugUiEnabled = useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      const v = new URLSearchParams(window.location.search).get('debug');
+      return v === '1' || v === 'true';
+    } catch {
+      return false;
+    }
+  }, []);
+
   const [lastRequest, setLastRequest] = useState<any | null>(null);
+  const [debugEvidence, setDebugEvidence] = useState<
+    | {
+        requestJson: string;
+        responseMeta: {
+          search_id?: string;
+          candidate_count?: number | null;
+          filtered_count?: number | null;
+          warnings?: string[];
+        };
+        normalized_filters?: any;
+      }
+    | null
+  >(null);
   const [lastResponseCount, setLastResponseCount] = useState<number>(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
@@ -770,16 +793,13 @@ export default function MapSearch({
     const minAcres = hasLotSize && lotSizeUnit === 'acres' ? minLotSize : null;
     const maxAcres = hasLotSize && lotSizeUnit === 'acres' ? maxLotSize : null;
 
-    const filters: ParcelAttributeFilters = {
+    const filters0: ParcelAttributeFilters = {
       min_sqft: toFloatOrNull(filterForm.minSqft),
       max_sqft: toFloatOrNull(filterForm.maxSqft),
       min_acres: minAcres,
       max_acres: maxAcres,
       min_lot_size_sqft: minLotSizeSqft,
       max_lot_size_sqft: maxLotSizeSqft,
-      lot_size_unit: null,
-      min_lot_size: null,
-      max_lot_size: null,
       min_beds: toIntOrNull(filterForm.minBeds),
       min_baths: toFloatOrNull(filterForm.minBaths),
       min_year_built: toIntOrNull(filterForm.minYearBuilt),
@@ -797,7 +817,16 @@ export default function MapSearch({
       last_sale_date_start: filterForm.lastSaleStart.trim() || null,
       last_sale_date_end: filterForm.lastSaleEnd.trim() || null,
     };
-    const hasAnyFilters = Object.values(filters).some((v) => v !== null && v !== undefined && v !== '');
+
+    // IMPORTANT: omit blank filter keys entirely so "blank" never restricts results.
+    const filters: any = {};
+    for (const [k, v] of Object.entries(filters0 as any)) {
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'string' && !v.trim()) continue;
+      if (Array.isArray(v) && v.length === 0) continue;
+      filters[k] = v;
+    }
+    const hasAnyFilters = Object.keys(filters).length > 0;
 
     // If the user wants auto-enrichment, honor it even for baseline runs.
     // This is especially important for counties where zoning/FLU options come
@@ -814,6 +843,10 @@ export default function MapSearch({
       enrich_limit: enrich ? 10 : undefined,
       sort: sortKey,
     };
+
+    if (debugUiEnabled) {
+      payload.debug = true;
+    }
 
     if (poly) {
       payload.polygon_geojson = poly;
@@ -986,6 +1019,13 @@ export default function MapSearch({
     const payload = built.payload;
     const hadFilters = !!(payload as any)?.filters;
     setLastRequest(payload);
+    if (debugUiEnabled) {
+      try {
+        setDebugEvidence({ requestJson: JSON.stringify(payload, null, 2), responseMeta: {} });
+      } catch {
+        setDebugEvidence({ requestJson: String(payload), responseMeta: {} });
+      }
+    }
     console.log('[Run] payload', payload);
 
     try {
@@ -1057,6 +1097,36 @@ export default function MapSearch({
     try {
       const resp = await parcelsSearchNormalized(payload);
       if (reqId !== activeReq.current) return;
+
+      if (debugUiEnabled) {
+        try {
+          const summary = (resp as any).summary || {};
+          const warnings = Array.isArray((resp as any).warnings) ? ((resp as any).warnings as string[]) : [];
+          const meta = {
+            search_id: (resp as any).search_id,
+            candidate_count:
+              typeof summary.candidate_count === 'number'
+                ? summary.candidate_count
+                : Number.isFinite(Number(summary.candidate_count))
+                  ? Number(summary.candidate_count)
+                  : null,
+            filtered_count:
+              typeof summary.filtered_count === 'number'
+                ? summary.filtered_count
+                : Number.isFinite(Number(summary.filtered_count))
+                  ? Number(summary.filtered_count)
+                  : null,
+            warnings,
+          };
+          setDebugEvidence((prev) => ({
+            requestJson: prev?.requestJson ?? JSON.stringify(payload, null, 2),
+            responseMeta: meta,
+            normalized_filters: (resp as any).normalized_filters,
+          }));
+        } catch {
+          // ignore
+        }
+      }
 
       const summary = (resp as any).summary || {};
       const candidateCountRaw = typeof summary.candidate_count === 'number' ? summary.candidate_count : Number(summary.candidate_count);
@@ -1461,18 +1531,22 @@ export default function MapSearch({
               <div className="text-cre-muted">Last Sale Start</div>
               <input
                 className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                type="date"
+                type="text"
+                inputMode="numeric"
                 value={filterForm.lastSaleStart}
                 onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleStart: e.target.value }))}
+                placeholder="YYYY-MM-DD or MM/DD/YYYY"
               />
             </label>
             <label className="space-y-1">
               <div className="text-cre-muted">Last Sale End</div>
               <input
                 className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                type="date"
+                type="text"
+                inputMode="numeric"
                 value={filterForm.lastSaleEnd}
                 onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleEnd: e.target.value }))}
+                placeholder="YYYY-MM-DD or MM/DD/YYYY"
               />
             </label>
 
@@ -1512,6 +1586,40 @@ export default function MapSearch({
           >
             {runDebugLoading ? 'Debug…' : 'Run (debug)'}
           </button>
+
+          {debugUiEnabled ? (
+            <details className="w-full rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
+              <summary className="cursor-pointer select-none font-semibold">Debug (debug=1)</summary>
+              <div className="mt-2 grid gap-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-widest text-cre-muted">Request JSON</div>
+                  <pre className="mt-1 max-h-[220px] overflow-auto rounded-lg border border-cre-border/30 bg-black/20 p-2 text-[11px]">
+                    {debugEvidence?.requestJson || '(none)'}
+                  </pre>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-widest text-cre-muted">Response Meta</div>
+                  <pre className="mt-1 max-h-[160px] overflow-auto rounded-lg border border-cre-border/30 bg-black/20 p-2 text-[11px]">
+                    {debugEvidence
+                      ? JSON.stringify(
+                          {
+                            ...debugEvidence.responseMeta,
+                            last_sale_range_parsed: debugEvidence?.normalized_filters
+                              ? {
+                                  start: debugEvidence.normalized_filters.last_sale_date_start ?? null,
+                                  end: debugEvidence.normalized_filters.last_sale_date_end ?? null,
+                                }
+                              : null,
+                          },
+                          null,
+                          2
+                        )
+                      : '(none)'}
+                  </pre>
+                </div>
+              </div>
+            </details>
+          ) : null}
 
           <button
             type="button"

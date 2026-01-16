@@ -59,7 +59,7 @@
       {
         "label": "Proof: Orange Enrich (OCPA)",
         "type": "shell",
-        "command": "bash",
+        git commit -m \"fix: last sale date filters (optional + formats) + debug evidence + stronger proofs\"; \
         "args": [
           "-lc",
           "set -o pipefail; bash scripts/prove_orange_enrich.sh 2>&1 | tee PROOF_ORANGE_ENRICH.txt"
@@ -645,10 +645,13 @@ git commit -m 'feat: Zoning/FLU multi-select filters'"
         "-lc",
         "set -euo pipefail; \
 git add \
+  src/florida_property_scraper/api/app.py \
   web/src/pages/MapSearch.tsx \
+  web/scripts/smoke_polygon_filters.mjs \
+  PROOF_POLYGON_FILTERS.txt \
   PROOF_POLYGON_UI.txt \
   PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
+git commit -m 'fix: last sale date filters (optional + formats) + debug evidence + stronger proofs'; \
 git push"
       ],
       "options": {
@@ -669,10 +672,13 @@ git push"
         "-lc",
         "set -euo pipefail; \
 git add \
+  src/florida_property_scraper/api/app.py \
   web/src/pages/MapSearch.tsx \
+  web/scripts/smoke_polygon_filters.mjs \
+  PROOF_POLYGON_FILTERS.txt \
   PROOF_POLYGON_UI.txt \
   PROOF_POLYGON_SEARCH.txt; \
-git commit -m 'fix: deterministic polygon finish + debug UI + zoning usability + parcel lines telemetry'; \
+git commit -m 'fix: last sale date filters (optional + formats) + debug evidence + stronger proofs'; \
 git push"
       ],
       "options": {
