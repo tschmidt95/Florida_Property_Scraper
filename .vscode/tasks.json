@@ -327,6 +327,24 @@
       }
     },
     {
+      "label": "Proof: Official Records Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_official_records_engine.sh 2>&1 | tee PROOF_OFFICIAL_RECORDS_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Git: Commit+Push (Permit Trigger Categories)",
       "type": "shell",
       "command": "bash",

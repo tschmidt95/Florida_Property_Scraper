@@ -89,6 +89,7 @@ export type ParcelMapSearchRequest =
       polygon_geojson: GeoJSON.Polygon;
       center?: never;
       radius_m?: never;
+      parcel_id_in?: string[];
       live?: boolean;
       enrich?: boolean;
       enrich_limit?: number;
@@ -96,12 +97,14 @@ export type ParcelMapSearchRequest =
       include_geometry?: boolean;
       filters?: ParcelAttributeFilters;
       sort?: string;
+      debug?: boolean;
     }
   | {
       county: string;
       polygon_geojson?: never;
       center: { lat: number; lng: number };
       radius_m: number;
+      parcel_id_in?: string[];
       live?: boolean;
       enrich?: boolean;
       enrich_limit?: number;
@@ -109,6 +112,7 @@ export type ParcelMapSearchRequest =
       include_geometry?: boolean;
       filters?: ParcelAttributeFilters;
       sort?: string;
+      debug?: boolean;
     };
 
 export type ParcelRecord = {
@@ -379,6 +383,50 @@ export type TriggersByParcelResponse = {
   alerts: TriggerAlertRecord[];
 };
 
+export type TriggerRollupRecord = {
+  county: string;
+  parcel_id: string;
+  rebuilt_at: string;
+  last_seen_any?: string | null;
+  last_seen_permits?: string | null;
+  last_seen_tax?: string | null;
+  last_seen_official_records?: string | null;
+  last_seen_code_enforcement?: string | null;
+  last_seen_courts?: string | null;
+  last_seen_gis_planning?: string | null;
+  has_permits: number;
+  has_tax: number;
+  has_official_records: number;
+  has_code_enforcement: number;
+  has_courts: number;
+  has_gis_planning: number;
+  count_critical: number;
+  count_strong: number;
+  count_support: number;
+  seller_score: number;
+  details_json: string;
+};
+
+export type TriggerRollupsSearchRequest = {
+  county: string;
+  polygon_geojson?: GeoJSON.Polygon;
+  center?: { lat: number; lng: number };
+  radius_m?: number;
+  min_score?: number | null;
+  any_groups?: string[] | null;
+  tiers?: string[] | null;
+  limit?: number;
+  offset?: number;
+};
+
+export type TriggerRollupsSearchResponse = {
+  county: string;
+  candidate_count: number;
+  returned_count: number;
+  parcel_ids: string[];
+  rollups: TriggerRollupRecord[];
+};
+
 export async function triggersByParcel(params: {
   county: string;
   parcel_id: string;
@@ -406,6 +454,27 @@ export async function triggersByParcel(params: {
   const data: unknown = await resp.json();
   if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
   return data as TriggersByParcelResponse;
+}
+
+export async function triggersRollupsSearch(
+  payload: TriggerRollupsSearchRequest
+): Promise<TriggerRollupsSearchResponse> {
+  const resp = await fetch('/api/triggers/rollups/search', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  return data as TriggerRollupsSearchResponse;
 }
 
 export type AdvancedSearchFilters = {

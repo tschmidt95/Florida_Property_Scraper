@@ -737,7 +737,21 @@ if app:
             },
         }
         try:
+            # Optional pre-filter: restrict to a known parcel_id allow-list.
+            # This is used by trigger rollup filters (separate endpoint precomputes IDs).
+            allowed_ids: set[str] | None = None
+            raw_allow = payload.get("parcel_id_in")
+            if isinstance(raw_allow, list) and raw_allow:
+                allowed = [str(x or "").strip() for x in raw_allow]
+                allowed = [x for x in allowed if x]
+                if allowed:
+                    allowed_ids = set(allowed[:2000])
+                    intersecting = [f for f in intersecting if f.parcel_id in allowed_ids]
+
             parcel_ids = [f.parcel_id for f in intersecting]
+
+            if debug_counts is not None:
+                debug_counts["parcel_id_in_count"] = int(len(allowed_ids) if allowed_ids is not None else 0)
 
             def _norm_choice(v: object) -> str:
                 s = str(v or "").strip()

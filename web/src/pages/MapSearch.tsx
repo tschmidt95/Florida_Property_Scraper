@@ -10,6 +10,7 @@ import {
   parcelsSearchNormalized,
   permitsByParcel,
   triggersByParcel,
+  triggersRollupsSearch,
   type ParcelAttributeFilters,
   type ParcelRecord,
   type ParcelSearchListItem,
@@ -432,6 +433,23 @@ export default function MapSearch({
   const [selectedTriggersLoading, setSelectedTriggersLoading] = useState(false);
   const [selectedTriggersError, setSelectedTriggersError] = useState<string | null>(null);
 
+  const [rollupsEnabled, setRollupsEnabled] = useState(false);
+  const [rollupsMinScore, setRollupsMinScore] = useState('');
+  const [rollupsGroupOfficialRecords, setRollupsGroupOfficialRecords] = useState(false);
+  const [rollupsGroupPermits, setRollupsGroupPermits] = useState(false);
+  const [rollupsTierCritical, setRollupsTierCritical] = useState(false);
+  const [rollupsTierStrong, setRollupsTierStrong] = useState(false);
+  const [rollupsTierSupport, setRollupsTierSupport] = useState(false);
+  const [rollupsLastSummary, setRollupsLastSummary] = useState<
+    | {
+        candidate_count: number;
+        returned_count: number;
+        parcel_ids_count: number;
+      }
+    | null
+  >(null);
+  const [rollupsError, setRollupsError] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(
     'Draw a polygon or circle, then click Run.',
@@ -533,6 +551,7 @@ export default function MapSearch({
         debug_timing_ms?: any;
         debug_counts?: any;
         debug_flags?: any;
+        prefilter?: any;
       }
     | null
   >(null);
@@ -640,6 +659,15 @@ export default function MapSearch({
     setSelectedFutureLandUse([]);
     setZoningQuery('');
     setFutureLandUseQuery('');
+    setRollupsEnabled(false);
+    setRollupsMinScore('');
+    setRollupsGroupOfficialRecords(false);
+    setRollupsGroupPermits(false);
+    setRollupsTierCritical(false);
+    setRollupsTierStrong(false);
+    setRollupsTierSupport(false);
+    setRollupsLastSummary(null);
+    setRollupsError(null);
     setErrorBanner('Filters cleared. Click Run to refresh results.');
   }
 
@@ -1047,6 +1075,8 @@ export default function MapSearch({
     setLastError(null);
     setSoftWarnings([]);
     setErrorBanner(null);
+    setRollupsError(null);
+    setRollupsLastSummary(null);
 
     const built = buildSearchPayloadForMap();
     if ('error' in built) {
@@ -1058,6 +1088,73 @@ export default function MapSearch({
 
     const payload = built.payload;
     const hadFilters = !!(payload as any)?.filters;
+
+    const parsePositiveIntOrNull = (raw: string): number | null => {
+      const s = String(raw || '').trim().replace(/,/g, '');
+      if (!s) return null;
+      const n = Number(s);
+      if (!Number.isFinite(n)) return null;
+      const i = Math.trunc(n);
+      if (i <= 0) return null;
+      return i;
+    };
+
+    const rollupsMinScoreN = parsePositiveIntOrNull(rollupsMinScore);
+    const rollupsAnyGroups: string[] = [];
+    if (rollupsGroupOfficialRecords) rollupsAnyGroups.push('official_records');
+    if (rollupsGroupPermits) rollupsAnyGroups.push('permits');
+    const rollupsTiers: string[] = [];
+    if (rollupsTierCritical) rollupsTiers.push('critical');
+    if (rollupsTierStrong) rollupsTiers.push('strong');
+    if (rollupsTierSupport) rollupsTiers.push('support');
+    const rollupsActive =
+      rollupsEnabled && (rollupsMinScoreN !== null || rollupsAnyGroups.length > 0 || rollupsTiers.length > 0);
+
+    if (rollupsEnabled && !rollupsActive) {
+      setRollupsError('Select at least one trigger filter (group/tier/min score).');
+    }
+
+    if (rollupsActive) {
+      try {
+        const rollupsReq: any = {
+          county,
+          min_score: rollupsMinScoreN,
+          any_groups: rollupsAnyGroups.length ? rollupsAnyGroups : null,
+          tiers: rollupsTiers.length ? rollupsTiers : null,
+          limit: 2000,
+          offset: 0,
+        };
+        if ((payload as any)?.polygon_geojson) rollupsReq.polygon_geojson = (payload as any).polygon_geojson;
+        if ((payload as any)?.center && (payload as any)?.radius_m) {
+          rollupsReq.center = (payload as any).center;
+          rollupsReq.radius_m = (payload as any).radius_m;
+        }
+
+        const rollupsResp = await triggersRollupsSearch(rollupsReq);
+        const ids = Array.isArray(rollupsResp.parcel_ids) ? rollupsResp.parcel_ids : [];
+        setRollupsLastSummary({
+          candidate_count: Number(rollupsResp.candidate_count || 0),
+          returned_count: Number(rollupsResp.returned_count || 0),
+          parcel_ids_count: ids.length,
+        });
+
+        if (!ids.length) {
+          setErrorBanner('0 parcels matched trigger rollups filters.');
+          setParcels([]);
+          setRecords([]);
+          return;
+        }
+
+        (payload as any).parcel_id_in = ids;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setRollupsError(msg);
+        setErrorBanner(`Trigger rollups search failed: ${msg}`);
+        setParcels([]);
+        setRecords([]);
+        return;
+      }
+    }
     const requestOrigin = (() => {
       try {
         return typeof window !== 'undefined' ? String(window.location.origin || '') : '';
@@ -1069,7 +1166,18 @@ export default function MapSearch({
     setLastRequest(payload);
     if (debugUiEnabled) {
       try {
-        setDebugEvidence({ requestJson: JSON.stringify(payload, null, 2), responseMeta: { request_origin: requestOrigin } });
+        setDebugEvidence({
+          requestJson: JSON.stringify(payload, null, 2),
+          responseMeta: { request_origin: requestOrigin },
+          prefilter: rollupsActive
+            ? {
+                rollups_enabled: true,
+                min_score: rollupsMinScoreN,
+                any_groups: rollupsAnyGroups,
+                tiers: rollupsTiers,
+              }
+            : { rollups_enabled: false },
+        });
       } catch {
         setDebugEvidence({ requestJson: String(payload), responseMeta: { request_origin: requestOrigin } });
       }
@@ -1175,6 +1283,7 @@ export default function MapSearch({
             debug_timing_ms: (resp as any).debug_timing_ms,
             debug_counts: (resp as any).debug_counts,
             debug_flags: (resp as any).debug_flags,
+            prefilter: prev?.prefilter,
           }));
         } catch {
           // ignore
@@ -1334,6 +1443,9 @@ export default function MapSearch({
               setFutureLandUseQuery('');
               setSelectedZoning([]);
               setSelectedFutureLandUse([]);
+              setRollupsEnabled(false);
+              setRollupsLastSummary(null);
+              setRollupsError(null);
             }}
           >
             <option value="orange">Orange</option>
@@ -1620,6 +1732,109 @@ export default function MapSearch({
           </label>
         </div>
 
+        <div className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Triggers</div>
+            <label
+              className="flex items-center gap-2 text-xs text-cre-text"
+              title="Uses offline rollups; when enabled, the app pre-filters by parcel IDs before running the main search."
+            >
+              <input
+                type="checkbox"
+                checked={rollupsEnabled}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setRollupsEnabled(next);
+                  setRollupsLastSummary(null);
+                  setRollupsError(null);
+                }}
+              />
+              Enable
+            </label>
+          </div>
+
+          {rollupsEnabled ? (
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              <label className="space-y-1">
+                <div className="text-cre-muted">Min Seller Score</div>
+                <input
+                  className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
+                  inputMode="numeric"
+                  value={rollupsMinScore}
+                  onChange={(e) => setRollupsMinScore(e.target.value)}
+                  placeholder="e.g. 70"
+                />
+              </label>
+
+              <div className="space-y-1">
+                <div className="text-cre-muted">Match any group</div>
+                <div className="flex flex-wrap gap-3 pt-1">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rollupsGroupOfficialRecords}
+                      onChange={(e) => setRollupsGroupOfficialRecords(e.target.checked)}
+                    />
+                    Official records
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rollupsGroupPermits}
+                      onChange={(e) => setRollupsGroupPermits(e.target.checked)}
+                    />
+                    Permits
+                  </label>
+                </div>
+              </div>
+
+              <div className="col-span-2 space-y-1">
+                <div className="text-cre-muted">Any tier</div>
+                <div className="flex flex-wrap gap-3 pt-1">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierCritical}
+                      onChange={(e) => setRollupsTierCritical(e.target.checked)}
+                    />
+                    Critical
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierStrong}
+                      onChange={(e) => setRollupsTierStrong(e.target.checked)}
+                    />
+                    Strong
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierSupport}
+                      onChange={(e) => setRollupsTierSupport(e.target.checked)}
+                    />
+                    Support
+                  </label>
+                </div>
+              </div>
+
+              {rollupsError ? (
+                <div className="col-span-2 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+                  Trigger rollups error: {rollupsError}
+                </div>
+              ) : rollupsLastSummary ? (
+                <div className="col-span-2 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+                  Rollups: {rollupsLastSummary.returned_count} matched (of {rollupsLastSummary.candidate_count} candidates)
+                </div>
+              ) : (
+                <div className="col-span-2 text-[11px] text-cre-muted">Tip: pick a group, a tier, or a min score.</div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-2 text-[11px] text-cre-muted">Off by default (keeps baseline polygon search unchanged).</div>
+          )}
+        </div>
+
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
@@ -1666,6 +1881,7 @@ export default function MapSearch({
                             debug_flags: debugEvidence.debug_flags ?? null,
                             debug_counts: debugEvidence.debug_counts ?? null,
                             debug_timing_ms: debugEvidence.debug_timing_ms ?? null,
+                            prefilter: debugEvidence.prefilter ?? null,
                           },
                           null,
                           2

@@ -18,6 +18,27 @@ class TriggerKey(StrEnum):
     PERMIT_WINDOWS = "permit_windows"
     PERMIT_DOORS = "permit_doors"
     PERMIT_SOLAR = "permit_solar"
+
+    # Official records (recorded documents)
+    OFFICIAL_RECORD = "official_record"
+    DEED_WARRANTY = "deed_warranty"
+    DEED_QUITCLAIM = "deed_quitclaim"
+    DEED_TRUSTEE = "deed_trustee"
+    DEED_NOMINAL = "deed_nominal"
+    LIS_PENDENS = "lis_pendens"
+    FORECLOSURE = "foreclosure"
+    MORTGAGE = "mortgage"
+    HELOC = "heloc"
+    MORTGAGE_ASSIGNMENT = "mortgage_assignment"
+    MORTGAGE_MODIFICATION = "mortgage_modification"
+    SATISFACTION = "satisfaction"
+    RELEASE = "release"
+    LIEN_MECHANICS = "lien_mechanics"
+    LIEN_IRS = "lien_irs"
+    LIEN_HOA = "lien_hoa"
+    LIEN_JUDGMENT = "lien_judgment"
+    PROBATE = "probate"
+    DIVORCE = "divorce"
     OWNER_MAILING_CHANGED = "owner_mailing_changed"
 
 
@@ -39,6 +60,36 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     }:
         return 4
     if key in {TriggerKey.PERMIT_WINDOWS, TriggerKey.PERMIT_DOORS, TriggerKey.PERMIT_SOLAR}:
+        return 2
+
+    # Official records tiers
+    if key in {
+        TriggerKey.LIS_PENDENS,
+        TriggerKey.FORECLOSURE,
+        TriggerKey.PROBATE,
+        TriggerKey.DIVORCE,
+        TriggerKey.LIEN_IRS,
+        TriggerKey.LIEN_JUDGMENT,
+    }:
+        return 5
+    if key in {
+        TriggerKey.DEED_WARRANTY,
+        TriggerKey.DEED_QUITCLAIM,
+        TriggerKey.DEED_TRUSTEE,
+        TriggerKey.DEED_NOMINAL,
+        TriggerKey.SATISFACTION,
+        TriggerKey.RELEASE,
+        TriggerKey.HELOC,
+        TriggerKey.LIEN_MECHANICS,
+        TriggerKey.LIEN_HOA,
+    }:
+        return 4
+    if key in {
+        TriggerKey.MORTGAGE,
+        TriggerKey.MORTGAGE_ASSIGNMENT,
+        TriggerKey.MORTGAGE_MODIFICATION,
+        TriggerKey.OFFICIAL_RECORD,
+    }:
         return 2
 
     if key == TriggerKey.PERMIT_ISSUED:

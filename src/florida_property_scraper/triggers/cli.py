@@ -25,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--limit", type=int, default=50)
     p_run.add_argument("--now", default=None, help="Override now (ISO8601)")
 
+    p_rollups = sub.add_parser("rollups", help="Rebuild parcel trigger rollups (offline)")
+    p_rollups.add_argument("--db", default=os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite"))
+    p_rollups.add_argument("--county", required=True)
+    p_rollups.add_argument("--rebuilt_at", default=None, help="Override rebuilt_at timestamp (ISO8601)")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "list":
@@ -44,6 +49,21 @@ def main(argv: list[str] | None = None) -> int:
                 county=str(args.county),
                 now_iso=str(args.now).strip() if args.now else utc_now_iso(),
                 limit=int(args.limit),
+            )
+        finally:
+            store.close()
+
+        print(json.dumps(out))
+        return 0
+
+    if args.cmd == "rollups":
+        db_path = Path(str(args.db))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        store = SQLiteStore(str(db_path))
+        try:
+            out = store.rebuild_parcel_trigger_rollups(
+                county=str(args.county),
+                rebuilt_at=str(args.rebuilt_at).strip() if args.rebuilt_at else utc_now_iso(),
             )
         finally:
             store.close()

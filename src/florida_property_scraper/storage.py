@@ -250,6 +250,40 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_permits_final_date ON permits(final_date)"
         )
 
+        # Official records (offline stub table; future recorder connectors can populate)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS official_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                join_key TEXT,
+                doc_type TEXT,
+                rec_date TEXT,
+                parties TEXT,
+                book_page_or_instrument TEXT,
+                consideration TEXT,
+                raw_text TEXT,
+                owner_name TEXT,
+                address TEXT,
+                source TEXT,
+                raw TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_official_records_county_instrument_doc_date ON official_records(county, book_page_or_instrument, doc_type, rec_date)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_official_records_county_parcel_id ON official_records(county, parcel_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_official_records_county_join_key ON official_records(county, join_key)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_official_records_rec_date ON official_records(rec_date)"
+        )
+
         # Trigger engine tables (separate from polygon search)
         self.conn.execute(
             """
@@ -316,6 +350,42 @@ class SQLiteStore:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_trigger_alerts_county_parcel_status_time ON trigger_alerts(county, parcel_id, status, last_seen_at DESC)"
         )
+
+        # Precomputed trigger rollups (offline rebuild job; queried by UI filters)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS parcel_trigger_rollups (
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                rebuilt_at TEXT NOT NULL,
+                last_seen_any TEXT,
+                last_seen_permits TEXT,
+                last_seen_tax TEXT,
+                last_seen_official_records TEXT,
+                last_seen_code_enforcement TEXT,
+                last_seen_courts TEXT,
+                last_seen_gis_planning TEXT,
+                has_permits INTEGER NOT NULL DEFAULT 0,
+                has_tax INTEGER NOT NULL DEFAULT 0,
+                has_official_records INTEGER NOT NULL DEFAULT 0,
+                has_code_enforcement INTEGER NOT NULL DEFAULT 0,
+                has_courts INTEGER NOT NULL DEFAULT 0,
+                has_gis_planning INTEGER NOT NULL DEFAULT 0,
+                count_critical INTEGER NOT NULL DEFAULT 0,
+                count_strong INTEGER NOT NULL DEFAULT 0,
+                count_support INTEGER NOT NULL DEFAULT 0,
+                seller_score INTEGER NOT NULL DEFAULT 0,
+                details_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY(county, parcel_id)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rollups_county_score ON parcel_trigger_rollups(county, seller_score DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rollups_county_flags ON parcel_trigger_rollups(county, has_permits, has_official_records, has_tax, has_code_enforcement, has_courts, has_gis_planning)"
+        )
         self.conn.commit()
 
     def upsert_many_permits(self, records: List[PermitRecord]) -> None:
@@ -369,6 +439,396 @@ class SQLiteStore:
             payload,
         )
         self.conn.commit()
+
+    def upsert_many_official_records(self, records: List[Dict[str, Any]]) -> None:
+        if not records:
+            return
+
+        payload = [
+            (
+                (r.get("county") or "").strip().lower(),
+                r.get("parcel_id"),
+                r.get("join_key"),
+                r.get("doc_type"),
+                r.get("rec_date"),
+                r.get("parties"),
+                r.get("book_page_or_instrument"),
+                r.get("consideration"),
+                r.get("raw_text"),
+                r.get("owner_name"),
+                r.get("address"),
+                r.get("source"),
+                r.get("raw"),
+            )
+            for r in records
+        ]
+
+        self.conn.executemany(
+            """
+            INSERT INTO official_records (
+                county,
+                parcel_id,
+                join_key,
+                doc_type,
+                rec_date,
+                parties,
+                book_page_or_instrument,
+                consideration,
+                raw_text,
+                owner_name,
+                address,
+                source,
+                raw
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, book_page_or_instrument, doc_type, rec_date) DO UPDATE SET
+                parcel_id=excluded.parcel_id,
+                join_key=excluded.join_key,
+                parties=excluded.parties,
+                consideration=excluded.consideration,
+                raw_text=excluded.raw_text,
+                owner_name=excluded.owner_name,
+                address=excluded.address,
+                source=excluded.source,
+                raw=excluded.raw
+            """,
+            payload,
+        )
+        self.conn.commit()
+
+    @staticmethod
+    def _severity_to_tier(severity: int) -> str:
+        try:
+            s = int(severity)
+        except Exception:
+            s = 1
+        if s >= 5:
+            return "critical"
+        if s >= 4:
+            return "strong"
+        if s >= 2:
+            return "support"
+        return "low"
+
+    @staticmethod
+    def _compute_seller_score(*, critical: int, strong: int, support: int) -> int:
+        """Compute a 0-100 seller score from stacking rules.
+
+        Rules (requested):
+          - 1 critical OR 2 strong OR 4 mixed -> high score
+        """
+
+        c = max(0, int(critical))
+        s = max(0, int(strong))
+        p = max(0, int(support))
+
+        if c >= 1:
+            return 100
+        if s >= 2:
+            return 85
+        if (s + p) >= 4:
+            return 70
+        if s == 1:
+            return 45
+        if p >= 2:
+            return 25
+        if p == 1:
+            return 15
+        return 0
+
+    def rebuild_parcel_trigger_rollups(
+        self,
+        *,
+        county: str,
+        rebuilt_at: str,
+    ) -> Dict[str, Any]:
+        """Idempotently rebuild rollups for a county from trigger_events.
+
+        This does not call any network providers; it only reads/writes SQLite.
+        """
+
+        county_key = (county or "").strip().lower()
+        if not county_key:
+            return {"ok": False, "error": "county is required"}
+
+        rows = self.conn.execute(
+            """
+            SELECT county, parcel_id, trigger_key, trigger_at, severity
+            FROM trigger_events
+            WHERE county=?
+            ORDER BY parcel_id, trigger_at DESC
+            """,
+            (county_key,),
+        ).fetchall()
+
+        # Aggregate in Python to keep trigger-key mapping flexible.
+        agg: Dict[str, Dict[str, Any]] = {}
+
+        def _group_for_trigger_key(k: str) -> str:
+            kk = (k or "").strip().lower()
+            if kk.startswith("permit_"):
+                return "permits"
+            if kk.startswith("deed_"):
+                return "official_records"
+            if kk.startswith("mortgage") or kk.startswith("heloc"):
+                return "official_records"
+            if kk.startswith("lien_") or kk in {"lis_pendens", "foreclosure", "probate", "divorce", "satisfaction", "release"}:
+                return "official_records"
+            # Reserved groups for future connectors
+            if kk.startswith("tax_"):
+                return "tax"
+            if kk.startswith("code_"):
+                return "code_enforcement"
+            if kk.startswith("court_"):
+                return "courts"
+            if kk.startswith("gis_"):
+                return "gis_planning"
+            return "other"
+
+        for r in rows:
+            pid = str(r["parcel_id"] or "").strip()
+            if not pid:
+                continue
+
+            d = agg.get(pid)
+            if d is None:
+                d = {
+                    "last_seen_any": None,
+                    "last_seen_permits": None,
+                    "last_seen_tax": None,
+                    "last_seen_official_records": None,
+                    "last_seen_code_enforcement": None,
+                    "last_seen_courts": None,
+                    "last_seen_gis_planning": None,
+                    "has_permits": 0,
+                    "has_tax": 0,
+                    "has_official_records": 0,
+                    "has_code_enforcement": 0,
+                    "has_courts": 0,
+                    "has_gis_planning": 0,
+                    "count_critical": 0,
+                    "count_strong": 0,
+                    "count_support": 0,
+                }
+                agg[pid] = d
+
+            trigger_at = str(r["trigger_at"] or "").strip() or None
+            if trigger_at:
+                if d["last_seen_any"] is None or trigger_at > d["last_seen_any"]:
+                    d["last_seen_any"] = trigger_at
+
+            group = _group_for_trigger_key(str(r["trigger_key"] or ""))
+            if group == "permits":
+                d["has_permits"] = 1
+                if trigger_at and (d["last_seen_permits"] is None or trigger_at > d["last_seen_permits"]):
+                    d["last_seen_permits"] = trigger_at
+            elif group == "official_records":
+                d["has_official_records"] = 1
+                if trigger_at and (
+                    d["last_seen_official_records"] is None
+                    or trigger_at > d["last_seen_official_records"]
+                ):
+                    d["last_seen_official_records"] = trigger_at
+            elif group == "tax":
+                d["has_tax"] = 1
+                if trigger_at and (d["last_seen_tax"] is None or trigger_at > d["last_seen_tax"]):
+                    d["last_seen_tax"] = trigger_at
+            elif group == "code_enforcement":
+                d["has_code_enforcement"] = 1
+                if trigger_at and (
+                    d["last_seen_code_enforcement"] is None
+                    or trigger_at > d["last_seen_code_enforcement"]
+                ):
+                    d["last_seen_code_enforcement"] = trigger_at
+            elif group == "courts":
+                d["has_courts"] = 1
+                if trigger_at and (d["last_seen_courts"] is None or trigger_at > d["last_seen_courts"]):
+                    d["last_seen_courts"] = trigger_at
+            elif group == "gis_planning":
+                d["has_gis_planning"] = 1
+                if trigger_at and (
+                    d["last_seen_gis_planning"] is None
+                    or trigger_at > d["last_seen_gis_planning"]
+                ):
+                    d["last_seen_gis_planning"] = trigger_at
+
+            tier = self._severity_to_tier(int(r["severity"] or 1))
+            if tier == "critical":
+                d["count_critical"] += 1
+            elif tier == "strong":
+                d["count_strong"] += 1
+            elif tier == "support":
+                d["count_support"] += 1
+
+        # Idempotent: replace all rollups for the county.
+        self.conn.execute("DELETE FROM parcel_trigger_rollups WHERE county=?", (county_key,))
+
+        out_rows = []
+        for pid, d in agg.items():
+            score = self._compute_seller_score(
+                critical=int(d["count_critical"]),
+                strong=int(d["count_strong"]),
+                support=int(d["count_support"]),
+            )
+            out_rows.append(
+                (
+                    county_key,
+                    pid,
+                    str(rebuilt_at),
+                    d["last_seen_any"],
+                    d["last_seen_permits"],
+                    d["last_seen_tax"],
+                    d["last_seen_official_records"],
+                    d["last_seen_code_enforcement"],
+                    d["last_seen_courts"],
+                    d["last_seen_gis_planning"],
+                    int(d["has_permits"]),
+                    int(d["has_tax"]),
+                    int(d["has_official_records"]),
+                    int(d["has_code_enforcement"]),
+                    int(d["has_courts"]),
+                    int(d["has_gis_planning"]),
+                    int(d["count_critical"]),
+                    int(d["count_strong"]),
+                    int(d["count_support"]),
+                    int(score),
+                    json.dumps({}, ensure_ascii=True),
+                )
+            )
+
+        self.conn.executemany(
+            """
+            INSERT INTO parcel_trigger_rollups (
+                county,
+                parcel_id,
+                rebuilt_at,
+                last_seen_any,
+                last_seen_permits,
+                last_seen_tax,
+                last_seen_official_records,
+                last_seen_code_enforcement,
+                last_seen_courts,
+                last_seen_gis_planning,
+                has_permits,
+                has_tax,
+                has_official_records,
+                has_code_enforcement,
+                has_courts,
+                has_gis_planning,
+                count_critical,
+                count_strong,
+                count_support,
+                seller_score,
+                details_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            out_rows,
+        )
+        self.conn.commit()
+        return {"ok": True, "county": county_key, "rows": len(out_rows)}
+
+    def get_rollup_for_parcel(self, *, county: str, parcel_id: str) -> Dict[str, Any] | None:
+        county_key = (county or "").strip().lower()
+        pid = (parcel_id or "").strip()
+        if not county_key or not pid:
+            return None
+        r = self.conn.execute(
+            """
+            SELECT * FROM parcel_trigger_rollups
+            WHERE county=? AND parcel_id=?
+            """,
+            (county_key, pid),
+        ).fetchone()
+        return dict(r) if r else None
+
+    def search_rollups(
+        self,
+        *,
+        county: str,
+        parcel_ids: List[str] | None = None,
+        min_score: int | None = None,
+        require_any_groups: List[str] | None = None,
+        require_tiers: List[str] | None = None,
+        limit: int = 250,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        county_key = (county or "").strip().lower()
+        if not county_key:
+            return []
+
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 250
+        lim = max(1, min(lim, 2000))
+        try:
+            off = int(offset)
+        except Exception:
+            off = 0
+        off = max(0, min(off, 50_000))
+
+        where = ["county=?"]
+        params: list[Any] = [county_key]
+
+        if parcel_ids:
+            ids = [str(x or "").strip() for x in parcel_ids]
+            ids = [x for x in ids if x]
+            if ids:
+                ids = ids[:2000]
+                placeholders = ",".join(["?"] * len(ids))
+                where.append(f"parcel_id IN ({placeholders})")
+                params.extend(ids)
+
+        if min_score is not None:
+            try:
+                ms = int(min_score)
+            except Exception:
+                ms = 0
+            where.append("seller_score >= ?")
+            params.append(ms)
+
+        groups = set((require_any_groups or []))
+        # Any-of semantics
+        group_clauses: list[str] = []
+        for g in groups:
+            gg = str(g or "").strip().lower()
+            if gg == "permits":
+                group_clauses.append("has_permits=1")
+            elif gg == "tax":
+                group_clauses.append("has_tax=1")
+            elif gg in {"official_records", "records"}:
+                group_clauses.append("has_official_records=1")
+            elif gg in {"code", "code_enforcement"}:
+                group_clauses.append("has_code_enforcement=1")
+            elif gg == "courts":
+                group_clauses.append("has_courts=1")
+            elif gg in {"gis", "gis_planning"}:
+                group_clauses.append("has_gis_planning=1")
+        if group_clauses:
+            where.append("(" + " OR ".join(group_clauses) + ")")
+
+        tiers = set((require_tiers or []))
+        tier_clauses: list[str] = []
+        for t in tiers:
+            tt = str(t or "").strip().lower()
+            if tt == "critical":
+                tier_clauses.append("count_critical > 0")
+            elif tt == "strong":
+                tier_clauses.append("count_strong > 0")
+            elif tt == "support":
+                tier_clauses.append("count_support > 0")
+        if tier_clauses:
+            where.append("(" + " OR ".join(tier_clauses) + ")")
+
+        sql = (
+            "SELECT * FROM parcel_trigger_rollups WHERE "
+            + " AND ".join(where)
+            + " ORDER BY seller_score DESC, (last_seen_any IS NULL) ASC, last_seen_any DESC LIMIT ? OFFSET ?"
+        )
+        params.extend([lim, off])
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     def list_permits_for_parcel(
         self,
