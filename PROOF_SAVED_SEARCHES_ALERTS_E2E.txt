@@ -1,0 +1,123 @@
+Starting API on http://127.0.0.1:8011 using temp DB: /tmp/tmp.inujnCJIGP/leads.sqlite
+health: OK
+
+$ curl -sS http://127.0.0.1:8011/api/debug/ping
+{
+    "ok": true,
+    "server_time": "2026-01-17T20:20:04.962897+00:00",
+    "git": {
+        "sha": "9db8ce8",
+        "branch": "feature/address-lookup-ui"
+    },
+    "env": {
+        "FPS_USE_FDOR_CENTROIDS": "",
+        "PA_DB": "/tmp/tmp.inujnCJIGP/leads.sqlite",
+        "LEADS_SQLITE_PATH": "/tmp/tmp.inujnCJIGP/leads.sqlite",
+        "APP_GIT_SHA": "",
+        "APP_GIT_BRANCH": ""
+    }
+}
+
+$ curl -sS -X POST http://127.0.0.1:8011/api/saved-searches (create saved search)
+{
+    "ok": true,
+    "saved_search": {
+        "id": "1622880ca952",
+        "name": "E2E Saved Search",
+        "county": "orange",
+        "type": "polygon",
+        "watchlist_id": "2e3885f0ad12",
+        "polygon_geojson_json": "{\"type\": \"Polygon\", \"coordinates\": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}",
+        "bbox_json": null,
+        "filters_json": "{}",
+        "enrich": 0,
+        "sort": "",
+        "created_at": "2026-01-17T20:20:04+00:00",
+        "updated_at": "2026-01-17T20:20:04+00:00",
+        "last_run_at": null,
+        "is_enabled": 1
+    }
+}
+
+$ curl -sS -X POST http://127.0.0.1:8011/api/saved-searches/1622880ca952/members (add member)
+{
+    "ok": true
+}
+
+$ python - <<'PY' (seed trigger_alerts for parcel)
+{'ok': True, 'seed_trigger_alert': 'PASS'}
+
+$ python -m florida_property_scraper scheduler run --no-saved-searches --no-connectors --no-rollups (sync inbox)
+{
+  "alerts_inserted": 1,
+  "alerts_updated": 0,
+  "connectors": [],
+  "counties": [
+    "orange"
+  ],
+  "db": "/tmp/tmp.inujnCJIGP/leads.sqlite",
+  "inbox": [
+    {
+      "inserted": 1,
+      "ok": true,
+      "run_id": "ba6d722b79bd",
+      "since": "1970-01-01T00:00:00+00:00",
+      "updated": 0,
+      "watched": 1
+    }
+  ],
+  "now": "2026-01-01T00:00:01+00:00",
+  "ok": true,
+  "rollups": [],
+  "saved_searches": 1
+}
+
+$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=1622880ca952 (list alerts)
+{
+    "ok": true,
+    "alerts": [
+        {
+            "id": 1,
+            "saved_search_id": "1622880ca952",
+            "parcel_id": "P-E2E-1",
+            "county": "orange",
+            "alert_key": "seller_intent_critical",
+            "severity": 5,
+            "title": "Seller intent (critical)",
+            "body_json": "{\"text\": \"seller_score=100 rule=critical>=1 trigger_keys=tax_delinquent\", \"details\": {\"rule\": \"critical>=1\", \"seller_score\": 100, \"trigger_keys\": [\"tax_delinquent\"], \"severity\": 5}}",
+            "why_json": "{\"trigger_keys\": [\"tax_delinquent\"]}",
+            "first_seen_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "status": "new"
+        }
+    ]
+}
+
+$ curl -sS -X POST http://127.0.0.1:8011/api/alerts/1/read (mark read)
+{
+    "ok": true
+}
+
+$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=1622880ca952&status=read (list read)
+{
+    "ok": true,
+    "alerts": [
+        {
+            "id": 1,
+            "saved_search_id": "1622880ca952",
+            "parcel_id": "P-E2E-1",
+            "county": "orange",
+            "alert_key": "seller_intent_critical",
+            "severity": 5,
+            "title": "Seller intent (critical)",
+            "body_json": "{\"text\": \"seller_score=100 rule=critical>=1 trigger_keys=tax_delinquent\", \"details\": {\"rule\": \"critical>=1\", \"seller_score\": 100, \"trigger_keys\": [\"tax_delinquent\"], \"severity\": 5}}",
+            "why_json": "{\"trigger_keys\": [\"tax_delinquent\"]}",
+            "first_seen_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "status": "read"
+        }
+    ]
+}
+{'ok': True, 'saved_searches_alerts_e2e': 'PASS'}
+
+PASS
