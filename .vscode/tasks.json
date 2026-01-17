@@ -21,6 +21,24 @@
       }
     },
     {
+      "label": "Proof: Watchlists Alerts",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_watchlists_alerts.sh 2>&1 | tee PROOF_WATCHLISTS_ALERTS.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Stop: Kill 8000",
       "type": "shell",
       "command": "bash",
@@ -242,7 +260,10 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh; echo; git status --porcelain=v1 && echo && git status"
+        "set -euo pipefail; \
+git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json src/florida_property_scraper/storage.py src/florida_property_scraper/api/app.py src/florida_property_scraper/triggers/engine.py tests/test_triggers_seller_intent_rules.py web/src/lib/api.ts web/src/pages/MapSearch.tsx 2>/dev/null || true; \
+git checkout -- PROOF_POLYGON_UI.txt scripts/prove_polygon_ui.sh tests/test_triggers_seller_intent_rules.py web/src/lib/api.ts web/src/pages/MapSearch.tsx; \
+echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -296,7 +317,40 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json .gitignore scripts/up.sh PROOF_CODE_ENFORCEMENT_ENGINE.txt PROOF_OFFICIAL_RECORDS_ENGINE.txt PROOF_POLYGON_FILTERS.txt PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_TRIGGERS_ENGINE.txt 2>/dev/null || true; git add .vscode/tasks.json .gitignore scripts/up.sh PROOF_CODE_ENFORCEMENT_ENGINE.txt PROOF_OFFICIAL_RECORDS_ENGINE.txt PROOF_POLYGON_FILTERS.txt PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_TRIGGERS_ENGINE.txt; git commit -m \"chore: restart+verify reliability (vite) + refresh proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
+        "set -euo pipefail; \
+git update-index --no-skip-worktree --no-assume-unchanged \
+  .vscode/tasks.json \
+  src/florida_property_scraper/storage.py \
+  src/florida_property_scraper/api/app.py \
+  src/florida_property_scraper/api/routes/watchlists.py \
+  src/florida_property_scraper/__main__.py \
+  src/florida_property_scraper/scheduler/__init__.py \
+  src/florida_property_scraper/scheduler/cli.py \
+  src/florida_property_scraper/scheduler/runner.py \
+  tests/test_api_watchlists_alerts.py \
+  tests/test_scheduler_runner.py \
+  tests/test_triggers_seller_intent_rules.py \
+  scripts/prove_watchlists_alerts.sh \
+  PROOF_WATCHLISTS_ALERTS.txt \
+  2>/dev/null || true; \
+git add \
+  .vscode/tasks.json \
+  src/florida_property_scraper/storage.py \
+  src/florida_property_scraper/api/app.py \
+  src/florida_property_scraper/api/routes/watchlists.py \
+  src/florida_property_scraper/__main__.py \
+  src/florida_property_scraper/scheduler/__init__.py \
+  src/florida_property_scraper/scheduler/cli.py \
+  src/florida_property_scraper/scheduler/runner.py \
+  tests/test_api_watchlists_alerts.py \
+  tests/test_scheduler_runner.py \
+  tests/test_triggers_seller_intent_rules.py \
+  scripts/prove_watchlists_alerts.sh \
+  PROOF_WATCHLISTS_ALERTS.txt; \
+git commit -m \"feat: saved searches alerts inbox + scheduler runner\"; \
+git push; \
+echo; git --no-pager log -1 --oneline; \
+echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

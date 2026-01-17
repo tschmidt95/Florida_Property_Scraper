@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -438,7 +440,1066 @@ class SQLiteStore:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rollups_county_flags ON parcel_trigger_rollups(county, has_permits, has_official_records, has_tax, has_code_enforcement, has_courts, has_gis_planning)"
         )
+
+        # Saved searches + watchlists + inbox alerts (offline-first; does not require external services)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                county TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                is_enabled INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watchlists_county_enabled ON watchlists(county, is_enabled)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                county TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'polygon',
+                watchlist_id TEXT,
+                polygon_geojson_json TEXT NOT NULL,
+                bbox_json TEXT,
+                filters_json TEXT NOT NULL DEFAULT '{}',
+                enrich INTEGER NOT NULL DEFAULT 0,
+                sort TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_run_at TEXT,
+                is_enabled INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_searches_county_enabled ON saved_searches(county, is_enabled)"
+        )
+
+        # Saved-search membership is tracked separately so it is idempotent and diffable.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_search_members (
+                saved_search_id TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                county TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                removed_at TEXT,
+                last_seen_at TEXT,
+                PRIMARY KEY(saved_search_id, parcel_id)
+            )
+            """
+        )
+        # Backfill/migrate: ensure 'source' exists for older DBs.
+        cur.execute("PRAGMA table_info(saved_search_members)")
+        ssm_cols = {r[1] for r in cur.fetchall()}
+        if "source" not in ssm_cols:
+            self.conn.execute("ALTER TABLE saved_search_members ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_search_members_search_active ON saved_search_members(saved_search_id, removed_at, last_seen_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_search_members_county_parcel ON saved_search_members(county, parcel_id)"
+        )
+
+        # Alert rules drive notifications and how alerts are generated from rollups/triggers.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_rules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                severity_threshold INTEGER NOT NULL DEFAULT 1,
+                criteria_json TEXT NOT NULL DEFAULT '{}',
+                notify_email TEXT,
+                notify_webhook_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alert_rules_enabled ON alert_rules(enabled, updated_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS watchlist_members (
+                watchlist_id TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                county TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                last_seen_at TEXT,
+                PRIMARY KEY(watchlist_id, parcel_id)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watchlist_members_county_parcel ON watchlist_members(county, parcel_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watchlist_members_watchlist_seen ON watchlist_members(watchlist_id, last_seen_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS watchlist_runs (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                saved_search_id TEXT,
+                watchlist_id TEXT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                ok INTEGER NOT NULL DEFAULT 0,
+                stats_json TEXT NOT NULL DEFAULT '{}',
+                error_text TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watchlist_runs_watchlist_time ON watchlist_runs(watchlist_id, started_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_watchlist_runs_saved_search_time ON watchlist_runs(saved_search_id, started_at DESC)"
+        )
+
+        # Migrate legacy alerts_inbox schema (watchlist-based) to alerts_inbox_legacy.
+        try:
+            cols = {
+                str(r["name"])
+                for r in self.conn.execute("PRAGMA table_info(alerts_inbox)").fetchall()
+            }
+        except sqlite3.OperationalError:
+            cols = set()
+        if cols and ("watchlist_id" in cols) and ("saved_search_id" not in cols):
+            self.conn.execute("ALTER TABLE alerts_inbox RENAME TO alerts_inbox_legacy")
+
+        # New inbox schema (saved-search scoped; deterministic + offline-first).
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alerts_inbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                saved_search_id TEXT,
+                parcel_id TEXT NOT NULL,
+                county TEXT NOT NULL,
+                alert_key TEXT NOT NULL,
+                severity INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                body_json TEXT NOT NULL DEFAULT '{}',
+                why_json TEXT NOT NULL DEFAULT '{}',
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new'
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alerts_inbox_status_time ON alerts_inbox(status, last_seen_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alerts_inbox_search_time ON alerts_inbox(saved_search_id, last_seen_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alerts_inbox_county_time2 ON alerts_inbox(county, last_seen_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_alerts_inbox_dedupe2 ON alerts_inbox(saved_search_id, parcel_id, alert_key)"
+        )
+
+        # Idempotent notification delivery ledger. Do not resend unless the alert fingerprint changes.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_deliveries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_inbox_id INTEGER NOT NULL,
+                channel TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                recipient TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                error_text TEXT,
+                UNIQUE(alert_inbox_id, channel, fingerprint)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alert_deliveries_alert_channel ON alert_deliveries(alert_inbox_id, channel, created_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                recipient TEXT,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                sent_at TEXT,
+                error_text TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notifications_status_time ON notifications(status, created_at DESC)"
+        )
+
         self.conn.commit()
+
+    @staticmethod
+    def _utc_now_iso() -> str:
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    @staticmethod
+    def _uuid() -> str:
+        return uuid.uuid4().hex
+
+    @staticmethod
+    def _clean_json(obj: Any) -> str:
+        return json.dumps(obj, ensure_ascii=True, default=str)
+
+    def create_watchlist(
+        self,
+        *,
+        name: str,
+        county: str,
+        is_enabled: bool = True,
+        now_iso: str | None = None,
+    ) -> Dict[str, Any]:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        wid = self._uuid()[:12]
+        nm = str(name or "").strip() or "Watchlist"
+        county_key = (county or "").strip().lower()
+        self.conn.execute(
+            """
+            INSERT INTO watchlists (id, name, county, created_at, updated_at, is_enabled)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (wid, nm, county_key, now, now, 1 if is_enabled else 0),
+        )
+        self.conn.commit()
+        return {
+            "id": wid,
+            "name": nm,
+            "county": county_key,
+            "created_at": now,
+            "updated_at": now,
+            "is_enabled": 1 if is_enabled else 0,
+        }
+
+    def list_watchlists(self, *, county: str | None = None) -> List[Dict[str, Any]]:
+        where = []
+        params: list[Any] = []
+        if county:
+            where.append("county=?")
+            params.append((county or "").strip().lower())
+        sql = "SELECT * FROM watchlists"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY updated_at DESC, created_at DESC"
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_watchlist(self, *, watchlist_id: str) -> Dict[str, Any] | None:
+        wid = str(watchlist_id or "").strip()
+        if not wid:
+            return None
+        r = self.conn.execute("SELECT * FROM watchlists WHERE id=? LIMIT 1", (wid,)).fetchone()
+        return dict(r) if r else None
+
+    def add_parcel_to_watchlist(
+        self,
+        *,
+        watchlist_id: str,
+        county: str,
+        parcel_id: str,
+        source: str = "manual",
+        now_iso: str | None = None,
+    ) -> bool:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        wid = str(watchlist_id or "").strip()
+        pid = str(parcel_id or "").strip()
+        county_key = (county or "").strip().lower()
+        src = str(source or "manual").strip().lower() or "manual"
+        if not wid or not pid or not county_key:
+            return False
+
+        self.conn.execute(
+            """
+            INSERT INTO watchlist_members (watchlist_id, parcel_id, county, added_at, source, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(watchlist_id, parcel_id) DO UPDATE SET
+                county=excluded.county,
+                last_seen_at=excluded.last_seen_at
+            """,
+            (wid, pid, county_key, now, src, now),
+        )
+        self.conn.execute(
+            "UPDATE watchlists SET updated_at=? WHERE id=?",
+            (now, wid),
+        )
+        self.conn.commit()
+        return True
+
+    def list_watchlist_members(
+        self,
+        *,
+        watchlist_id: str,
+        limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        wid = str(watchlist_id or "").strip()
+        if not wid:
+            return []
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 2000
+        lim = max(1, min(lim, 5000))
+        rows = self.conn.execute(
+            """
+            SELECT * FROM watchlist_members
+            WHERE watchlist_id=?
+            ORDER BY (last_seen_at IS NULL) ASC, last_seen_at DESC, added_at DESC
+            LIMIT ?
+            """,
+            (wid, lim),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create_saved_search(
+        self,
+        *,
+        name: str,
+        county: str,
+        polygon_geojson: Dict[str, Any],
+        filters: Dict[str, Any] | None = None,
+        enrich: bool = False,
+        sort: str | None = None,
+        watchlist_id: str | None = None,
+        is_enabled: bool = True,
+        now_iso: str | None = None,
+    ) -> Dict[str, Any]:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        sid = self._uuid()[:12]
+        nm = str(name or "").strip() or "Saved Search"
+        county_key = (county or "").strip().lower()
+
+        wl_id = (watchlist_id or "").strip() or None
+        if wl_id is None:
+            wl = self.create_watchlist(name=nm, county=county_key, now_iso=now)
+            wl_id = str(wl.get("id") or "").strip() or None
+
+        # Normalize filters: drop blanks so "optional" filters never restrict when unset.
+        f_in = filters or {}
+        f_out: Dict[str, Any] = {}
+        if isinstance(f_in, dict):
+            for k, v in f_in.items():
+                if v is None:
+                    continue
+                if isinstance(v, str) and not v.strip():
+                    continue
+                if isinstance(v, list) and len(v) == 0:
+                    continue
+                f_out[str(k)] = v
+
+        self.conn.execute(
+            """
+            INSERT INTO saved_searches (
+                id, name, county, watchlist_id, polygon_geojson_json, filters_json, enrich, sort,
+                created_at, updated_at, last_run_at, is_enabled
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sid,
+                nm,
+                county_key,
+                wl_id,
+                self._clean_json(polygon_geojson or {}),
+                self._clean_json(f_out),
+                1 if bool(enrich) else 0,
+                str(sort or ""),
+                now,
+                now,
+                None,
+                1 if is_enabled else 0,
+            ),
+        )
+        self.conn.commit()
+        return self.get_saved_search(saved_search_id=sid) or {"id": sid}
+
+    def list_saved_searches(self, *, county: str | None = None) -> List[Dict[str, Any]]:
+        where = []
+        params: list[Any] = []
+        if county:
+            where.append("county=?")
+            params.append((county or "").strip().lower())
+        sql = "SELECT * FROM saved_searches"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY updated_at DESC, created_at DESC"
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_saved_search(self, *, saved_search_id: str) -> Dict[str, Any] | None:
+        sid = str(saved_search_id or "").strip()
+        if not sid:
+            return None
+        r = self.conn.execute("SELECT * FROM saved_searches WHERE id=? LIMIT 1", (sid,)).fetchone()
+        return dict(r) if r else None
+
+    def add_member_to_saved_search(
+        self,
+        *,
+        saved_search_id: str,
+        county: str,
+        parcel_id: str,
+        source: str = "manual",
+        now_iso: str | None = None,
+    ) -> bool:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        sid = str(saved_search_id or "").strip()
+        pid = str(parcel_id or "").strip()
+        county_key = str(county or "").strip().lower()
+        src = str(source or "manual").strip().lower() or "manual"
+        if not sid or not pid or not county_key:
+            return False
+        if not self.get_saved_search(saved_search_id=sid):
+            return False
+        self.conn.execute(
+            """
+            INSERT INTO saved_search_members (saved_search_id, parcel_id, county, added_at, source, removed_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(saved_search_id, parcel_id) DO UPDATE SET
+                county=excluded.county,
+                removed_at=NULL,
+                last_seen_at=excluded.last_seen_at,
+                source=excluded.source
+            """,
+            (sid, pid, county_key, now, src, now),
+        )
+        self.conn.commit()
+        return True
+
+    def list_saved_search_members(
+        self,
+        *,
+        saved_search_id: str,
+        active_only: bool = True,
+        limit: int = 2000,
+    ) -> List[Dict[str, Any]]:
+        sid = str(saved_search_id or "").strip()
+        if not sid:
+            return []
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 2000
+        lim = max(1, min(lim, 5000))
+        sql = "SELECT * FROM saved_search_members WHERE saved_search_id=?"
+        params: list[Any] = [sid]
+        if active_only:
+            sql += " AND removed_at IS NULL"
+        sql += " ORDER BY (last_seen_at IS NULL) ASC, last_seen_at DESC, added_at DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_watchlist_run_start(
+        self,
+        *,
+        kind: str,
+        watchlist_id: str | None,
+        saved_search_id: str | None,
+        started_at: str,
+    ) -> str:
+        rid = self._uuid()[:12]
+        self.conn.execute(
+            """
+            INSERT INTO watchlist_runs (
+                id, kind, saved_search_id, watchlist_id, started_at, ok, stats_json
+            )
+            VALUES (?, ?, ?, ?, ?, 0, '{}')
+            """,
+            (rid, str(kind or "").strip() or "unknown", saved_search_id, watchlist_id, started_at),
+        )
+        self.conn.commit()
+        return rid
+
+    def record_watchlist_run_finish(
+        self,
+        *,
+        run_id: str,
+        finished_at: str,
+        ok: bool,
+        stats: Dict[str, Any] | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE watchlist_runs
+            SET finished_at=?, ok=?, stats_json=?, error_text=?
+            WHERE id=?
+            """,
+            (
+                str(finished_at or ""),
+                1 if ok else 0,
+                self._clean_json(stats or {}),
+                (str(error_text or "") if error_text else None),
+                str(run_id or ""),
+            ),
+        )
+        self.conn.commit()
+
+    def get_last_watchlist_run(
+        self,
+        *,
+        watchlist_id: str,
+        kind: str,
+    ) -> Dict[str, Any] | None:
+        wid = str(watchlist_id or "").strip()
+        kd = str(kind or "").strip().lower() or "unknown"
+        if not wid:
+            return None
+        r = self.conn.execute(
+            """
+            SELECT * FROM watchlist_runs
+            WHERE watchlist_id=? AND kind=? AND ok=1 AND finished_at IS NOT NULL
+            ORDER BY finished_at DESC
+            LIMIT 1
+            """,
+            (wid, kd),
+        ).fetchone()
+        return dict(r) if r else None
+
+    def run_saved_search(
+        self,
+        *,
+        saved_search_id: str,
+        now_iso: str | None = None,
+        limit: int = 2000,
+    ) -> Dict[str, Any]:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        ss = self.get_saved_search(saved_search_id=saved_search_id)
+        if not ss:
+            return {"ok": False, "error": "saved_search not found"}
+
+        county_key = str(ss.get("county") or "").strip().lower()
+        watchlist_id = str(ss.get("watchlist_id") or "").strip()
+        if not watchlist_id:
+            return {"ok": False, "error": "saved_search has no watchlist_id"}
+
+        run_id = self.record_watchlist_run_start(
+            kind="saved_search",
+            watchlist_id=watchlist_id,
+            saved_search_id=str(ss.get("id") or ""),
+            started_at=now,
+        )
+
+        try:
+            try:
+                polygon = json.loads(ss.get("polygon_geojson_json") or "{}")
+            except Exception:
+                polygon = {}
+            try:
+                filters = json.loads(ss.get("filters_json") or "{}")
+            except Exception:
+                filters = {}
+
+            enrich = bool(int(ss.get("enrich") or 0))
+            sort = str(ss.get("sort") or "")
+
+            # Reuse the authoritative parcel search implementation.
+            from florida_property_scraper.api import app as api_app
+
+            resp = api_app.api_parcels_search(
+                {
+                    "county": county_key,
+                    "geometry": polygon,
+                    "filters": filters,
+                    "enrich": bool(enrich),
+                    "sort": sort,
+                    "limit": int(limit),
+                    "include_geometry": False,
+                }
+            )
+
+            payload: Dict[str, Any] = {}
+            try:
+                if hasattr(resp, "body") and isinstance(resp.body, (bytes, bytearray)):
+                    payload = json.loads(resp.body.decode("utf-8"))
+                elif isinstance(resp, dict):
+                    payload = resp
+            except Exception:
+                payload = {}
+
+            records = payload.get("records") if isinstance(payload.get("records"), list) else []
+            next_ids = [str(r.get("parcel_id") or "").strip() for r in (records or []) if isinstance(r, dict)]
+            next_ids = [p for p in next_ids if p]
+            next_set = set(next_ids)
+
+            cur_members = self.list_watchlist_members(watchlist_id=watchlist_id, limit=5000)
+            cur_set = set(str(m.get("parcel_id") or "").strip() for m in cur_members)
+
+            # Only auto-remove members that came from this saved search.
+            removable = set(
+                str(m.get("parcel_id") or "").strip()
+                for m in cur_members
+                if str(m.get("source") or "").strip().lower() == "saved_search"
+            )
+
+            added = sorted(next_set - cur_set)
+            removed = sorted(removable - next_set)
+
+            # Maintain saved_search_members separately so scheduler/alerts can be keyed
+            # directly to a saved search (and manual membership does not get auto-removed).
+            cur_rows = self.conn.execute(
+                """
+                SELECT parcel_id, source, removed_at
+                FROM saved_search_members
+                WHERE saved_search_id=?
+                """,
+                (str(ss.get("id") or ""),),
+            ).fetchall()
+            active_ssm = {
+                str(r["parcel_id"] or "").strip()
+                for r in cur_rows
+                if str(r["parcel_id"] or "").strip() and (r["removed_at"] is None)
+            }
+            removable_ssm = {
+                str(r["parcel_id"] or "").strip()
+                for r in cur_rows
+                if str(r["parcel_id"] or "").strip()
+                and (r["removed_at"] is None)
+                and (str(r["source"] or "").strip().lower() == "saved_search")
+            }
+            added_ssm = sorted(next_set - active_ssm)
+            removed_ssm = sorted(removable_ssm - next_set)
+
+            for pid in added:
+                self.add_parcel_to_watchlist(
+                    watchlist_id=watchlist_id,
+                    county=county_key,
+                    parcel_id=pid,
+                    source="saved_search",
+                    now_iso=now,
+                )
+
+            for pid in added_ssm:
+                self.conn.execute(
+                    """
+                    INSERT INTO saved_search_members (saved_search_id, parcel_id, county, added_at, source, removed_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, 'saved_search', NULL, ?)
+                    ON CONFLICT(saved_search_id, parcel_id) DO UPDATE SET
+                        county=excluded.county,
+                        removed_at=NULL,
+                        last_seen_at=excluded.last_seen_at,
+                        source=CASE
+                            WHEN saved_search_members.source IS NULL OR saved_search_members.source='' THEN 'saved_search'
+                            ELSE saved_search_members.source
+                        END
+                    """,
+                    (str(ss.get("id") or ""), pid, county_key, now, now),
+                )
+
+            # Update last_seen for existing saved_search members we still match.
+            keep = sorted((next_set & cur_set))
+            if keep:
+                placeholders = ",".join(["?"] * len(keep))
+                self.conn.execute(
+                    f"""
+                    UPDATE watchlist_members
+                    SET last_seen_at=?
+                    WHERE watchlist_id=? AND parcel_id IN ({placeholders})
+                    """,
+                    [now, watchlist_id] + keep,
+                )
+
+                # Mirror last_seen into saved_search_members for any still-active membership.
+                self.conn.execute(
+                    f"""
+                    UPDATE saved_search_members
+                    SET last_seen_at=?
+                    WHERE saved_search_id=? AND removed_at IS NULL AND parcel_id IN ({placeholders})
+                    """,
+                    [now, str(ss.get("id") or "")] + keep,
+                )
+
+            for pid in removed:
+                self.conn.execute(
+                    "DELETE FROM watchlist_members WHERE watchlist_id=? AND parcel_id=? AND source='saved_search'",
+                    (watchlist_id, pid),
+                )
+
+            for pid in removed_ssm:
+                self.conn.execute(
+                    """
+                    UPDATE saved_search_members
+                    SET removed_at=?
+                    WHERE saved_search_id=? AND parcel_id=? AND removed_at IS NULL AND source='saved_search'
+                    """,
+                    (now, str(ss.get("id") or ""), pid),
+                )
+
+            self.conn.execute(
+                "UPDATE saved_searches SET updated_at=?, last_run_at=? WHERE id=?",
+                (now, now, str(ss.get("id") or "")),
+            )
+            self.conn.execute(
+                "UPDATE watchlists SET updated_at=? WHERE id=?",
+                (now, watchlist_id),
+            )
+            self.conn.commit()
+
+            stats = {
+                "added": len(added),
+                "removed": len(removed),
+                "matched": len(next_set),
+                "candidate_count": int(payload.get("summary", {}).get("candidate_count") or 0) if isinstance(payload.get("summary"), dict) else 0,
+                "filtered_count": int(payload.get("summary", {}).get("filtered_count") or 0) if isinstance(payload.get("summary"), dict) else 0,
+            }
+            self.record_watchlist_run_finish(run_id=run_id, finished_at=now, ok=True, stats=stats)
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "saved_search_id": str(ss.get("id") or ""),
+                "watchlist_id": watchlist_id,
+                "county": county_key,
+                "added": added,
+                "removed": removed,
+                "stats": stats,
+            }
+        except Exception as e:
+            self.record_watchlist_run_finish(
+                run_id=run_id,
+                finished_at=now,
+                ok=False,
+                stats={"error": type(e).__name__},
+                error_text=str(e),
+            )
+            return {"ok": False, "error": str(e), "run_id": run_id}
+
+    def list_alerts(
+        self,
+        *,
+        saved_search_id: str | None = None,
+        county: str | None = None,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        where: list[str] = []
+        params: list[Any] = []
+        if saved_search_id:
+            where.append("saved_search_id=?")
+            params.append(str(saved_search_id))
+        if county:
+            where.append("county=?")
+            params.append(str(county).strip().lower())
+        if status:
+            where.append("status=?")
+            params.append(str(status).strip().lower())
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 200
+        lim = max(1, min(lim, 1000))
+
+        sql = "SELECT * FROM alerts_inbox"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_seen_at DESC, id DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_alert_read(self, *, alert_id: int) -> bool:
+        try:
+            aid = int(alert_id)
+        except Exception:
+            return False
+        if aid <= 0:
+            return False
+        self.conn.execute("UPDATE alerts_inbox SET status='read' WHERE id=?", (aid,))
+        self.conn.commit()
+        return True
+
+    def _format_inbox_alert(self, *, alert_key: str, details: Dict[str, Any] | None) -> tuple[str, str, int, list[str]]:
+        d = details or {}
+        sev = int(d.get("severity") or 0)
+        trigger_keys = d.get("trigger_keys") if isinstance(d.get("trigger_keys"), list) else []
+        trigger_keys = [str(k or "").strip() for k in trigger_keys]
+        trigger_keys = [k for k in trigger_keys if k]
+
+        seller_score = None
+        try:
+            seller_score = int(d.get("seller_score") or 0)
+        except Exception:
+            seller_score = None
+        rule = str(d.get("rule") or "").strip() or None
+
+        title = str(alert_key)
+        body_parts: list[str] = []
+
+        if alert_key == "permit_activity":
+            title = "Permit activity"
+            body_parts.append("Recent permit activity detected.")
+        elif alert_key == "owner_moved":
+            title = "Owner mailing changed"
+            body_parts.append("Owner mailing address change detected.")
+        elif alert_key == "redevelopment_signal":
+            title = "Redevelopment signal"
+            body_parts.append("Permit activity + owner mailing change within window.")
+        elif alert_key == "seller_intent_critical":
+            title = "Seller intent (critical)"
+        elif alert_key == "seller_intent_strong_stack":
+            title = "Seller intent (strong stack)"
+        elif alert_key == "seller_intent_mixed_stack":
+            title = "Seller intent (mixed stack)"
+
+        if seller_score is not None and seller_score > 0:
+            body_parts.append(f"seller_score={seller_score}")
+        if rule:
+            body_parts.append(f"rule={rule}")
+        if trigger_keys:
+            body_parts.append("trigger_keys=" + ",".join(trigger_keys[:10]))
+
+        body = " ".join(body_parts).strip() or title
+        if sev <= 0:
+            # Severity is stored on trigger_alerts; default to a conservative mapping.
+            if alert_key in {"seller_intent_critical"}:
+                sev = 5
+            elif alert_key in {"seller_intent_strong_stack", "redevelopment_signal"}:
+                sev = 4
+            elif alert_key in {"seller_intent_mixed_stack", "owner_moved"}:
+                sev = 3
+            else:
+                sev = 2
+        return title, body, int(sev), trigger_keys
+
+    def sync_saved_search_inbox_from_trigger_alerts(
+        self,
+        *,
+        saved_search_id: str,
+        now_iso: str | None = None,
+        since_iso: str | None = None,
+        max_parcels: int = 500,
+    ) -> Dict[str, Any]:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        sid = str(saved_search_id or "").strip()
+        if not sid:
+            return {"ok": False, "error": "saved_search_id required"}
+
+        ss = self.get_saved_search(saved_search_id=sid)
+        if not ss:
+            return {"ok": False, "error": "saved_search not found"}
+
+        county_key = str(ss.get("county") or "").strip().lower()
+        watchlist_id = str(ss.get("watchlist_id") or "").strip() or None
+
+        if since_iso is None:
+            r = self.conn.execute(
+                """
+                SELECT finished_at
+                FROM watchlist_runs
+                WHERE saved_search_id=? AND kind='alerts' AND ok=1 AND finished_at IS NOT NULL
+                ORDER BY finished_at DESC
+                LIMIT 1
+                """,
+                (sid,),
+            ).fetchone()
+            since_iso = str(r["finished_at"] or "").strip() if r else None
+
+        if not since_iso:
+            since_iso = "1970-01-01T00:00:00+00:00"
+
+        run_id = self.record_watchlist_run_start(
+            kind="alerts",
+            watchlist_id=watchlist_id,
+            saved_search_id=sid,
+            started_at=now,
+        )
+
+        try:
+            # Prefer saved_search_members (diffable, source-aware). Fallback to watchlist_members.
+            members = self.conn.execute(
+                """
+                SELECT parcel_id
+                FROM saved_search_members
+                WHERE saved_search_id=? AND removed_at IS NULL
+                ORDER BY (last_seen_at IS NULL) ASC, last_seen_at DESC, added_at DESC
+                LIMIT ?
+                """,
+                (sid, max(1, int(max_parcels))),
+            ).fetchall()
+            parcel_ids = [str(r["parcel_id"] or "").strip() for r in members]
+            parcel_ids = [p for p in parcel_ids if p]
+
+            if (not parcel_ids) and watchlist_id:
+                wl_members = self.list_watchlist_members(watchlist_id=watchlist_id, limit=max(1, int(max_parcels)))
+                parcel_ids = [str(m.get("parcel_id") or "").strip() for m in wl_members]
+                parcel_ids = [p for p in parcel_ids if p]
+
+            if not parcel_ids:
+                self.record_watchlist_run_finish(
+                    run_id=run_id,
+                    finished_at=now,
+                    ok=True,
+                    stats={"inserted": 0, "updated": 0, "watched": 0, "since": since_iso},
+                )
+                return {"ok": True, "run_id": run_id, "inserted": 0, "updated": 0, "watched": 0, "since": since_iso}
+
+            placeholders = ",".join(["?"] * len(parcel_ids))
+            rows = self.conn.execute(
+                f"""
+                SELECT county, parcel_id, alert_key, severity, first_seen_at, last_seen_at, details_json
+                FROM trigger_alerts
+                WHERE county=?
+                  AND status='open'
+                  AND last_seen_at > ?
+                  AND parcel_id IN ({placeholders})
+                ORDER BY last_seen_at DESC
+                """,
+                [county_key, since_iso] + parcel_ids,
+            ).fetchall()
+
+            inserted = 0
+            updated = 0
+            for r in rows:
+                try:
+                    details = json.loads(str(r["details_json"] or "{}"))
+                except Exception:
+                    details = {}
+                if isinstance(details, dict):
+                    details.setdefault("severity", int(r["severity"] or 1))
+
+                title, body, sev, trigger_keys = self._format_inbox_alert(
+                    alert_key=str(r["alert_key"] or ""),
+                    details=details,
+                )
+                first_seen_at = str(r["first_seen_at"] or "").strip() or now
+                last_seen_at = str(r["last_seen_at"] or "").strip() or now
+
+                body_json = {"text": body, "details": details}
+                why_json = {"trigger_keys": trigger_keys}
+
+                cur = self.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO alerts_inbox (
+                        saved_search_id, parcel_id, county, alert_key, severity,
+                        title, body_json, why_json,
+                        first_seen_at, last_seen_at, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+                    """,
+                    (
+                        sid,
+                        str(r["parcel_id"] or ""),
+                        county_key,
+                        str(r["alert_key"] or ""),
+                        int(sev),
+                        str(title or ""),
+                        self._clean_json(body_json),
+                        self._clean_json(why_json),
+                        first_seen_at,
+                        last_seen_at,
+                    ),
+                )
+                inserted += int(cur.rowcount or 0)
+
+                # If this alert already existed, only bump it when trigger_alerts moved forward.
+                cur2 = self.conn.execute(
+                    """
+                    UPDATE alerts_inbox
+                    SET
+                        severity=?,
+                        title=?,
+                        body_json=?,
+                        why_json=?,
+                        last_seen_at=?,
+                        status='new'
+                    WHERE saved_search_id=? AND parcel_id=? AND alert_key=? AND last_seen_at < ?
+                    """,
+                    (
+                        int(sev),
+                        str(title or ""),
+                        self._clean_json(body_json),
+                        self._clean_json(why_json),
+                        last_seen_at,
+                        sid,
+                        str(r["parcel_id"] or ""),
+                        str(r["alert_key"] or ""),
+                        last_seen_at,
+                    ),
+                )
+                updated += int(cur2.rowcount or 0)
+
+            self.conn.commit()
+            self.record_watchlist_run_finish(
+                run_id=run_id,
+                finished_at=now,
+                ok=True,
+                stats={"inserted": inserted, "updated": updated, "watched": len(parcel_ids), "since": since_iso},
+            )
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "inserted": inserted,
+                "updated": updated,
+                "watched": len(parcel_ids),
+                "since": since_iso,
+            }
+        except Exception as e:
+            self.record_watchlist_run_finish(
+                run_id=run_id,
+                finished_at=now,
+                ok=False,
+                stats={"error": type(e).__name__},
+                error_text=str(e),
+            )
+            return {"ok": False, "error": str(e), "run_id": run_id}
+
+    def sync_watchlist_inbox_from_trigger_alerts(
+        self,
+        *,
+        watchlist_id: str,
+        now_iso: str | None = None,
+        since_iso: str | None = None,
+        max_parcels: int = 500,
+    ) -> Dict[str, Any]:
+        """Backward-compatible wrapper: sync all saved searches attached to a watchlist."""
+        wid = str(watchlist_id or "").strip()
+        if not wid:
+            return {"ok": False, "error": "watchlist_id required"}
+        rows = self.conn.execute(
+            "SELECT id FROM saved_searches WHERE watchlist_id=? ORDER BY updated_at DESC",
+            (wid,),
+        ).fetchall()
+        if not rows:
+            return {"ok": True, "inserted": 0, "updated": 0, "saved_searches": 0}
+        inserted = 0
+        updated = 0
+        for r in rows[:50]:
+            sid = str(r["id"] or "").strip()
+            if not sid:
+                continue
+            res = self.sync_saved_search_inbox_from_trigger_alerts(
+                saved_search_id=sid,
+                now_iso=now_iso,
+                since_iso=since_iso,
+                max_parcels=max_parcels,
+            )
+            inserted += int(res.get("inserted") or 0)
+            updated += int(res.get("updated") or 0)
+        return {"ok": True, "inserted": inserted, "updated": updated, "saved_searches": len(rows)}
 
     def upsert_many_permits(self, records: List[PermitRecord]) -> None:
         if not records:

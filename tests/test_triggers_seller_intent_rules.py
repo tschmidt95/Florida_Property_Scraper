@@ -41,8 +41,8 @@ def test_seller_intent_alert_fires_on_critical() -> None:
             _insert_events(store, county="orange", parcel_id="P-CRIT", now=now, severities=[5])
 
             alerts = store.list_trigger_alerts_for_parcel(county="orange", parcel_id="P-CRIT", status="open")
-            seller = [a for a in alerts if a.get("alert_key") == "seller_intent"]
-            assert seller, "expected seller_intent alert"
+            seller = [a for a in alerts if a.get("alert_key") == "seller_intent_critical"]
+            assert seller, "expected seller_intent_critical alert"
             details = json.loads(seller[0].get("details_json") or "{}")
             assert details.get("rule") == "critical>=1"
             assert int(details.get("seller_score") or 0) == 100
@@ -59,8 +59,8 @@ def test_seller_intent_alert_fires_on_two_strong() -> None:
             _insert_events(store, county="orange", parcel_id="P-STRONG", now=now, severities=[4, 4])
 
             alerts = store.list_trigger_alerts_for_parcel(county="orange", parcel_id="P-STRONG", status="open")
-            seller = [a for a in alerts if a.get("alert_key") == "seller_intent"]
-            assert seller, "expected seller_intent alert"
+            seller = [a for a in alerts if a.get("alert_key") == "seller_intent_strong_stack"]
+            assert seller, "expected seller_intent_strong_stack alert"
             details = json.loads(seller[0].get("details_json") or "{}")
             assert details.get("rule") == "strong>=2"
             assert int(details.get("seller_score") or 0) == 85
@@ -77,8 +77,8 @@ def test_seller_intent_alert_fires_on_mixed_four() -> None:
             _insert_events(store, county="orange", parcel_id="P-MIX", now=now, severities=[4, 2, 2, 2])
 
             alerts = store.list_trigger_alerts_for_parcel(county="orange", parcel_id="P-MIX", status="open")
-            seller = [a for a in alerts if a.get("alert_key") == "seller_intent"]
-            assert seller, "expected seller_intent alert"
+            seller = [a for a in alerts if a.get("alert_key") == "seller_intent_mixed_stack"]
+            assert seller, "expected seller_intent_mixed_stack alert"
             details = json.loads(seller[0].get("details_json") or "{}")
             assert details.get("rule") == "mixed>=4"
             assert int(details.get("seller_score") or 0) == 70

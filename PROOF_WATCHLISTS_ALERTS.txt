@@ -1,0 +1,4 @@
+$ python - <<'PY' (seed watchlist + trigger_alert + inbox sync)
+{'ok': True, 'watchlist_alerts': 'PASS'}
+
+PASS

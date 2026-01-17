@@ -235,6 +235,10 @@ def main():
         from florida_property_scraper.triggers.cli import main as triggers_main
 
         raise SystemExit(triggers_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "scheduler":
+        from florida_property_scraper.scheduler.cli import main as scheduler_main
+
+        raise SystemExit(scheduler_main(sys.argv[2:]))
     parser = argparse.ArgumentParser(
         description="Florida property scraper CLI",
     )

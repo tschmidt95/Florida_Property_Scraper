@@ -124,16 +124,19 @@ if app:
     from florida_property_scraper.api.routes.permits import router as permits_router
     from florida_property_scraper.api.routes.lookup import router as lookup_router
     from florida_property_scraper.api.routes.triggers import router as triggers_router
+    from florida_property_scraper.api.routes.watchlists import router as watchlists_router
 
     assert search_router is not None
     assert permits_router is not None
     assert lookup_router is not None
     assert triggers_router is not None
+    assert watchlists_router is not None
 
     app.include_router(search_router, prefix="/api")
     app.include_router(permits_router, prefix="/api")
     app.include_router(lookup_router, prefix="/api")
     app.include_router(triggers_router, prefix="/api")
+    app.include_router(watchlists_router, prefix="/api")
 
     @app.get("/health")
     def health_route():
@@ -2951,3 +2954,104 @@ if app:
             os.getenv("APP_GIT_BRANCH", ""),
         )
         init_db(os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite"))
+
+    _watchlists_scheduler_task = {"task": None}
+
+    @app.on_event("startup")
+    async def _start_watchlists_scheduler():
+        import asyncio
+
+        enabled = os.getenv("FPS_WATCHLIST_SCHEDULER", "0").strip() == "1"
+        if not enabled:
+            return
+
+        interval_s = int(float(os.getenv("FPS_WATCHLIST_INTERVAL_S", "3600") or 3600))
+        interval_s = max(30, interval_s)
+        connector_limit = int(float(os.getenv("FPS_TRIGGER_CONNECTOR_LIMIT", "50") or 50))
+        connector_limit = max(1, min(connector_limit, 500))
+
+        logger = logging.getLogger("fps.watchlists")
+        logger.warning(
+            "watchlists scheduler enabled: interval_s=%s connector_limit=%s",
+            interval_s,
+            connector_limit,
+        )
+
+        async def _loop():
+            from florida_property_scraper.storage import SQLiteStore
+            from florida_property_scraper.triggers.engine import run_connector_once, utc_now_iso
+            from florida_property_scraper.triggers.connectors.base import get_connector, list_connectors
+
+            # Ensure builtin connectors are registered.
+            import florida_property_scraper.triggers.connectors  # noqa: F401
+
+            db_path = os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite")
+
+            while True:
+                try:
+                    now = utc_now_iso()
+                    store = SQLiteStore(db_path)
+                    try:
+                        # 1) Run enabled saved searches to keep watchlist membership fresh.
+                        ss_rows = store.conn.execute(
+                            "SELECT id FROM saved_searches WHERE is_enabled=1 ORDER BY updated_at DESC"
+                        ).fetchall()
+                        for r in ss_rows[:50]:
+                            sid = str(r["id"] or "").strip()
+                            if not sid:
+                                continue
+                            store.run_saved_search(saved_search_id=sid, now_iso=now, limit=2000)
+
+                        # 2) Refresh triggers for counties that have enabled saved searches.
+                        wl_rows = store.conn.execute(
+                            "SELECT DISTINCT county FROM saved_searches WHERE is_enabled=1"
+                        ).fetchall()
+                        counties = [str(r["county"] or "").strip().lower() for r in wl_rows]
+                        counties = [c for c in counties if c]
+
+                        connector_keys = [k for k in list_connectors() if k != "fake"]
+                        for county in counties:
+                            for ck in connector_keys:
+                                try:
+                                    run_connector_once(
+                                        store=store,
+                                        connector=get_connector(ck),
+                                        county=county,
+                                        now_iso=now,
+                                        limit=connector_limit,
+                                    )
+                                except Exception as e:
+                                    logger.warning("connector %s failed for %s: %s", ck, county, e)
+
+                            # Rollups are county-scoped.
+                            try:
+                                store.rebuild_parcel_trigger_rollups(county=county, rebuilt_at=now)
+                            except Exception as e:
+                                logger.warning("rollups rebuild failed for %s: %s", county, e)
+
+                        # 3) Sync inbox for enabled saved searches.
+                        for r in ss_rows[:100]:
+                            sid = str(r["id"] or "").strip()
+                            if not sid:
+                                continue
+                            store.sync_saved_search_inbox_from_trigger_alerts(saved_search_id=sid, now_iso=now)
+                    finally:
+                        store.close()
+                except Exception as e:
+                    logger.warning("scheduler tick failed: %s", e)
+
+                await asyncio.sleep(interval_s)
+
+        _watchlists_scheduler_task["task"] = asyncio.create_task(_loop())
+
+    @app.on_event("shutdown")
+    async def _stop_watchlists_scheduler():
+        import asyncio
+
+        t = _watchlists_scheduler_task.get("task")
+        if t is not None:
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
