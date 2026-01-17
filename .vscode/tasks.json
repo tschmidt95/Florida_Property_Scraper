@@ -12,7 +12,11 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "isBackground": true,
+            "set -euo pipefail; \
+    echo '=== git status --porcelain=v1 -b ==='; git status --porcelain=v1 -b; \
+    echo; echo '=== git diff -- .vscode/tasks.json (first 120 lines) ==='; git --no-pager diff -- .vscode/tasks.json | head -n 120 || true; \
+    echo; echo '=== restoring .vscode/tasks.json from HEAD ==='; git checkout -- .vscode/tasks.json; \
+    echo; echo '=== git status --porcelain=v1 -b (after restore) ==='; git status --porcelain=v1 -b"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
