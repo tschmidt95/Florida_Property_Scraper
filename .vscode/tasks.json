@@ -309,6 +309,24 @@
       }
     },
     {
+      "label": "Verify: Pytest (full)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; pytest -q"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Proof: Triggers Engine",
       "type": "shell",
       "command": "bash",
@@ -345,12 +363,66 @@
       }
     },
     {
+      "label": "Proof: Tax Collector Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_tax_collector_engine.sh 2>&1 | tee PROOF_TAX_COLLECTOR_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Code Enforcement Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_code_enforcement_engine.sh 2>&1 | tee PROOF_CODE_ENFORCEMENT_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Git: Commit+Push (Permit Trigger Categories)",
       "type": "shell",
       "command": "bash",
       "args": [
         "-lc",
         "set -euo pipefail; git add .vscode/tasks.json PROOF_TRIGGERS_ENGINE.txt src/florida_property_scraper/triggers/taxonomy.py src/florida_property_scraper/triggers/engine.py src/florida_property_scraper/triggers/connectors/permits_db.py; git commit -m \\\"feat: categorize permits into tiered trigger types\\\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Tax+Code Connectors)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_CODE_ENFORCEMENT_ENGINE.txt 2>/dev/null || true; git add .vscode/tasks.json src/florida_property_scraper/storage.py src/florida_property_scraper/triggers/taxonomy.py src/florida_property_scraper/triggers/connectors/__init__.py src/florida_property_scraper/triggers/connectors/tax_collector_stub.py src/florida_property_scraper/triggers/connectors/code_enforcement_stub.py src/florida_property_scraper/triggers/normalization/tax_collector.py src/florida_property_scraper/triggers/normalization/code_enforcement.py tests/test_triggers_engine_tax_collector.py tests/test_triggers_engine_code_enforcement.py scripts/prove_tax_collector_engine.sh scripts/prove_code_enforcement_engine.sh PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_CODE_ENFORCEMENT_ENGINE.txt; git commit -m \"feat: tax collector + code enforcement connectors + taxonomy + proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

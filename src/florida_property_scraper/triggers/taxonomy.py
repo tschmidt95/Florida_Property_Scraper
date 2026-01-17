@@ -69,6 +69,22 @@ class TriggerKey(StrEnum):
     PROBATE_OPENED = "probate_opened"
     DIVORCE_FILED = "divorce_filed"
 
+    # Tax collector (distress / payment events)
+    DELINQUENT_TAX = "delinquent_tax"
+    TAX_CERTIFICATE_ISSUED = "tax_certificate_issued"
+    TAX_CERTIFICATE_REDEEMED = "tax_certificate_redeemed"
+    PAYMENT_PLAN_STARTED = "payment_plan_started"
+    PAYMENT_PLAN_DEFAULTED = "payment_plan_defaulted"
+
+    # Code enforcement (distress / compliance)
+    CODE_CASE_OPENED = "code_case_opened"
+    UNSAFE_STRUCTURE = "unsafe_structure"
+    CONDEMNATION = "condemnation"
+    FINES_IMPOSED = "fines_imposed"
+    LIEN_RELEASED = "lien_released"
+    COMPLIANCE_ACHIEVED = "compliance_achieved"
+    REPEAT_VIOLATION = "repeat_violation"
+
     # Back-compat keys retained for already-ingested rows / older stubs.
     # Prefer the expanded keys above going forward.
     FORECLOSURE = "foreclosure"
@@ -111,6 +127,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     if key in {
         TriggerKey.LIS_PENDENS,
         TriggerKey.TAX_DEED_APPLICATION,
+        TriggerKey.DELINQUENT_TAX,
         TriggerKey.PROBATE_OPENED,
         TriggerKey.DIVORCE_FILED,
         # Back-compat
@@ -139,6 +156,15 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.JUDGMENT_LIEN,
         TriggerKey.UTILITY_LIEN,
         TriggerKey.LIEN_RELEASE,
+        # Tax collector (strong)
+        TriggerKey.TAX_CERTIFICATE_ISSUED,
+        TriggerKey.TAX_CERTIFICATE_REDEEMED,
+        TriggerKey.PAYMENT_PLAN_STARTED,
+        TriggerKey.PAYMENT_PLAN_DEFAULTED,
+        # Code enforcement (strong)
+        TriggerKey.CODE_CASE_OPENED,
+        TriggerKey.FINES_IMPOSED,
+        TriggerKey.REPEAT_VIOLATION,
         # Back-compat
         TriggerKey.SATISFACTION,
         TriggerKey.RELEASE,
@@ -148,6 +174,14 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.LIEN_JUDGMENT,
     }:
         return 4
+
+    # Critical: code enforcement distress
+    if key in {
+        TriggerKey.UNSAFE_STRUCTURE,
+        TriggerKey.CONDEMNATION,
+        TriggerKey.CODE_ENFORCEMENT_LIEN,
+    }:
+        return 5
 
     # Support: recorded mortgages/assignments/modifications, UCC, nominal consideration flags
     if key in {
@@ -164,6 +198,13 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.HELOC,
         TriggerKey.MORTGAGE_MODIFICATION,
         TriggerKey.OFFICIAL_RECORD,
+    }:
+        return 2
+
+    # Support: code enforcement resolutions
+    if key in {
+        TriggerKey.LIEN_RELEASED,
+        TriggerKey.COMPLIANCE_ACHIEVED,
     }:
         return 2
 

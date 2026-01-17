@@ -284,6 +284,58 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_official_records_rec_date ON official_records(rec_date)"
         )
 
+        # Tax collector (offline stub table)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tax_collector_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT,
+                amount_due REAL,
+                status TEXT,
+                description TEXT,
+                source TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_tax_collector_dedupe ON tax_collector_events(county, parcel_id, observed_at, event_type)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tax_collector_county_parcel_time ON tax_collector_events(county, parcel_id, observed_at DESC)"
+        )
+
+        # Code enforcement (offline stub table)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS code_enforcement_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT,
+                case_number TEXT,
+                status TEXT,
+                description TEXT,
+                fine_amount REAL,
+                lien_amount REAL,
+                source TEXT,
+                raw_json TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_code_enf_dedupe ON code_enforcement_events(county, parcel_id, observed_at, event_type)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_code_enf_county_parcel_time ON code_enforcement_events(county, parcel_id, observed_at DESC)"
+        )
+
         # Trigger engine tables (separate from polygon search)
         self.conn.execute(
             """
@@ -496,6 +548,112 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    def upsert_many_tax_collector_events(self, records: List[Dict[str, Any]]) -> None:
+        if not records:
+            return
+
+        payload = [
+            (
+                (r.get("county") or "").strip().lower(),
+                str(r.get("parcel_id") or "").strip(),
+                str(r.get("observed_at") or "").strip(),
+                str(r.get("event_type") or "").strip(),
+                r.get("event_date"),
+                r.get("amount_due"),
+                r.get("status"),
+                r.get("description"),
+                r.get("source"),
+                json.dumps(r.get("raw") if ("raw" in r) else r, ensure_ascii=True),
+            )
+            for r in records
+            if str(r.get("parcel_id") or "").strip() and str(r.get("observed_at") or "").strip() and str(r.get("event_type") or "").strip()
+        ]
+        if not payload:
+            return
+
+        self.conn.executemany(
+            """
+            INSERT INTO tax_collector_events (
+                county,
+                parcel_id,
+                observed_at,
+                event_type,
+                event_date,
+                amount_due,
+                status,
+                description,
+                source,
+                raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, parcel_id, observed_at, event_type) DO UPDATE SET
+                event_date=excluded.event_date,
+                amount_due=excluded.amount_due,
+                status=excluded.status,
+                description=excluded.description,
+                source=excluded.source,
+                raw_json=excluded.raw_json
+            """,
+            payload,
+        )
+        self.conn.commit()
+
+    def upsert_many_code_enforcement_events(self, records: List[Dict[str, Any]]) -> None:
+        if not records:
+            return
+
+        payload = [
+            (
+                (r.get("county") or "").strip().lower(),
+                str(r.get("parcel_id") or "").strip(),
+                str(r.get("observed_at") or "").strip(),
+                str(r.get("event_type") or "").strip(),
+                r.get("event_date"),
+                r.get("case_number"),
+                r.get("status"),
+                r.get("description"),
+                r.get("fine_amount"),
+                r.get("lien_amount"),
+                r.get("source"),
+                json.dumps(r.get("raw") if ("raw" in r) else r, ensure_ascii=True),
+            )
+            for r in records
+            if str(r.get("parcel_id") or "").strip() and str(r.get("observed_at") or "").strip() and str(r.get("event_type") or "").strip()
+        ]
+        if not payload:
+            return
+
+        self.conn.executemany(
+            """
+            INSERT INTO code_enforcement_events (
+                county,
+                parcel_id,
+                observed_at,
+                event_type,
+                event_date,
+                case_number,
+                status,
+                description,
+                fine_amount,
+                lien_amount,
+                source,
+                raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, parcel_id, observed_at, event_type) DO UPDATE SET
+                event_date=excluded.event_date,
+                case_number=excluded.case_number,
+                status=excluded.status,
+                description=excluded.description,
+                fine_amount=excluded.fine_amount,
+                lien_amount=excluded.lien_amount,
+                source=excluded.source,
+                raw_json=excluded.raw_json
+            """,
+            payload,
+        )
+        self.conn.commit()
+
     @staticmethod
     def _severity_to_tier(severity: int) -> str:
         try:
@@ -590,9 +748,16 @@ class SQLiteStore:
             if kk.startswith("lien_") or kk in {"lis_pendens", "foreclosure", "probate", "divorce", "satisfaction", "release"}:
                 return "official_records"
             # Reserved groups for future connectors
-            if kk.startswith("tax_"):
+            if kk.startswith("tax_") or kk in {"delinquent_tax", "payment_plan_started", "payment_plan_defaulted"}:
                 return "tax"
-            if kk.startswith("code_"):
+            if kk.startswith("code_") or kk in {
+                "unsafe_structure",
+                "condemnation",
+                "fines_imposed",
+                "lien_released",
+                "compliance_achieved",
+                "repeat_violation",
+            }:
                 return "code_enforcement"
             if kk.startswith("court_"):
                 return "courts"
