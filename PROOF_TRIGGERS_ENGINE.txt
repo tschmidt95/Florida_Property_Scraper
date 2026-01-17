@@ -1,5 +1,5 @@
 $ python -m florida_property_scraper triggers run --county orange --connector fake --limit 2 --now 2026-01-01T00:00:00+00:00
-{"ok": true, "run_id": "triggers:fake:orange:a2bc05ee93", "county": "orange", "connector": "fake", "now": "2026-01-01T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 3}
+{"ok": true, "run_id": "triggers:fake:orange:8237f2064a", "county": "orange", "connector": "fake", "now": "2026-01-01T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 3}
 
 $ python - <<'PY' (verify alerts)
 {'alerts': ['owner_moved', 'permit_activity', 'redevelopment_signal']}
@@ -9,7 +9,7 @@ PASS
 == permits_db connector (offline, reads permits table) ==
 $ python - <<'PY' (seed permit)
 $ python -m florida_property_scraper triggers run --county seminole --connector permits_db --limit 50 --now 2026-01-01T00:00:00+00:00
-{"ok": true, "run_id": "triggers:permits_db:seminole:54141f93b6", "county": "seminole", "connector": "permits_db", "now": "2026-01-01T00:00:00+00:00", "raw_events": 1, "trigger_events": 1, "alerts_written": 1}
+{"ok": true, "run_id": "triggers:permits_db:seminole:7c3f8479f9", "county": "seminole", "connector": "permits_db", "now": "2026-01-01T00:00:00+00:00", "raw_events": 1, "trigger_events": 1, "alerts_written": 1}
 
 $ python - <<'PY' (verify permit_activity)
 {'alerts': ['permit_activity']}

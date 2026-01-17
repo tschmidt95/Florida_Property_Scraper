@@ -194,21 +194,25 @@ def evaluate_and_upsert_alerts(
                 )
             )
 
-        # 4) Seller intent: tiered stacking rule
+        # 4) Seller intent: tiered stacking rule (three distinct alert keys)
         c = int(tier_counts.get("critical") or 0)
         s = int(tier_counts.get("strong") or 0)
         p = int(tier_counts.get("support") or 0)
 
         seller_score = int(SQLiteStore._compute_seller_score(critical=c, strong=s, support=p))
         rule: str | None = None
+        alert_key: str | None = None
         if c >= 1:
             rule = "critical>=1"
+            alert_key = "seller_intent_critical"
         elif s >= 2:
             rule = "strong>=2"
+            alert_key = "seller_intent_strong_stack"
         elif (s + p) >= 4:
             rule = "mixed>=4"
+            alert_key = "seller_intent_mixed_stack"
 
-        if rule is not None:
+        if rule is not None and alert_key is not None:
             sev = 3
             if seller_score >= 100:
                 sev = 5
@@ -221,7 +225,7 @@ def evaluate_and_upsert_alerts(
                 store.upsert_trigger_alert(
                     county=county_key,
                     parcel_id=parcel_id,
-                    alert_key="seller_intent",
+                    alert_key=str(alert_key),
                     severity=int(sev),
                     first_seen_at=now_iso,
                     last_seen_at=now_iso,
