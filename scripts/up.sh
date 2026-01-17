@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$ROOT_DIR/.uvicorn_8000.log"
 PID_FILE="$ROOT_DIR/.uvicorn_8000.pid"
+VITE_LOG_FILE="$ROOT_DIR/.vite_5173.log"
+VITE_PID_FILE="$ROOT_DIR/.vite_5173.pid"
+VITE_PID=""
 
 get_git_sha() {
   (cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null) || echo "unknown"
@@ -18,6 +21,92 @@ kill_port() {
   echo "$ lsof -t -iTCP:${port} -sTCP:LISTEN | xargs -r kill -9"
   # shellcheck disable=SC2086
   lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null | xargs -r kill -9 || true
+}
+
+vite_port_is_listening() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | grep -q ':5173'
+    return $?
+  fi
+  return 1
+}
+
+start_vite_dev_server() {
+  : > "$VITE_LOG_FILE"
+  : > "$VITE_PID_FILE"
+
+  if [[ ! -d "$ROOT_DIR/web/node_modules" ]]; then
+    echo "$ (cd web && npm ci)"
+    (cd "$ROOT_DIR/web" && npm ci)
+  fi
+
+  echo "$ (cd web && nohup npm run dev -- --host 127.0.0.1 --port 5173 > ../.vite_5173.log 2>&1 &)"
+  (
+    cd "$ROOT_DIR/web" || exit 1
+    nohup npm run dev -- --host 127.0.0.1 --port 5173 > "$VITE_LOG_FILE" 2>&1 &
+    echo "$!" > "$VITE_PID_FILE"
+  )
+
+  VITE_PID="$(cat "$VITE_PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$VITE_PID" ]]; then
+    echo "Vite PID file not written"
+    tail -n 200 "$VITE_LOG_FILE" || true
+    exit 1
+  fi
+
+  sleep 0.1
+  if ! kill -0 "$VITE_PID" 2>/dev/null; then
+    echo "Vite exited immediately"
+    echo "$ ps -p $VITE_PID -o pid,ppid,etime,cmd || true"
+    ps -p "$VITE_PID" -o pid,ppid,etime,cmd || true
+    tail -n 200 "$VITE_LOG_FILE" || true
+    exit 1
+  fi
+
+  echo "$ lsof -nP -iTCP:5173 -sTCP:LISTEN  (or ss fallback)"
+  listening=0
+  for _ in {1..60}; do
+    if ! kill -0 "$VITE_PID" 2>/dev/null; then
+      break
+    fi
+    if vite_port_is_listening; then
+      listening=1
+      break
+    fi
+    sleep 0.25
+  done
+
+  if [[ "$listening" -ne 1 ]]; then
+    echo "Vite failed to bind/listen on port 5173"
+    echo "$ ps -p $VITE_PID -o pid,ppid,etime,cmd || true"
+    ps -p "$VITE_PID" -o pid,ppid,etime,cmd || true
+    echo "$ lsof -nP -iTCP:5173 -sTCP:LISTEN || true"
+    lsof -nP -iTCP:5173 -sTCP:LISTEN || true
+    echo "$ ss -ltnp | grep ':5173' || true"
+    ss -ltnp | grep ':5173' || true
+    tail -n 200 "$VITE_LOG_FILE" || true
+    exit 1
+  fi
+
+  echo "$ curl -sS http://127.0.0.1:5173/ | head -n 1"
+  ready=0
+  for _ in {1..60}; do
+    if curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:5173/ 2>/dev/null | grep -q '^200$'; then
+      ready=1
+      break
+    fi
+    sleep 0.25
+  done
+
+  if [[ "$ready" -ne 1 ]]; then
+    echo "Vite did not return HTTP 200 on /"
+    tail -n 200 "$VITE_LOG_FILE" || true
+    exit 1
+  fi
 }
 
 # Step 1: hard reset port listeners
@@ -198,6 +287,10 @@ if [[ "$ready" -ne 1 ]]; then
   exit 1
 fi
 
+if [[ "${FPS_START_VITE_DEV_SERVER:-1}" == "1" ]]; then
+  start_vite_dev_server
+fi
+
 LOCAL_URL="http://127.0.0.1:8000/"
 echo "LOCAL_URL=$LOCAL_URL"
 
@@ -230,9 +323,14 @@ ping_ok="$(curl -sS http://127.0.0.1:8000/api/debug/ping | python -c "import jso
 rc4=$?
 echo "$ping_ok"
 
+echo "$ curl -sS -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5173/"
+vite_code="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:5173/)"
+rc5=$?
+echo "VITE_HTTP_${vite_code:-000}"
+
 set -e
 
-if [[ "$rc1" -ne 0 || "$rc2" -ne 0 || "$rc3" -ne 0 || "$rc4" -ne 0 || "$openapi_ok" != "True" || "$ping_ok" != "True" ]]; then
+if [[ "$rc1" -ne 0 || "$rc2" -ne 0 || "$rc3" -ne 0 || "$rc4" -ne 0 || "$rc5" -ne 0 || "$openapi_ok" != "True" || "$ping_ok" != "True" || "${vite_code:-000}" != "200" ]]; then
   echo "verification failed"
   echo "$ ps -p $UVICORN_PID -o pid,ppid,etime,cmd || true"
   ps -p "$UVICORN_PID" -o pid,ppid,etime,cmd || true
@@ -254,5 +352,16 @@ if ! echo "$out_html" | tr '[:upper:]' '[:lower:]' | grep -q "<!doctype html"; t
 fi
 
 # Keep backend alive; Ctrl+C should stop it.
-trap 'echo "$ kill -TERM $UVICORN_PID"; kill -TERM "$UVICORN_PID" 2>/dev/null || true' INT TERM
+trap '
+  echo "$ kill -TERM $UVICORN_PID";
+  kill -TERM "$UVICORN_PID" 2>/dev/null || true;
+  if [[ -n "${VITE_PID:-}" ]]; then
+    echo "$ kill -TERM $VITE_PID";
+    kill -TERM "$VITE_PID" 2>/dev/null || true;
+  fi
+' INT TERM
 wait "$UVICORN_PID"
+
+if [[ -n "${VITE_PID:-}" ]]; then
+  kill -TERM "$VITE_PID" 2>/dev/null || true
+fi
