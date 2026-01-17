@@ -20,16 +20,60 @@ class TriggerKey(StrEnum):
     PERMIT_SOLAR = "permit_solar"
 
     # Official records (recorded documents)
+    #
+    # These keys are meant to be stable and connector-agnostic.
+    # Prefer the expanded categories below for new connectors.
     OFFICIAL_RECORD = "official_record"
-    DEED_WARRANTY = "deed_warranty"
+
+    # deeds
+    DEED_RECORDED = "deed_recorded"
     DEED_QUITCLAIM = "deed_quitclaim"
+    DEED_WARRANTY = "deed_warranty"
+    DEED_PR = "deed_pr"
     DEED_TRUSTEE = "deed_trustee"
-    DEED_NOMINAL = "deed_nominal"
+    DEED_TO_TRUST = "deed_to_trust"
+    DEED_TO_LLC = "deed_to_llc"
+    DEED_NOMINAL_CONSIDERATION = "deed_nominal_consideration"
+
+    # mortgages
+    MORTGAGE_RECORDED = "mortgage_recorded"
+    HELOC_RECORDED = "heloc_recorded"
+    LOAN_MODIFICATION = "loan_modification"
+    SUBORDINATION = "subordination"
+    MORTGAGE_SATISFACTION = "mortgage_satisfaction"
+    MORTGAGE_ASSIGNMENT = "mortgage_assignment"
+
+    # distress
+    NOTICE_OF_DEFAULT = "notice_of_default"
     LIS_PENDENS = "lis_pendens"
+    FORECLOSURE_FILING = "foreclosure_filing"
+    FORECLOSURE_JUDGMENT = "foreclosure_judgment"
+    CERTIFICATE_OF_SALE = "certificate_of_sale"
+    CERTIFICATE_OF_TITLE = "certificate_of_title"
+
+    # liens
+    MECHANICS_LIEN = "mechanics_lien"
+    HOA_LIEN = "hoa_lien"
+    IRS_TAX_LIEN = "irs_tax_lien"
+    STATE_TAX_LIEN = "state_tax_lien"
+    CODE_ENFORCEMENT_LIEN = "code_enforcement_lien"
+    JUDGMENT_LIEN = "judgment_lien"
+    UTILITY_LIEN = "utility_lien"
+    LIEN_RELEASE = "lien_release"
+
+    # ucc
+    UCC_FILING = "ucc_filing"
+
+    # placeholders (reserved)
+    TAX_DEED_APPLICATION = "tax_deed_application"
+    PROBATE_OPENED = "probate_opened"
+    DIVORCE_FILED = "divorce_filed"
+
+    # Back-compat keys retained for already-ingested rows / older stubs.
+    # Prefer the expanded keys above going forward.
     FORECLOSURE = "foreclosure"
     MORTGAGE = "mortgage"
     HELOC = "heloc"
-    MORTGAGE_ASSIGNMENT = "mortgage_assignment"
     MORTGAGE_MODIFICATION = "mortgage_modification"
     SATISFACTION = "satisfaction"
     RELEASE = "release"
@@ -63,30 +107,61 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         return 2
 
     # Official records tiers
+    # Critical: foreclosure*, lis_pendens, placeholders (tax deed, probate, divorce)
     if key in {
         TriggerKey.LIS_PENDENS,
-        TriggerKey.FORECLOSURE,
+        TriggerKey.TAX_DEED_APPLICATION,
+        TriggerKey.PROBATE_OPENED,
+        TriggerKey.DIVORCE_FILED,
+        # Back-compat
         TriggerKey.PROBATE,
         TriggerKey.DIVORCE,
+    }:
+        return 5
+    if key.startswith("foreclosure_") or key in {TriggerKey.FORECLOSURE}:
+        return 5
+
+    # Strong: liens, mortgage satisfaction, major deed categories
+    if key in {
+        TriggerKey.DEED_RECORDED,
+        TriggerKey.DEED_WARRANTY,
+        TriggerKey.DEED_QUITCLAIM,
+        TriggerKey.DEED_PR,
+        TriggerKey.DEED_TRUSTEE,
+        TriggerKey.DEED_TO_TRUST,
+        TriggerKey.DEED_TO_LLC,
+        TriggerKey.MORTGAGE_SATISFACTION,
+        TriggerKey.MECHANICS_LIEN,
+        TriggerKey.HOA_LIEN,
+        TriggerKey.IRS_TAX_LIEN,
+        TriggerKey.STATE_TAX_LIEN,
+        TriggerKey.CODE_ENFORCEMENT_LIEN,
+        TriggerKey.JUDGMENT_LIEN,
+        TriggerKey.UTILITY_LIEN,
+        TriggerKey.LIEN_RELEASE,
+        # Back-compat
+        TriggerKey.SATISFACTION,
+        TriggerKey.RELEASE,
+        TriggerKey.LIEN_MECHANICS,
+        TriggerKey.LIEN_HOA,
         TriggerKey.LIEN_IRS,
         TriggerKey.LIEN_JUDGMENT,
     }:
-        return 5
-    if key in {
-        TriggerKey.DEED_WARRANTY,
-        TriggerKey.DEED_QUITCLAIM,
-        TriggerKey.DEED_TRUSTEE,
-        TriggerKey.DEED_NOMINAL,
-        TriggerKey.SATISFACTION,
-        TriggerKey.RELEASE,
-        TriggerKey.HELOC,
-        TriggerKey.LIEN_MECHANICS,
-        TriggerKey.LIEN_HOA,
-    }:
         return 4
+
+    # Support: recorded mortgages/assignments/modifications, UCC, nominal consideration flags
     if key in {
-        TriggerKey.MORTGAGE,
+        TriggerKey.MORTGAGE_RECORDED,
+        TriggerKey.HELOC_RECORDED,
+        TriggerKey.LOAN_MODIFICATION,
+        TriggerKey.SUBORDINATION,
         TriggerKey.MORTGAGE_ASSIGNMENT,
+        TriggerKey.NOTICE_OF_DEFAULT,
+        TriggerKey.UCC_FILING,
+        TriggerKey.DEED_NOMINAL_CONSIDERATION,
+        # Back-compat
+        TriggerKey.MORTGAGE,
+        TriggerKey.HELOC,
         TriggerKey.MORTGAGE_MODIFICATION,
         TriggerKey.OFFICIAL_RECORD,
     }:

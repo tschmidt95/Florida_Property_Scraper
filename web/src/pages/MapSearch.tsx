@@ -10,6 +10,7 @@ import {
   parcelsSearchNormalized,
   permitsByParcel,
   triggersByParcel,
+  triggersRollupByParcel,
   triggersRollupsSearch,
   type ParcelAttributeFilters,
   type ParcelRecord,
@@ -17,6 +18,7 @@ import {
   type PermitRecord,
   type TriggerAlertRecord,
   type TriggerEventRecord,
+  type TriggerRollupRecord,
 } from '../lib/api';
 
 type MapStatus = 'loading' | 'loaded' | 'failed';
@@ -433,6 +435,12 @@ export default function MapSearch({
   const [selectedTriggersLoading, setSelectedTriggersLoading] = useState(false);
   const [selectedTriggersError, setSelectedTriggersError] = useState<string | null>(null);
 
+  const [selectedRollup, setSelectedRollup] = useState<TriggerRollupRecord | null>(null);
+  const [selectedRollupLoading, setSelectedRollupLoading] = useState(false);
+  const [selectedRollupError, setSelectedRollupError] = useState<string | null>(null);
+
+  const [triggerLookupParcelId, setTriggerLookupParcelId] = useState('');
+
   const [rollupsEnabled, setRollupsEnabled] = useState(false);
   const [rollupsMinScore, setRollupsMinScore] = useState('');
   const [rollupsGroupOfficialRecords, setRollupsGroupOfficialRecords] = useState(false);
@@ -696,6 +704,7 @@ export default function MapSearch({
     let cancelled = false;
 
     async function loadSelectedDetails(parcelId: string) {
+      setTriggerLookupParcelId(parcelId);
       setSelectedPermitsError(null);
       setSelectedPermitsLoading(true);
       try {
@@ -734,6 +743,22 @@ export default function MapSearch({
         if (!cancelled) setSelectedTriggersLoading(false);
       }
 
+      setSelectedRollupError(null);
+      setSelectedRollupLoading(true);
+      try {
+        const rollup = await triggersRollupByParcel({ county, parcel_id: parcelId });
+        if (cancelled) return;
+        setSelectedRollup(rollup);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // Rollup can be absent if rollups haven't been rebuilt yet.
+        setSelectedRollup(null);
+        setSelectedRollupError(msg);
+      } finally {
+        if (!cancelled) setSelectedRollupLoading(false);
+      }
+
       // Best-effort: enrich the selected parcel into PA cache for richer fields.
       if (!['orange', 'seminole'].includes((county || '').toLowerCase())) return;
       try {
@@ -756,6 +781,9 @@ export default function MapSearch({
       setSelectedAlerts([]);
       setSelectedTriggersLoading(false);
       setSelectedTriggersError(null);
+      setSelectedRollup(null);
+      setSelectedRollupLoading(false);
+      setSelectedRollupError(null);
       return;
     }
 
@@ -2225,12 +2253,74 @@ export default function MapSearch({
 
                   <div className="pt-1">
                     <div className="font-semibold">Triggers / Alerts</div>
+
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <input
+                        className="min-w-[220px] flex-1 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[12px] text-cre-text"
+                        value={triggerLookupParcelId}
+                        onChange={(e) => setTriggerLookupParcelId(e.target.value)}
+                        placeholder="Parcel ID (lookup)"
+                      />
+                      <button
+                        type="button"
+                        className="rounded-lg border border-cre-border/40 bg-cre-bg px-3 py-1 text-[12px] font-semibold text-cre-text hover:bg-cre-surface disabled:opacity-60"
+                        disabled={!triggerLookupParcelId.trim()}
+                        onClick={() => {
+                          const next = triggerLookupParcelId.trim();
+                          if (!next) return;
+                          setSelectedParcelId(next);
+                        }}
+                        title="Loads triggers/alerts for this parcel_id"
+                      >
+                        Load
+                      </button>
+                    </div>
+
                     {selectedTriggersLoading ? (
                       <div className="text-cre-muted">Loading triggers…</div>
                     ) : selectedTriggersError ? (
                       <div className="text-cre-muted">Triggers unavailable: {selectedTriggersError}</div>
+                    ) : selectedRollupLoading ? (
+                      <div className="text-cre-muted">Loading rollup…</div>
                     ) : selectedAlerts.length || selectedTriggerEvents.length ? (
                       <div className="space-y-2">
+                        <div className="rounded-lg border border-cre-border/40 bg-cre-surface p-2 text-[11px] text-cre-muted">
+                          {(() => {
+                            let rule: string | null = null;
+                            let counts: any = null;
+                            try {
+                              const d = selectedRollup?.details_json ? JSON.parse(selectedRollup.details_json) : null;
+                              rule = d?.seller_intent?.rule ?? null;
+                              counts = d?.seller_intent?.counts ?? null;
+                            } catch {
+                              rule = null;
+                              counts = null;
+                            }
+
+                            const uniqueKeys = Array.from(
+                              new Set((selectedTriggerEvents || []).map((t) => (t.trigger_key || '').trim()).filter(Boolean))
+                            ).sort();
+
+                            return (
+                              <div className="space-y-1">
+                                <div className="text-cre-text">
+                                  Seller score: {selectedRollup?.seller_score ?? '—'}
+                                  {rule ? ` · rule: ${rule}` : ''}
+                                </div>
+                                {counts ? (
+                                  <div>
+                                    tiers: c{counts.critical ?? 0} / s{counts.strong ?? 0} / p{counts.support ?? 0}
+                                  </div>
+                                ) : null}
+                                {selectedRollupError ? <div>rollup: {selectedRollupError}</div> : null}
+                                <div className="font-mono text-[11px] text-cre-muted break-words">
+                                  keys: {uniqueKeys.length ? uniqueKeys.join(', ') : '—'}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
                         {selectedAlerts.length ? (
                           <div className="space-y-1">
                             <div className="text-[11px] text-cre-muted">{selectedAlerts.length} open alert(s)</div>

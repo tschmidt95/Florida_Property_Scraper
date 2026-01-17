@@ -22,11 +22,71 @@ def test_official_records_stub_connector_emits_critical_and_rollups() -> None:
                     {
                         "county": "orange",
                         "parcel_id": "PARCEL-9",
-                        "join_key": None,
-                        "doc_type": "LIS PENDENS",
+                        "join_key": "OWNERKEY-9",
+                        "doc_type": "WARRANTY DEED",
                         "rec_date": "2026-01-01",
+                        "parties": "GRANTOR -> GRANTEE",
+                        "book_page_or_instrument": "INST-100",
+                        "consideration": "$350,000",
+                        "raw_text": "WARRANTY DEED",
+                        "owner_name": "DOE, JOHN",
+                        "address": "123 MAIN ST",
+                        "source": "test",
+                        "raw": None,
+                    },
+                    {
+                        "county": "orange",
+                        "parcel_id": "PARCEL-9",
+                        "join_key": "OWNERKEY-9",
+                        "doc_type": "MORTGAGE",
+                        "rec_date": "2026-01-02",
+                        "parties": "BORROWER / LENDER",
+                        "book_page_or_instrument": "INST-101",
+                        "consideration": None,
+                        "raw_text": "MORTGAGE RECORDED",
+                        "owner_name": "DOE, JOHN",
+                        "address": "123 MAIN ST",
+                        "source": "test",
+                        "raw": None,
+                    },
+                    {
+                        "county": "orange",
+                        "parcel_id": "PARCEL-9",
+                        "join_key": "OWNERKEY-9",
+                        "doc_type": "SATISFACTION OF MORTGAGE",
+                        "rec_date": "2026-01-03",
+                        "parties": "LENDER / BORROWER",
+                        "book_page_or_instrument": "INST-102",
+                        "consideration": None,
+                        "raw_text": "SATISFACTION",
+                        "owner_name": "DOE, JOHN",
+                        "address": "123 MAIN ST",
+                        "source": "test",
+                        "raw": None,
+                    },
+                    {
+                        "county": "orange",
+                        "parcel_id": "PARCEL-9",
+                        "join_key": "OWNERKEY-9",
+                        "doc_type": "CLAIM OF LIEN",
+                        "rec_date": "2026-01-04",
+                        "parties": "CONTRACTOR / OWNER",
+                        "book_page_or_instrument": "INST-103",
+                        "consideration": None,
+                        "raw_text": "MECHANIC'S LIEN",
+                        "owner_name": "DOE, JOHN",
+                        "address": "123 MAIN ST",
+                        "source": "test",
+                        "raw": None,
+                    },
+                    {
+                        "county": "orange",
+                        "parcel_id": "PARCEL-9",
+                        "join_key": "OWNERKEY-9",
+                        "doc_type": "LIS PENDENS",
+                        "rec_date": "2026-01-05",
                         "parties": "PLAINTIFF v DEFENDANT",
-                        "book_page_or_instrument": "INST-123",
+                        "book_page_or_instrument": "INST-104",
                         "consideration": None,
                         "raw_text": "LIS PENDENS NOTICE",
                         "owner_name": "DOE, JOHN",
@@ -49,6 +109,10 @@ def test_official_records_stub_connector_emits_critical_and_rollups() -> None:
 
             events = store.list_trigger_events_for_parcel(county="orange", parcel_id="PARCEL-9", limit=50)
             keys = {e.get("trigger_key") for e in events}
+            assert str(TriggerKey.DEED_WARRANTY) in keys
+            assert str(TriggerKey.MORTGAGE_RECORDED) in keys
+            assert str(TriggerKey.MORTGAGE_SATISFACTION) in keys
+            assert str(TriggerKey.MECHANICS_LIEN) in keys
             assert str(TriggerKey.LIS_PENDENS) in keys
 
             rebuilt = store.rebuild_parcel_trigger_rollups(county="orange", rebuilt_at="2026-01-16T00:00:00+00:00")

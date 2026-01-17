@@ -56,6 +56,56 @@ class TriggersByParcelResponse(BaseModel):
     alerts: list[TriggerAlertOut]
 
 
+@router.get("/triggers/events/by_parcel", response_model=list[TriggerEventOut])
+def trigger_events_by_parcel(
+    county: str,
+    parcel_id: str,
+    limit: int = 100,
+) -> list[TriggerEventOut]:
+    county_key = (county or "").strip().lower()
+    pid = (parcel_id or "").strip()
+    if not county_key:
+        raise HTTPException(status_code=400, detail="county is required")
+    if not pid:
+        raise HTTPException(status_code=400, detail="parcel_id is required")
+
+    db_path = _get_db_path()
+    store = SQLiteStore(str(db_path))
+    try:
+        events = store.list_trigger_events_for_parcel(county=county_key, parcel_id=pid, limit=int(limit))
+    finally:
+        store.close()
+    return [TriggerEventOut(**e) for e in events]
+
+
+@router.get("/triggers/alerts/by_parcel", response_model=list[TriggerAlertOut])
+def trigger_alerts_by_parcel(
+    county: str,
+    parcel_id: str,
+    status: str = "open",
+    limit: int = 50,
+) -> list[TriggerAlertOut]:
+    county_key = (county or "").strip().lower()
+    pid = (parcel_id or "").strip()
+    if not county_key:
+        raise HTTPException(status_code=400, detail="county is required")
+    if not pid:
+        raise HTTPException(status_code=400, detail="parcel_id is required")
+
+    db_path = _get_db_path()
+    store = SQLiteStore(str(db_path))
+    try:
+        alerts = store.list_trigger_alerts_for_parcel(
+            county=county_key,
+            parcel_id=pid,
+            status=status,
+            limit=int(limit),
+        )
+    finally:
+        store.close()
+    return [TriggerAlertOut(**a) for a in alerts]
+
+
 @router.get("/triggers/by_parcel", response_model=TriggersByParcelResponse)
 def triggers_by_parcel(
     county: str,

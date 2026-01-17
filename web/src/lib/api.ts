@@ -477,6 +477,28 @@ export async function triggersRollupsSearch(
   return data as TriggerRollupsSearchResponse;
 }
 
+export async function triggersRollupByParcel(params: {
+  county: string;
+  parcel_id: string;
+}): Promise<TriggerRollupRecord> {
+  const qs = new URLSearchParams({
+    county: params.county,
+    parcel_id: params.parcel_id,
+  });
+  const resp = await fetch(`/api/triggers/rollups/by_parcel?${qs.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  return data as TriggerRollupRecord;
+}
+
 export type AdvancedSearchFilters = {
   no_permits_in_years?: number | null;
   permit_status?: string[] | null;

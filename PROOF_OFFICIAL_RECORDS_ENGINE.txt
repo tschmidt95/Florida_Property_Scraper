@@ -1,13 +1,13 @@
 == seed official record (lis pendens) ==
 
 $ python -m florida_property_scraper triggers run --county orange --connector official_records_stub --limit 50 --now 2026-01-01T00:00:00+00:00
-{"ok": true, "run_id": "triggers:official_records_stub:orange:70945f9628", "county": "orange", "connector": "official_records_stub", "now": "2026-01-01T00:00:00+00:00", "raw_events": 1, "trigger_events": 1, "alerts_written": 0}
+{"ok": true, "run_id": "triggers:official_records_stub:orange:af06ed01be", "county": "orange", "connector": "official_records_stub", "now": "2026-01-01T00:00:00+00:00", "raw_events": 5, "trigger_events": 5, "alerts_written": 1}
 
 $ python -m florida_property_scraper triggers rollups --county orange --rebuilt_at 2026-01-01T00:00:00+00:00
 {"ok": true, "county": "orange", "rows": 1}
 
 $ python - <<'PY' (verify rollup + trigger key)
-{'trigger_keys': ['lis_pendens']}
-{'has_official_records': 1, 'count_critical': 1, 'seller_score': 100}
+{'trigger_keys': ['deed_warranty', 'lis_pendens', 'mechanics_lien', 'mortgage_recorded', 'mortgage_satisfaction']}
+{'has_official_records': 1, 'count_critical': 1, 'count_strong': 3, 'count_support': 1, 'seller_score': 100, 'seller_intent_rule': 'critical>=1'}
 
 PASS official_records_stub

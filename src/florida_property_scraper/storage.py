@@ -536,6 +536,21 @@ class SQLiteStore:
             return 15
         return 0
 
+    @staticmethod
+    def _seller_intent_rule(*, critical: int, strong: int, support: int) -> str | None:
+        """Explain the stacking rule that produced a high seller intent signal."""
+
+        c = max(0, int(critical))
+        s = max(0, int(strong))
+        p = max(0, int(support))
+        if c >= 1:
+            return "critical>=1"
+        if s >= 2:
+            return "strong>=2"
+        if (s + p) >= 4:
+            return "mixed>=4"
+        return None
+
     def rebuild_parcel_trigger_rollups(
         self,
         *,
@@ -670,6 +685,23 @@ class SQLiteStore:
                 strong=int(d["count_strong"]),
                 support=int(d["count_support"]),
             )
+
+            rule = self._seller_intent_rule(
+                critical=int(d["count_critical"]),
+                strong=int(d["count_strong"]),
+                support=int(d["count_support"]),
+            )
+            details = {
+                "seller_intent": {
+                    "rule": rule,
+                    "seller_score": int(score),
+                    "counts": {
+                        "critical": int(d["count_critical"]),
+                        "strong": int(d["count_strong"]),
+                        "support": int(d["count_support"]),
+                    },
+                }
+            }
             out_rows.append(
                 (
                     county_key,
@@ -692,7 +724,7 @@ class SQLiteStore:
                     int(d["count_strong"]),
                     int(d["count_support"]),
                     int(score),
-                    json.dumps({}, ensure_ascii=True),
+                    json.dumps(details, ensure_ascii=True),
                 )
             )
 

@@ -95,27 +95,45 @@ def evaluate_and_upsert_alerts(
     since_iso = _iso_minus_days(now_iso, window_days)
 
     # Pull recent triggers from DB, plus the ones we just produced.
-    by_parcel: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    # Deduplicate by trigger_event_id to avoid double-counting.
+    # Track per parcel: trigger_event_id -> (trigger_key, severity)
+    by_parcel: dict[str, dict[int, tuple[str, int]]] = defaultdict(dict)
 
     recent = store.list_trigger_events_for_county(county=county_key, since_iso=since_iso, limit=5000)
     for r in recent:
         pid = str(r.get("parcel_id") or "")
         key = str(r.get("trigger_key") or "")
         rid = int(r.get("id") or 0)
+        sev = int(r.get("severity") or 1)
         if pid and key and rid:
-            by_parcel[pid].append((key, rid))
+            by_parcel[pid][rid] = (key, sev)
 
     for te, tid in new_trigger_rows:
         if tid is None:
             continue
-        by_parcel[te.parcel_id].append((te.trigger_key, int(tid)))
+        by_parcel[te.parcel_id][int(tid)] = (te.trigger_key, int(te.severity))
 
     wrote = 0
-    for parcel_id, items in by_parcel.items():
-        keys = {k for (k, _) in items}
+    for parcel_id, items_by_id in by_parcel.items():
+        items = list(items_by_id.items())
+        keys = {k for (_, (k, _)) in items}
         ids_by_key: dict[str, list[int]] = defaultdict(list)
-        for k, rid in items:
+        tier_counts = {"critical": 0, "strong": 0, "support": 0}
+        trigger_ids_all: list[int] = []
+        for rid, (k, sev) in items:
             ids_by_key[k].append(int(rid))
+            trigger_ids_all.append(int(rid))
+
+            try:
+                s = int(sev)
+            except Exception:
+                s = 1
+            if s >= 5:
+                tier_counts["critical"] += 1
+            elif s >= 4:
+                tier_counts["strong"] += 1
+            elif s >= 2:
+                tier_counts["support"] += 1
 
         permit_keys = {k for k in keys if (k or "").startswith("permit_")}
         permit_ids: list[int] = []
@@ -173,6 +191,49 @@ def evaluate_and_upsert_alerts(
                         )
                     ),
                     details={"window_days": window_days, "rule": "permit+mailing_change"},
+                )
+            )
+
+        # 4) Seller intent: tiered stacking rule
+        c = int(tier_counts.get("critical") or 0)
+        s = int(tier_counts.get("strong") or 0)
+        p = int(tier_counts.get("support") or 0)
+
+        seller_score = int(SQLiteStore._compute_seller_score(critical=c, strong=s, support=p))
+        rule: str | None = None
+        if c >= 1:
+            rule = "critical>=1"
+        elif s >= 2:
+            rule = "strong>=2"
+        elif (s + p) >= 4:
+            rule = "mixed>=4"
+
+        if rule is not None:
+            sev = 3
+            if seller_score >= 100:
+                sev = 5
+            elif seller_score >= 85:
+                sev = 4
+            elif seller_score >= 70:
+                sev = 3
+
+            wrote += int(
+                store.upsert_trigger_alert(
+                    county=county_key,
+                    parcel_id=parcel_id,
+                    alert_key="seller_intent",
+                    severity=int(sev),
+                    first_seen_at=now_iso,
+                    last_seen_at=now_iso,
+                    status="open",
+                    trigger_event_ids=sorted(set(int(x) for x in trigger_ids_all if x)),
+                    details={
+                        "window_days": window_days,
+                        "rule": rule,
+                        "seller_score": seller_score,
+                        "counts": {"critical": c, "strong": s, "support": p},
+                        "trigger_keys": sorted(k for k in keys if k),
+                    },
                 )
             )
 

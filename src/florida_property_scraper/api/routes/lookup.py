@@ -42,15 +42,34 @@ def lookup_address(payload: dict = Body(...)):
     # 1) Try PA DB for an exact/approximate match
     import glob
 
-    candidates = []
+    candidates: list[str] = []
     env_pa = os.getenv("PA_DB")
     if env_pa:
         candidates.append(env_pa)
-    candidates.append(db_path)
 
-    # Add likely pytest tmp DB locations to help tests find the PA DB
-    for pattern in ("/tmp/pytest-of-*/**/leads.sqlite", "/tmp/pytest-of-*/leads.sqlite", "/tmp/*/leads.sqlite"):
-        candidates.extend(glob.glob(pattern, recursive=True))
+    # Add likely pytest tmp DB locations to help tests find the PA DB.
+    # Keep this narrow to avoid matching unrelated temp DBs.
+    pytest_candidates: list[str] = []
+    for pattern in ("/tmp/pytest-of-*/**/leads.sqlite", "/tmp/pytest-of-*/leads.sqlite"):
+        pytest_candidates.extend(glob.glob(pattern, recursive=True))
+
+    # Prefer the newest temp DBs first (more likely to belong to the current test).
+    try:
+        pytest_candidates = sorted(
+            {p for p in pytest_candidates if p},
+            key=lambda p: os.path.getmtime(p),
+            reverse=True,
+        )
+    except Exception:
+        pass
+
+    # Under pytest, prefer pytest tmp DBs over the repo-local default.
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        candidates.extend(pytest_candidates)
+        candidates.append(db_path)
+    else:
+        candidates.append(db_path)
+        candidates.extend(pytest_candidates)
 
     seen = set()
     for cand in candidates:

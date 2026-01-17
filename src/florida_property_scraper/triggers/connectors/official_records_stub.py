@@ -8,6 +8,7 @@ from florida_property_scraper.storage import SQLiteStore
 
 from .base import TriggerConnector, register_connector
 from ..models import RawEvent, TriggerEvent
+from ..normalization.official_records import normalize_official_record_trigger_key
 from ..taxonomy import TriggerKey, default_severity_for_trigger
 
 
@@ -52,58 +53,6 @@ def _now_date(now_iso: str) -> date:
         return dt.astimezone(timezone.utc).date()
     except Exception:
         return datetime.now(timezone.utc).date()
-
-
-def _classify_official_record_trigger(payload: dict) -> TriggerKey:
-    doc_type = str(payload.get("doc_type") or "").strip().lower()
-    raw_text = str(payload.get("raw_text") or "").strip().lower()
-    parties = str(payload.get("parties") or "").strip().lower()
-    combo = f"{doc_type} {raw_text} {parties}".strip()
-
-    # Critical
-    if re.search(r"\blis\s+pendens\b|\blispendens\b", combo):
-        return TriggerKey.LIS_PENDENS
-    if re.search(r"\bforeclosure\b", combo):
-        return TriggerKey.FORECLOSURE
-    if re.search(r"\bprobate\b|\bpersonal\s+representative\b|\bpr\s+deed\b", combo):
-        return TriggerKey.PROBATE
-    if re.search(r"\bdivorce\b", combo):
-        return TriggerKey.DIVORCE
-    if re.search(r"\birs\b|\bfederal\s+tax\s+lien\b", combo):
-        return TriggerKey.LIEN_IRS
-    if re.search(r"\bjudg(e)?ment\s+lien\b|\bjudgment\b", combo):
-        return TriggerKey.LIEN_JUDGMENT
-
-    # Strong
-    if re.search(r"\bwarranty\s+deed\b", combo):
-        return TriggerKey.DEED_WARRANTY
-    if re.search(r"\bquit\s*claim\s+deed\b|\bquitclaim\b", combo):
-        return TriggerKey.DEED_QUITCLAIM
-    if re.search(r"\btrustee\s+deed\b", combo):
-        return TriggerKey.DEED_TRUSTEE
-    if re.search(r"\bsatisfaction\b|\brelease\b", combo):
-        return TriggerKey.SATISFACTION
-    if re.search(r"\bmechanic'?s\s+lien\b|\bconstruction\s+lien\b", combo):
-        return TriggerKey.LIEN_MECHANICS
-    if re.search(r"\bhoa\b|\bhomeowners\b", combo):
-        return TriggerKey.LIEN_HOA
-    if re.search(r"\bheloc\b|\bhome\s+equity\b", combo):
-        return TriggerKey.HELOC
-
-    # Support / strong-ish mortgage docs
-    if re.search(r"\bmortgage\b", combo):
-        if re.search(r"\bassignment\b", combo):
-            return TriggerKey.MORTGAGE_ASSIGNMENT
-        if re.search(r"\bmodification\b", combo):
-            return TriggerKey.MORTGAGE_MODIFICATION
-        return TriggerKey.MORTGAGE
-
-    # Nominal consideration deed (strong)
-    if re.search(r"\bdeed\b", combo) and re.search(r"\b\$0\b|\bnominal\b|\bno\s+consideration\b", combo):
-        return TriggerKey.DEED_NOMINAL
-
-    # Fallback
-    return TriggerKey.OFFICIAL_RECORD
 
 
 @register_connector
@@ -179,6 +128,7 @@ class OfficialRecordsStubConnector(TriggerConnector):
                     continue
 
                 payload = {
+                    "join_key": r["join_key"],
                     "doc_type": r["doc_type"],
                     "rec_date": r["rec_date"],
                     "parties": r["parties"],
@@ -209,8 +159,17 @@ class OfficialRecordsStubConnector(TriggerConnector):
         if (raw.event_type or "").strip().lower() != "official_records_stub.record":
             return None
 
-        trigger_key = _classify_official_record_trigger(raw.payload or {})
-        severity = default_severity_for_trigger(trigger_key)
+        payload = raw.payload or {}
+        trigger_key = normalize_official_record_trigger_key(
+            doc_type=str(payload.get("doc_type") or ""),
+            instrument=str(payload.get("book_page_or_instrument") or ""),
+            description=str(payload.get("raw_text") or ""),
+            parties=str(payload.get("parties") or ""),
+            consideration=str(payload.get("consideration") or ""),
+        )
+        severity = default_severity_for_trigger(str(trigger_key))
+
+        owner_key = str(payload.get("join_key") or "").strip() or None
         return TriggerEvent(
             county=raw.county,
             parcel_id=raw.parcel_id,
@@ -220,5 +179,5 @@ class OfficialRecordsStubConnector(TriggerConnector):
             source_connector_key=raw.connector_key,
             source_event_type=raw.event_type,
             source_event_id=None,
-            details={"official_record": raw.payload},
+            details={"official_record": payload, "owner_key": owner_key},
         )
