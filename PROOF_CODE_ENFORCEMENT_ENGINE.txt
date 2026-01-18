@@ -1,7 +1,7 @@
 == seed code enforcement events ==
 
 $ python -m florida_property_scraper triggers run --county orange --connector code_enforcement_stub --limit 50 --now 2026-01-16T00:00:00+00:00
-{"ok": true, "run_id": "triggers:code_enforcement_stub:orange:e3df17d8ef", "county": "orange", "connector": "code_enforcement_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 1}
+{"ok": true, "run_id": "triggers:code_enforcement_stub:orange:4b9588d8ce", "county": "orange", "connector": "code_enforcement_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 1}
 
 $ python -m florida_property_scraper triggers rollups --county orange --rebuilt_at 2026-01-16T00:00:00+00:00
 {"ok": true, "county": "orange", "rows": 1}

@@ -1,0 +1,15 @@
+== seed saved search + member ==
+{'saved_search_id': '9b464e489d33'}
+
+$ python -m florida_property_scraper triggers run --county seminole --connector courts_stub --limit 50 --now 2026-01-18T00:00:00+00:00
+{"ok": true, "run_id": "triggers:courts_stub:seminole:78945de509", "county": "seminole", "connector": "courts_stub", "now": "2026-01-18T00:00:00+00:00", "raw_events": 4, "trigger_events": 4, "alerts_written": 1}
+
+$ python -m florida_property_scraper triggers rollups --county seminole --rebuilt_at 2026-01-18T00:00:00+00:00
+{"ok": true, "county": "seminole", "rows": 1}
+
+$ python - <<'PY' (verify courts triggers + inbox)
+{'trigger_keys': ['divorce_filed', 'eviction_filing', 'foreclosure_filing', 'probate_opened']}
+{'trigger_alerts': ['seller_intent_critical']}
+{'inbox': ['seller_intent_critical']}
+
+PASS courts_stub

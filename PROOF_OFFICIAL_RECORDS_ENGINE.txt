@@ -1,7 +1,7 @@
 == seed official record (lis pendens) ==
 
 $ python -m florida_property_scraper triggers run --county orange --connector official_records_stub --limit 50 --now 2026-01-01T00:00:00+00:00
-{"ok": true, "run_id": "triggers:official_records_stub:orange:0695960d63", "county": "orange", "connector": "official_records_stub", "now": "2026-01-01T00:00:00+00:00", "raw_events": 5, "trigger_events": 5, "alerts_written": 1}
+{"ok": true, "run_id": "triggers:official_records_stub:orange:9283cd8464", "county": "orange", "connector": "official_records_stub", "now": "2026-01-01T00:00:00+00:00", "raw_events": 5, "trigger_events": 5, "alerts_written": 1}
 
 $ python -m florida_property_scraper triggers rollups --county orange --rebuilt_at 2026-01-01T00:00:00+00:00
 {"ok": true, "county": "orange", "rows": 1}

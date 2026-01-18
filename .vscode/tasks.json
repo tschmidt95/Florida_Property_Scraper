@@ -79,7 +79,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && HA_PASS=$(grep \"PASS\" PROOF_HOURLY_ALERTS_SCHEDULER.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"PROOF_HOURLY_ALERTS_SCHEDULER.txt: ${HA_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
+        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && HA_PASS=$(grep \"PASS\" PROOF_HOURLY_ALERTS_SCHEDULER.txt 2>/dev/null | tail -n 1 || true) && COURTS_PASS=$(grep \"PASS\" PROOF_COURTS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && LIENS_PASS=$(grep \"PASS\" PROOF_LIENS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && REC_PASS=$(grep \"PASS\" PROOF_RECORDER_ENGINE.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"PROOF_HOURLY_ALERTS_SCHEDULER.txt: ${HA_PASS}\" && echo \"PROOF_COURTS_ENGINE.txt: ${COURTS_PASS}\" && echo \"PROOF_LIENS_ENGINE.txt: ${LIENS_PASS}\" && echo \"PROOF_RECORDER_ENGINE.txt: ${REC_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -643,6 +643,60 @@ echo; git status --porcelain=v1 && echo && git status"
       }
     },
     {
+      "label": "Proof: Courts Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_courts_engine.sh 2>&1 | tee PROOF_COURTS_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Liens Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_liens_engine.sh 2>&1 | tee PROOF_LIENS_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Recorder Engine",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_recorder_engine.sh 2>&1 | tee PROOF_RECORDER_ENGINE.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
       "label": "Git: Commit+Push (Permit Trigger Categories)",
       "type": "shell",
       "command": "bash",
@@ -667,6 +721,24 @@ echo; git status --porcelain=v1 && echo && git status"
       "args": [
         "-lc",
         "set -euo pipefail; git update-index --no-skip-worktree --no-assume-unchanged .vscode/tasks.json PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_CODE_ENFORCEMENT_ENGINE.txt 2>/dev/null || true; git add .vscode/tasks.json src/florida_property_scraper/storage.py src/florida_property_scraper/triggers/taxonomy.py src/florida_property_scraper/triggers/connectors/__init__.py src/florida_property_scraper/triggers/connectors/tax_collector_stub.py src/florida_property_scraper/triggers/connectors/code_enforcement_stub.py src/florida_property_scraper/triggers/normalization/tax_collector.py src/florida_property_scraper/triggers/normalization/code_enforcement.py tests/test_triggers_engine_tax_collector.py tests/test_triggers_engine_code_enforcement.py scripts/prove_tax_collector_engine.sh scripts/prove_code_enforcement_engine.sh PROOF_TAX_COLLECTOR_ENGINE.txt PROOF_CODE_ENFORCEMENT_ENGINE.txt; git commit -m \"feat: tax collector + code enforcement connectors + taxonomy + proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Courts+Liens+Recorder)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; git add -A; git commit -m \"feat: add courts + liens + recorder trigger families (stubs) + normalization + proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 -b && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

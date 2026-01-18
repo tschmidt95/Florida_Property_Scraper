@@ -2163,6 +2163,8 @@ class SQLiteStore:
                 return "official_records"
             if kk.startswith("mortgage") or kk.startswith("heloc"):
                 return "official_records"
+            if kk.startswith("foreclosure_"):
+                return "official_records"
             if kk.startswith("lien_") or kk in {"lis_pendens", "foreclosure", "probate", "divorce", "satisfaction", "release"}:
                 return "official_records"
             # Reserved groups for future connectors
@@ -2177,6 +2179,8 @@ class SQLiteStore:
                 "repeat_violation",
             }:
                 return "code_enforcement"
+            if kk in {"probate_opened", "divorce_filed", "eviction_filing"}:
+                return "courts"
             if kk.startswith("court_"):
                 return "courts"
             if kk.startswith("gis_"):

@@ -1,18 +1,18 @@
-Starting API on http://127.0.0.1:8011 using temp DB: /tmp/tmp.CDkX91Nxk7/leads.sqlite
+Starting API on http://127.0.0.1:8011 using temp DB: /tmp/tmp.ttR9eXFpCF/leads.sqlite
 health: OK
 
 $ curl -sS http://127.0.0.1:8011/api/debug/ping
 {
     "ok": true,
-    "server_time": "2026-01-18T14:16:49.349360+00:00",
+    "server_time": "2026-01-18T19:48:52.116489+00:00",
     "git": {
-        "sha": "f1ad59a",
+        "sha": "52899ab",
         "branch": "feature/address-lookup-ui"
     },
     "env": {
         "FPS_USE_FDOR_CENTROIDS": "",
-        "PA_DB": "/tmp/tmp.CDkX91Nxk7/leads.sqlite",
-        "LEADS_SQLITE_PATH": "/tmp/tmp.CDkX91Nxk7/leads.sqlite",
+        "PA_DB": "/tmp/tmp.ttR9eXFpCF/leads.sqlite",
+        "LEADS_SQLITE_PATH": "/tmp/tmp.ttR9eXFpCF/leads.sqlite",
         "APP_GIT_SHA": "",
         "APP_GIT_BRANCH": ""
     }
@@ -22,24 +22,24 @@ $ curl -sS -X POST http://127.0.0.1:8011/api/saved-searches (create saved search
 {
     "ok": true,
     "saved_search": {
-        "id": "b8f9ad1ce8a8",
+        "id": "ac3843430f83",
         "name": "E2E Saved Search",
         "county": "orange",
         "type": "polygon",
-        "watchlist_id": "4b782950c6ea",
+        "watchlist_id": "5014ca3698b7",
         "polygon_geojson_json": "{\"type\": \"Polygon\", \"coordinates\": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}",
         "bbox_json": null,
         "filters_json": "{}",
         "enrich": 0,
         "sort": "",
-        "created_at": "2026-01-18T14:16:49+00:00",
-        "updated_at": "2026-01-18T14:16:49+00:00",
+        "created_at": "2026-01-18T19:48:52+00:00",
+        "updated_at": "2026-01-18T19:48:52+00:00",
         "last_run_at": null,
         "is_enabled": 1
     }
 }
 
-$ curl -sS -X POST http://127.0.0.1:8011/api/saved-searches/b8f9ad1ce8a8/members (add member)
+$ curl -sS -X POST http://127.0.0.1:8011/api/saved-searches/ac3843430f83/members (add member)
 {
     "ok": true
 }
@@ -48,7 +48,7 @@ $ python - <<'PY' (seed trigger_alerts for parcel)
 {'ok': True, 'seed_trigger_alert': 'PASS'}
 
 $ python -m florida_property_scraper scheduler run --no-saved-searches --no-connectors --no-rollups (sync inbox)
-ALERT[1] saved_search=b8f9ad1ce8a8 parcel=P-E2E-1 key=seller_intent_critical sev=5
+ALERT[1] saved_search=ac3843430f83 parcel=P-E2E-1 key=seller_intent_critical sev=5
 {
   "alerts_inserted": 1,
   "alerts_updated": 0,
@@ -56,7 +56,7 @@ ALERT[1] saved_search=b8f9ad1ce8a8 parcel=P-E2E-1 key=seller_intent_critical sev
   "counties": [
     "orange"
   ],
-  "db": "/tmp/tmp.CDkX91Nxk7/leads.sqlite",
+  "db": "/tmp/tmp.ttR9eXFpCF/leads.sqlite",
   "delivery": {
     "attempted": 1,
     "by_channel": {
@@ -69,7 +69,7 @@ ALERT[1] saved_search=b8f9ad1ce8a8 parcel=P-E2E-1 key=seller_intent_critical sev
     {
       "inserted": 1,
       "ok": true,
-      "run_id": "da0fc02c8b21",
+      "run_id": "bb28e6f9ec80",
       "since": "1970-01-01T00:00:00+00:00",
       "updated": 0,
       "watched": 1
@@ -77,7 +77,7 @@ ALERT[1] saved_search=b8f9ad1ce8a8 parcel=P-E2E-1 key=seller_intent_critical sev
   ],
   "lock": {
     "acquired": true,
-    "held_by_pid": 17691,
+    "held_by_pid": 29673,
     "ok": true,
     "stolen": false
   },
@@ -88,13 +88,13 @@ ALERT[1] saved_search=b8f9ad1ce8a8 parcel=P-E2E-1 key=seller_intent_critical sev
   "saved_searches": 1
 }
 
-$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=b8f9ad1ce8a8 (list alerts)
+$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=ac3843430f83 (list alerts)
 {
     "ok": true,
     "alerts": [
         {
             "id": 1,
-            "saved_search_id": "b8f9ad1ce8a8",
+            "saved_search_id": "ac3843430f83",
             "parcel_id": "P-E2E-1",
             "county": "orange",
             "alert_key": "seller_intent_critical",
@@ -114,13 +114,13 @@ $ curl -sS -X POST http://127.0.0.1:8011/api/alerts/1/read (mark read)
     "ok": true
 }
 
-$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=b8f9ad1ce8a8&status=read (list read)
+$ curl -sS http://127.0.0.1:8011/api/alerts?saved_search_id=ac3843430f83&status=read (list read)
 {
     "ok": true,
     "alerts": [
         {
             "id": 1,
-            "saved_search_id": "b8f9ad1ce8a8",
+            "saved_search_id": "ac3843430f83",
             "parcel_id": "P-E2E-1",
             "county": "orange",
             "alert_key": "seller_intent_critical",

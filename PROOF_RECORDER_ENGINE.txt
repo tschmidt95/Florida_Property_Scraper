@@ -1,0 +1,15 @@
+== seed saved search + member ==
+{'saved_search_id': 'c85daf2d6b01'}
+
+$ python -m florida_property_scraper triggers run --county seminole --connector recorder_stub --limit 50 --now 2026-01-18T00:00:00+00:00
+{"ok": true, "run_id": "triggers:recorder_stub:seminole:a1c2db7cd8", "county": "seminole", "connector": "recorder_stub", "now": "2026-01-18T00:00:00+00:00", "raw_events": 4, "trigger_events": 4, "alerts_written": 1}
+
+$ python -m florida_property_scraper triggers rollups --county seminole --rebuilt_at 2026-01-18T00:00:00+00:00
+{"ok": true, "county": "seminole", "rows": 1}
+
+$ python - <<'PY' (verify recorder triggers + inbox)
+{'trigger_keys': ['lis_pendens', 'mortgage_assignment', 'mortgage_satisfaction', 'notice_of_default']}
+{'trigger_alerts': ['seller_intent_critical']}
+{'inbox': ['seller_intent_critical']}
+
+PASS recorder_stub

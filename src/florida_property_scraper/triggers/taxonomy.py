@@ -68,6 +68,7 @@ class TriggerKey(StrEnum):
     TAX_DEED_APPLICATION = "tax_deed_application"
     PROBATE_OPENED = "probate_opened"
     DIVORCE_FILED = "divorce_filed"
+    EVICTION_FILING = "eviction_filing"
 
     # Tax collector (distress / payment events)
     DELINQUENT_TAX = "delinquent_tax"
@@ -130,6 +131,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.DELINQUENT_TAX,
         TriggerKey.PROBATE_OPENED,
         TriggerKey.DIVORCE_FILED,
+        TriggerKey.EVICTION_FILING,
         # Back-compat
         TriggerKey.PROBATE,
         TriggerKey.DIVORCE,
