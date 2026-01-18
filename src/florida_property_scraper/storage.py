@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -653,7 +655,171 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_notifications_status_time ON notifications(status, created_at DESC)"
         )
 
+        # SQLite-backed scheduler locks (single-runner enforcement).
+        # Heartbeat timestamps are stored as unix seconds for reliable TTL logic.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scheduler_locks (
+                lock_name TEXT PRIMARY KEY,
+                acquired_at TEXT NOT NULL,
+                pid INTEGER NOT NULL,
+                heartbeat_at TEXT NOT NULL,
+                heartbeat_ts INTEGER NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scheduler_locks_heartbeat ON scheduler_locks(heartbeat_ts)"
+        )
+
         self.conn.commit()
+
+    @staticmethod
+    def _iso_to_epoch_seconds(iso: str) -> int:
+        raw = (iso or "").strip()
+        if not raw:
+            return 0
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+            return int(dt.timestamp())
+        except Exception:
+            return 0
+
+    def acquire_scheduler_lock(
+        self,
+        *,
+        lock_name: str,
+        now_iso: str | None = None,
+        ttl_seconds: int = 7200,
+        pid: int | None = None,
+    ) -> Dict[str, Any]:
+        """Acquire a named scheduler lock (with TTL-based stale takeover).
+
+        Returns a dict with:
+        - ok: bool
+        - acquired: bool
+        - stolen: bool
+        - held_by_pid: int | None
+        """
+
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        name = (lock_name or "").strip() or "scheduler"
+        ttl = max(10, int(ttl_seconds or 0))
+        my_pid = int(pid if pid is not None else os.getpid())
+        now_ts = int(self._iso_to_epoch_seconds(now) or 0)
+
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            row = self.conn.execute(
+                "SELECT lock_name, pid, heartbeat_ts, heartbeat_at FROM scheduler_locks WHERE lock_name=? LIMIT 1",
+                (name,),
+            ).fetchone()
+
+            if not row:
+                self.conn.execute(
+                    """
+                    INSERT INTO scheduler_locks(lock_name, acquired_at, pid, heartbeat_at, heartbeat_ts)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (name, now, my_pid, now, now_ts),
+                )
+                self.conn.commit()
+                return {"ok": True, "acquired": True, "stolen": False, "held_by_pid": my_pid}
+
+            held_pid = int(row["pid"] or 0)
+            held_ts = int(row["heartbeat_ts"] or 0)
+            stale = bool(now_ts and held_ts and (held_ts < (now_ts - ttl)))
+
+            if stale:
+                self.conn.execute(
+                    """
+                    UPDATE scheduler_locks
+                    SET acquired_at=?, pid=?, heartbeat_at=?, heartbeat_ts=?
+                    WHERE lock_name=?
+                    """,
+                    (now, my_pid, now, now_ts, name),
+                )
+                self.conn.commit()
+                return {
+                    "ok": True,
+                    "acquired": True,
+                    "stolen": True,
+                    "held_by_pid": my_pid,
+                    "previous_pid": held_pid,
+                }
+
+            self.conn.rollback()
+            return {
+                "ok": True,
+                "acquired": False,
+                "stolen": False,
+                "held_by_pid": held_pid or None,
+                "heartbeat_at": str(row["heartbeat_at"] or "") or None,
+            }
+        except Exception as e:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return {"ok": False, "acquired": False, "error": str(e)}
+
+    def refresh_scheduler_lock(
+        self,
+        *,
+        lock_name: str,
+        now_iso: str | None = None,
+        pid: int | None = None,
+    ) -> bool:
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        name = (lock_name or "").strip() or "scheduler"
+        my_pid = int(pid if pid is not None else os.getpid())
+        now_ts = int(self._iso_to_epoch_seconds(now) or 0)
+        cur = self.conn.execute(
+            """
+            UPDATE scheduler_locks
+            SET heartbeat_at=?, heartbeat_ts=?
+            WHERE lock_name=? AND pid=?
+            """,
+            (now, now_ts, name, my_pid),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount and int(cur.rowcount) > 0)
+
+    def release_scheduler_lock(self, *, lock_name: str, pid: int | None = None) -> bool:
+        name = (lock_name or "").strip() or "scheduler"
+        my_pid = int(pid if pid is not None else os.getpid())
+        cur = self.conn.execute(
+            "DELETE FROM scheduler_locks WHERE lock_name=? AND pid=?",
+            (name, my_pid),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount and int(cur.rowcount) > 0)
+
+    def list_active_saved_searches(
+        self,
+        *,
+        counties: list[str] | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 200
+        lim = max(1, min(lim, 5000))
+
+        county_keys = [str(c or "").strip().lower() for c in (counties or [])]
+        county_keys = [c for c in county_keys if c]
+
+        sql = "SELECT * FROM saved_searches WHERE is_enabled=1"
+        params: list[Any] = []
+        if county_keys:
+            placeholders = ",".join(["?"] * len(county_keys))
+            sql += f" AND county IN ({placeholders})"
+            params.extend(county_keys)
+        sql += " ORDER BY updated_at DESC, created_at DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     @staticmethod
     def _utc_now_iso() -> str:
@@ -1195,6 +1361,7 @@ class SQLiteStore:
         county: str | None = None,
         status: str | None = None,
         limit: int = 200,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         where: list[str] = []
         params: list[Any] = []
@@ -1213,11 +1380,18 @@ class SQLiteStore:
             lim = 200
         lim = max(1, min(lim, 1000))
 
+        try:
+            off = int(offset)
+        except Exception:
+            off = 0
+        off = max(0, min(off, 100000))
+
         sql = "SELECT * FROM alerts_inbox"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY last_seen_at DESC, id DESC LIMIT ?"
+        sql += " ORDER BY last_seen_at DESC, id DESC LIMIT ? OFFSET ?"
         params.append(lim)
+        params.append(off)
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -1228,9 +1402,192 @@ class SQLiteStore:
             return False
         if aid <= 0:
             return False
-        self.conn.execute("UPDATE alerts_inbox SET status='read' WHERE id=?", (aid,))
+        cur = self.conn.execute("UPDATE alerts_inbox SET status='read' WHERE id=?", (aid,))
         self.conn.commit()
-        return True
+        return bool(cur.rowcount and int(cur.rowcount) > 0)
+
+    def _alert_fingerprint(self, alert_row: Dict[str, Any]) -> str:
+        """Stable fingerprint used for delivery dedupe."""
+
+        parts = [
+            str(alert_row.get("saved_search_id") or ""),
+            str(alert_row.get("parcel_id") or ""),
+            str(alert_row.get("alert_key") or ""),
+            str(alert_row.get("last_seen_at") or ""),
+            str(alert_row.get("severity") or ""),
+            str(alert_row.get("title") or ""),
+            str(alert_row.get("body_json") or ""),
+        ]
+        raw = "|".join(parts)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+    def list_undelivered_alerts(
+        self,
+        *,
+        saved_search_ids: list[str] | None = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        ids = [str(s or "").strip() for s in (saved_search_ids or [])]
+        ids = [s for s in ids if s]
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 200
+        lim = max(1, min(lim, 2000))
+
+        where = ["status='new'"]
+        params: list[Any] = []
+        if ids:
+            placeholders = ",".join(["?"] * len(ids))
+            where.append(f"saved_search_id IN ({placeholders})")
+            params.extend(ids)
+
+        sql = "SELECT * FROM alerts_inbox WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_seen_at DESC, id DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_alert_delivered(
+        self,
+        *,
+        alert_inbox_id: int,
+        channel: str,
+        fingerprint: str,
+        recipient: str | None,
+        now_iso: str,
+    ) -> bool:
+        ch = (channel or "").strip().lower() or "console"
+        fp = (fingerprint or "").strip()
+        if not fp:
+            return False
+        cur = self.conn.execute(
+            """
+            INSERT OR IGNORE INTO alert_deliveries(
+                alert_inbox_id, channel, fingerprint, recipient, status, created_at, sent_at, error_text
+            )
+            VALUES (?, ?, ?, ?, 'sent', ?, ?, NULL)
+            """,
+            (int(alert_inbox_id), ch, fp, recipient, now_iso, now_iso),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount and int(cur.rowcount) > 0)
+
+    def mark_alert_delivery_failed(
+        self,
+        *,
+        alert_inbox_id: int,
+        channel: str,
+        fingerprint: str,
+        recipient: str | None,
+        now_iso: str,
+        error_text: str,
+    ) -> bool:
+        ch = (channel or "").strip().lower() or "console"
+        fp = (fingerprint or "").strip()
+        if not fp:
+            return False
+        cur = self.conn.execute(
+            """
+            INSERT OR IGNORE INTO alert_deliveries(
+                alert_inbox_id, channel, fingerprint, recipient, status, created_at, sent_at, error_text
+            )
+            VALUES (?, ?, ?, ?, 'failed', ?, NULL, ?)
+            """,
+            (int(alert_inbox_id), ch, fp, recipient, now_iso, str(error_text or "")[:2000]),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount and int(cur.rowcount) > 0)
+
+    def deliver_new_alerts(
+        self,
+        *,
+        saved_search_ids: list[str] | None = None,
+        now_iso: str | None = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Deliver 'new' inbox alerts with idempotent dedupe via alert_deliveries."""
+
+        now = (now_iso or "").strip() or self._utc_now_iso()
+        alerts = self.list_undelivered_alerts(saved_search_ids=saved_search_ids, limit=limit)
+
+        enable_email = str(os.getenv("ALERTS_ENABLE_EMAIL", "")).strip() in {"1", "true", "yes"}
+        enable_sms = str(os.getenv("ALERTS_ENABLE_SMS", "")).strip() in {"1", "true", "yes"}
+        email_to = (os.getenv("ALERTS_EMAIL_TO", "") or "").strip() or None
+        sms_to = (os.getenv("ALERTS_SMS_TO", "") or "").strip() or None
+
+        channels: list[tuple[str, str | None]] = [("console", None)]
+        if enable_email:
+            channels.append(("email", email_to))
+        if enable_sms:
+            channels.append(("sms", sms_to))
+
+        delivered = 0
+        per_channel: Dict[str, int] = {c: 0 for (c, _) in channels}
+        attempted = 0
+
+        for a in alerts:
+            fp = self._alert_fingerprint(a)
+            for ch, recipient in channels:
+                attempted += 1
+                if ch in {"email", "sms"} and not recipient:
+                    # Record a single failure per alert+channel+fingerprint.
+                    self.mark_alert_delivery_failed(
+                        alert_inbox_id=int(a.get("id") or 0),
+                        channel=ch,
+                        fingerprint=fp,
+                        recipient=None,
+                        now_iso=now,
+                        error_text=f"{ch} enabled but recipient missing",
+                    )
+                    continue
+
+                ok = self.mark_alert_delivered(
+                    alert_inbox_id=int(a.get("id") or 0),
+                    channel=ch,
+                    fingerprint=fp,
+                    recipient=recipient,
+                    now_iso=now,
+                )
+                if not ok:
+                    continue
+
+                per_channel[ch] = int(per_channel.get(ch) or 0) + 1
+                delivered += 1
+
+                payload = {
+                    "saved_search_id": a.get("saved_search_id"),
+                    "parcel_id": a.get("parcel_id"),
+                    "county": a.get("county"),
+                    "alert_key": a.get("alert_key"),
+                    "title": a.get("title"),
+                    "body_json": a.get("body_json"),
+                    "why_json": a.get("why_json"),
+                    "last_seen_at": a.get("last_seen_at"),
+                    "severity": a.get("severity"),
+                }
+
+                # Persist a lightweight notification ledger (even console delivery) for debugging.
+                self.conn.execute(
+                    """
+                    INSERT INTO notifications(channel, recipient, payload_json, status, created_at, sent_at, error_text)
+                    VALUES (?, ?, ?, 'sent', ?, ?, NULL)
+                    """,
+                    (ch, recipient, self._clean_json(payload), now, now),
+                )
+                self.conn.commit()
+
+                if ch == "console":
+                    print(
+                        f"ALERT[{a.get('id')}] saved_search={a.get('saved_search_id')} parcel={a.get('parcel_id')} key={a.get('alert_key')} sev={a.get('severity')}"
+                    )
+
+        return {
+            "ok": True,
+            "attempted": attempted,
+            "delivered": delivered,
+            "by_channel": per_channel,
+        }
 
     def _format_inbox_alert(self, *, alert_key: str, details: Dict[str, Any] | None) -> tuple[str, str, int, list[str]]:
         d = details or {}

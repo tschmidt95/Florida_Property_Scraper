@@ -96,8 +96,8 @@ def evaluate_and_upsert_alerts(
 
     # Pull recent triggers from DB, plus the ones we just produced.
     # Deduplicate by trigger_event_id to avoid double-counting.
-    # Track per parcel: trigger_event_id -> (trigger_key, severity)
-    by_parcel: dict[str, dict[int, tuple[str, int]]] = defaultdict(dict)
+    # Track per parcel: trigger_event_id -> (trigger_key, severity, trigger_at)
+    by_parcel: dict[str, dict[int, tuple[str, int, str]]] = defaultdict(dict)
 
     recent = store.list_trigger_events_for_county(county=county_key, since_iso=since_iso, limit=5000)
     for r in recent:
@@ -105,24 +105,27 @@ def evaluate_and_upsert_alerts(
         key = str(r.get("trigger_key") or "")
         rid = int(r.get("id") or 0)
         sev = int(r.get("severity") or 1)
+        ta = str(r.get("trigger_at") or "").strip()
         if pid and key and rid:
-            by_parcel[pid][rid] = (key, sev)
+            by_parcel[pid][rid] = (key, sev, ta)
 
     for te, tid in new_trigger_rows:
         if tid is None:
             continue
-        by_parcel[te.parcel_id][int(tid)] = (te.trigger_key, int(te.severity))
+        by_parcel[te.parcel_id][int(tid)] = (te.trigger_key, int(te.severity), str(te.trigger_at or "").strip())
 
     wrote = 0
     for parcel_id, items_by_id in by_parcel.items():
         items = list(items_by_id.items())
-        keys = {k for (_, (k, _)) in items}
+        keys = {k for (_, (k, _, _)) in items}
         ids_by_key: dict[str, list[int]] = defaultdict(list)
         tier_counts = {"critical": 0, "strong": 0, "support": 0}
+        at_by_id: dict[int, str] = {}
         trigger_ids_all: list[int] = []
-        for rid, (k, sev) in items:
+        for rid, (k, sev, trigger_at) in items:
             ids_by_key[k].append(int(rid))
             trigger_ids_all.append(int(rid))
+            at_by_id[int(rid)] = str(trigger_at or "").strip()
 
             try:
                 s = int(sev)
@@ -135,6 +138,15 @@ def evaluate_and_upsert_alerts(
             elif s >= 2:
                 tier_counts["support"] += 1
 
+        def _span_for_ids(ids: list[int]) -> tuple[str, str]:
+            ats = [at_by_id.get(int(i), "") for i in (ids or [])]
+            ats = [a for a in ats if a]
+            if not ats:
+                # Fall back to scheduler time if trigger timestamps are missing.
+                return now_iso, now_iso
+            # ISO-8601 UTC timestamps are lexicographically comparable.
+            return (min(ats), max(ats))
+
         permit_keys = {k for k in keys if (k or "").startswith("permit_")}
         permit_ids: list[int] = []
         for pk in permit_keys:
@@ -143,14 +155,15 @@ def evaluate_and_upsert_alerts(
 
         # 1) Simple alert: permit activity
         if permit_ids:
+            first_seen, last_seen = _span_for_ids(permit_ids)
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
                     parcel_id=parcel_id,
                     alert_key="permit_activity",
                     severity=2,
-                    first_seen_at=now_iso,
-                    last_seen_at=now_iso,
+                    first_seen_at=first_seen,
+                    last_seen_at=last_seen,
                     status="open",
                     trigger_event_ids=permit_ids,
                     details={"window_days": window_days},
@@ -159,37 +172,36 @@ def evaluate_and_upsert_alerts(
 
         # 2) Simple alert: owner moved
         if str(TriggerKey.OWNER_MAILING_CHANGED) in keys:
+            owner_ids = ids_by_key[str(TriggerKey.OWNER_MAILING_CHANGED)]
+            first_seen, last_seen = _span_for_ids(owner_ids)
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
                     parcel_id=parcel_id,
                     alert_key="owner_moved",
                     severity=3,
-                    first_seen_at=now_iso,
-                    last_seen_at=now_iso,
+                    first_seen_at=first_seen,
+                    last_seen_at=last_seen,
                     status="open",
-                    trigger_event_ids=ids_by_key[str(TriggerKey.OWNER_MAILING_CHANGED)],
+                    trigger_event_ids=owner_ids,
                     details={"window_days": window_days},
                 )
             )
 
         # 3) Stacked alert: redevelopment signal
         if permit_ids and str(TriggerKey.OWNER_MAILING_CHANGED) in keys:
+            combo_ids = sorted(set(permit_ids + ids_by_key[str(TriggerKey.OWNER_MAILING_CHANGED)]))
+            first_seen, last_seen = _span_for_ids(combo_ids)
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
                     parcel_id=parcel_id,
                     alert_key="redevelopment_signal",
                     severity=4,
-                    first_seen_at=now_iso,
-                    last_seen_at=now_iso,
+                    first_seen_at=first_seen,
+                    last_seen_at=last_seen,
                     status="open",
-                    trigger_event_ids=sorted(
-                        set(
-                            permit_ids
-                            + ids_by_key[str(TriggerKey.OWNER_MAILING_CHANGED)]
-                        )
-                    ),
+                    trigger_event_ids=combo_ids,
                     details={"window_days": window_days, "rule": "permit+mailing_change"},
                 )
             )
@@ -221,16 +233,18 @@ def evaluate_and_upsert_alerts(
             elif seller_score >= 70:
                 sev = 3
 
+            all_ids = sorted(set(int(x) for x in trigger_ids_all if x))
+            first_seen, last_seen = _span_for_ids(all_ids)
             wrote += int(
                 store.upsert_trigger_alert(
                     county=county_key,
                     parcel_id=parcel_id,
                     alert_key=str(alert_key),
                     severity=int(sev),
-                    first_seen_at=now_iso,
-                    last_seen_at=now_iso,
+                    first_seen_at=first_seen,
+                    last_seen_at=last_seen,
                     status="open",
-                    trigger_event_ids=sorted(set(int(x) for x in trigger_ids_all if x)),
+                    trigger_event_ids=all_ids,
                     details={
                         "window_days": window_days,
                         "rule": rule,

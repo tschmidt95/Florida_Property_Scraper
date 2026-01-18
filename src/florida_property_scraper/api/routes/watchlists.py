@@ -224,10 +224,11 @@ def refresh_watchlist(watchlist_id: str, body: RefreshWatchlistBody) -> Dict[str
 
 @router.get("/alerts")
 def list_alerts(
-    saved_search_id: Optional[str] = None,
+    saved_search_id: str,
     county: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 200,
+    offset: int = 0,
 ) -> Dict[str, Any]:
     store = SQLiteStore(_get_db_path())
     try:
@@ -236,6 +237,7 @@ def list_alerts(
             county=county,
             status=status,
             limit=limit,
+            offset=offset,
         )
         return {"ok": True, "alerts": alerts}
     finally:

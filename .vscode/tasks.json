@@ -79,7 +79,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
+        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && HA_PASS=$(grep \"PASS\" PROOF_HOURLY_ALERTS_SCHEDULER.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"PROOF_HOURLY_ALERTS_SCHEDULER.txt: ${HA_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -134,6 +134,24 @@
       "args": [
         "-lc",
         "set -o pipefail; bash scripts/prove_saved_searches_alerts_e2e.sh 2>&1 | tee PROOF_SAVED_SEARCHES_ALERTS_E2E.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Hourly Alerts Scheduler",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_hourly_alerts_scheduler.sh 2>&1 | tee PROOF_HOURLY_ALERTS_SCHEDULER.txt"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
