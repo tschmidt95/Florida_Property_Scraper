@@ -774,7 +774,24 @@ echo; git status --porcelain=v1 && echo && git status"
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; git add -A; git commit -m \"feat: add courts + liens + recorder trigger families (stubs) + normalization + proofs\"; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 -b && echo && git status"
+        "set -euo pipefail; \
+git update-index --no-skip-worktree --no-assume-unchanged \
+  .vscode/tasks.json \
+  PROOF_TRIGGERS_ENGINE.txt \
+  PROOF_OFFICIAL_RECORDS_ENGINE.txt \
+  PROOF_TAX_COLLECTOR_ENGINE.txt \
+  PROOF_CODE_ENFORCEMENT_ENGINE.txt \
+  PROOF_PROPERTY_APPRAISER_ENGINE.txt \
+  PROOF_PERMITS_ENGINE.txt \
+  PROOF_WATCHLISTS_ALERTS.txt \
+  PROOF_SAVED_SEARCHES_ALERTS_E2E.txt \
+  PROOF_HOURLY_ALERTS_SCHEDULER.txt \
+  2>/dev/null || true; \
+git add -A; \
+git commit -m \"feat: trigger filters + code enforcement & permits expansions\"; \
+git push; \
+echo; git --no-pager log -1 --oneline; \
+echo; git status --porcelain=v1 -b && echo && git status"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
