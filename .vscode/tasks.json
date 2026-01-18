@@ -12,16 +12,101 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-            "set -euo pipefail; \
-    echo '=== git status --porcelain=v1 -b ==='; git status --porcelain=v1 -b; \
-    echo; echo '=== git diff -- .vscode/tasks.json (first 120 lines) ==='; git --no-pager diff -- .vscode/tasks.json | head -n 120 || true; \
-    echo; echo '=== restoring .vscode/tasks.json from HEAD ==='; git checkout -- .vscode/tasks.json; \
-    echo; echo '=== git status --porcelain=v1 -b (after restore) ==='; git status --porcelain=v1 -b"
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
         "clear": false
+      }
+    },
+    {
+      "label": "Checkpoint: Repo State",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail && { echo \"==== Repo State ====\" && pwd && echo \"\" && echo \"==== branch ====\" && git rev-parse --abbrev-ref HEAD && echo \"\" && echo \"==== git status --porcelain=v1 -b ====\" && git status --porcelain=v1 -b && echo \"\" && echo \"==== git --no-pager diff --stat ====\" && git --no-pager diff --stat && echo \"\" && echo \"==== git --no-pager diff --name-only ====\" && git --no-pager diff --name-only && echo \"\" && echo \"==== git --no-pager log -5 --oneline --decorate ====\" && git --no-pager log -5 --oneline --decorate && echo \"\" && echo \"==== git fetch --prune ====\" && git fetch --prune && echo \"\" && echo \"HEAD=$(git rev-parse --short HEAD) upstream=$(git rev-parse --short @{u})\" && echo \"\" && echo \"==== git --no-pager diff -- .vscode/tasks.json ====\" && git --no-pager diff -- .vscode/tasks.json; } 2>&1 | tee .checkpoint_repo_state.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Checkpoint: Proofs (fast)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail && echo \"==== Proofs (fast) ====\" && bash scripts/prove_watchlists_alerts.sh && bash scripts/prove_saved_searches_alerts_e2e.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Checkpoint: Pytest",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail && echo \"==== Pytest ====\" && pytest -q"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Checkpoint: FINAL VERIFICATION",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Checkpoint: Safe Stash (WIP)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail && echo \"==== SAFE CHECKPOINT (no commit/push) ====\" && echo \"\" && echo \"1) pwd\" && pwd && echo \"\" && echo \"2) git rev-parse --abbrev-ref HEAD\" && git rev-parse --abbrev-ref HEAD && echo \"\" && echo \"3) git status --porcelain=v1 -b\" && git status --porcelain=v1 -b && echo \"\" && echo \"4) git --no-pager diff --stat\" && git --no-pager diff --stat && echo \"\" && echo \"5) git --no-pager diff --name-only\" && git --no-pager diff --name-only && echo \"\" && echo \"6) git stash push -u -m \\\"WIP checkpoint before stepping away\\\"\" && git stash push -u -m \"WIP checkpoint before stepping away\" && echo \"\" && echo \"7) git status --porcelain=v1 -b (after stash)\" && git status --porcelain=v1 -b && echo \"\" && echo \"8) git stash list | head -n 5\" && git stash list | head -n 5 && echo \"\" && echo \"RESTORE: git stash apply\" && echo \"RESTORE (destructive): git stash pop\" && echo \"If conflicts: git status; then resolve; then git add -A; then continue\" && echo \"Note: this stash includes untracked files (-u)\""
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
       }
     },
     {
@@ -31,6 +116,24 @@
       "args": [
         "-lc",
         "set -o pipefail; bash scripts/prove_watchlists_alerts.sh 2>&1 | tee PROOF_WATCHLISTS_ALERTS.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Saved Searches Alerts E2E",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -o pipefail; bash scripts/prove_saved_searches_alerts_e2e.sh 2>&1 | tee PROOF_SAVED_SEARCHES_ALERTS_E2E.txt"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
