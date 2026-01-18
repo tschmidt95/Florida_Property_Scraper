@@ -19,6 +19,16 @@ class TriggerKey(StrEnum):
     PERMIT_DOORS = "permit_doors"
     PERMIT_SOLAR = "permit_solar"
 
+    # Additional permit categories (expanded)
+    PERMIT_POOL = "permit_pool"
+    PERMIT_FIRE = "permit_fire"
+    PERMIT_SITEWORK = "permit_sitework"
+    PERMIT_SIGN = "permit_sign"
+    PERMIT_TENANT_IMPROVEMENT = "permit_tenant_improvement"
+    PERMIT_REMODEL = "permit_remodel"
+    PERMIT_FENCE = "permit_fence"
+    PERMIT_GENERATOR = "permit_generator"
+
     # Official records (recorded documents)
     #
     # These keys are meant to be stable and connector-agnostic.
@@ -81,6 +91,11 @@ class TriggerKey(StrEnum):
     CODE_CASE_OPENED = "code_case_opened"
     UNSAFE_STRUCTURE = "unsafe_structure"
     CONDEMNATION = "condemnation"
+    DEMOLITION_ORDER = "demolition_order"
+    ABATEMENT_ORDER = "abatement_order"
+    BOARD_HEARING_SET = "board_hearing_set"
+    REINSPECTION_FAILED = "reinspection_failed"
+    LIEN_RECORDED = "lien_recorded"
     FINES_IMPOSED = "fines_imposed"
     LIEN_RELEASED = "lien_released"
     COMPLIANCE_ACHIEVED = "compliance_achieved"
@@ -101,6 +116,8 @@ class TriggerKey(StrEnum):
     PROBATE = "probate"
     DIVORCE = "divorce"
     OWNER_MAILING_CHANGED = "owner_mailing_changed"
+    OWNER_NAME_CHANGED = "owner_name_changed"
+    DEED_LAST_SALE_UPDATED = "deed_last_sale_updated"
 
 
 def default_severity_for_trigger(trigger_key: str) -> int:
@@ -118,9 +135,21 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.PERMIT_HVAC,
         TriggerKey.PERMIT_ELECTRICAL,
         TriggerKey.PERMIT_PLUMBING,
+        TriggerKey.PERMIT_POOL,
+        TriggerKey.PERMIT_FIRE,
+        TriggerKey.PERMIT_SITEWORK,
+        TriggerKey.PERMIT_TENANT_IMPROVEMENT,
+        TriggerKey.PERMIT_REMODEL,
+        TriggerKey.PERMIT_GENERATOR,
     }:
         return 4
-    if key in {TriggerKey.PERMIT_WINDOWS, TriggerKey.PERMIT_DOORS, TriggerKey.PERMIT_SOLAR}:
+    if key in {
+        TriggerKey.PERMIT_WINDOWS,
+        TriggerKey.PERMIT_DOORS,
+        TriggerKey.PERMIT_SOLAR,
+        TriggerKey.PERMIT_FENCE,
+        TriggerKey.PERMIT_SIGN,
+    }:
         return 2
 
     # Official records tiers
@@ -140,6 +169,17 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     if key.startswith("foreclosure_") or key in {TriggerKey.FORECLOSURE}:
         return 5
 
+    # Critical: code enforcement distress
+    if key in {
+        TriggerKey.UNSAFE_STRUCTURE,
+        TriggerKey.CONDEMNATION,
+        TriggerKey.DEMOLITION_ORDER,
+        TriggerKey.ABATEMENT_ORDER,
+        TriggerKey.CODE_ENFORCEMENT_LIEN,
+        TriggerKey.LIEN_RECORDED,
+    }:
+        return 5
+
     # Strong: liens, mortgage satisfaction, major deed categories
     if key in {
         TriggerKey.DEED_RECORDED,
@@ -154,7 +194,6 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.HOA_LIEN,
         TriggerKey.IRS_TAX_LIEN,
         TriggerKey.STATE_TAX_LIEN,
-        TriggerKey.CODE_ENFORCEMENT_LIEN,
         TriggerKey.JUDGMENT_LIEN,
         TriggerKey.UTILITY_LIEN,
         TriggerKey.LIEN_RELEASE,
@@ -165,6 +204,8 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.PAYMENT_PLAN_DEFAULTED,
         # Code enforcement (strong)
         TriggerKey.CODE_CASE_OPENED,
+        TriggerKey.BOARD_HEARING_SET,
+        TriggerKey.REINSPECTION_FAILED,
         TriggerKey.FINES_IMPOSED,
         TriggerKey.REPEAT_VIOLATION,
         # Back-compat
@@ -177,14 +218,6 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     }:
         return 4
 
-    # Critical: code enforcement distress
-    if key in {
-        TriggerKey.UNSAFE_STRUCTURE,
-        TriggerKey.CONDEMNATION,
-        TriggerKey.CODE_ENFORCEMENT_LIEN,
-    }:
-        return 5
-
     # Support: recorded mortgages/assignments/modifications, UCC, nominal consideration flags
     if key in {
         TriggerKey.MORTGAGE_RECORDED,
@@ -195,6 +228,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.NOTICE_OF_DEFAULT,
         TriggerKey.UCC_FILING,
         TriggerKey.DEED_NOMINAL_CONSIDERATION,
+        TriggerKey.DEED_LAST_SALE_UPDATED,
         # Back-compat
         TriggerKey.MORTGAGE,
         TriggerKey.HELOC,
@@ -213,5 +247,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     if key == TriggerKey.PERMIT_ISSUED:
         return 2
     if key == TriggerKey.OWNER_MAILING_CHANGED:
+        return 3
+    if key == TriggerKey.OWNER_NAME_CHANGED:
         return 3
     return 1

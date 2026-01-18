@@ -1,0 +1,13 @@
+== seed permits ==
+
+$ python -m florida_property_scraper triggers run --county seminole --connector permits_db --limit 50 --now 2026-01-18T00:00:00+00:00
+{"ok": true, "run_id": "triggers:permits_db:seminole:378d7b9b92", "county": "seminole", "connector": "permits_db", "now": "2026-01-18T00:00:00+00:00", "raw_events": 8, "trigger_events": 8, "alerts_written": 2}
+
+$ python -m florida_property_scraper triggers rollups --county seminole --rebuilt_at 2026-01-18T00:00:00+00:00
+{"ok": true, "county": "seminole", "rows": 1}
+
+$ python - <<'PY' (verify trigger keys + rollup)
+{'trigger_keys': ['permit_fence', 'permit_fire', 'permit_generator', 'permit_pool', 'permit_remodel', 'permit_sign', 'permit_sitework', 'permit_tenant_improvement']}
+{'has_permits': 1, 'count_critical': 0, 'count_strong': 6, 'count_support': 2, 'seller_score': 85, 'groups': ['permits'], 'trigger_keys': ['permit_fence', 'permit_fire', 'permit_generator', 'permit_pool', 'permit_remodel', 'permit_sign', 'permit_sitework', 'permit_tenant_improvement']}
+
+PASS permits_db

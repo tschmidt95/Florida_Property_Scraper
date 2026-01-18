@@ -1,0 +1,11 @@
+$ python -m florida_property_scraper triggers run --county seminole --connector property_appraiser_stub --limit 50 --now 2026-01-16T00:00:00+00:00
+{"ok": true, "run_id": "triggers:property_appraiser_stub:seminole:98e219b11f", "county": "seminole", "connector": "property_appraiser_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 3, "trigger_events": 3, "alerts_written": 1}
+
+$ python -m florida_property_scraper triggers rollups --county seminole --rebuilt_at 2026-01-16T00:00:00+00:00
+{"ok": true, "county": "seminole", "rows": 1}
+
+$ python - <<'PY' (verify keys + alert)
+{'trigger_keys': ['deed_last_sale_updated', 'owner_mailing_changed', 'owner_name_changed']}
+{'alert_keys': ['owner_moved']}
+
+PASS property_appraiser_stub

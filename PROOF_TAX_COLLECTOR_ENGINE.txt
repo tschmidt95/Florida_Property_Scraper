@@ -1,7 +1,7 @@
 == seed tax collector events ==
 
 $ python -m florida_property_scraper triggers run --county orange --connector tax_collector_stub --limit 50 --now 2026-01-16T00:00:00+00:00
-{"ok": true, "run_id": "triggers:tax_collector_stub:orange:2708b7a624", "county": "orange", "connector": "tax_collector_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 1}
+{"ok": true, "run_id": "triggers:tax_collector_stub:orange:84084cf850", "county": "orange", "connector": "tax_collector_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 1}
 
 $ python -m florida_property_scraper triggers rollups --county orange --rebuilt_at 2026-01-16T00:00:00+00:00
 {"ok": true, "county": "orange", "rows": 1}

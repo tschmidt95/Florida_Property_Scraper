@@ -240,6 +240,8 @@ class RollupsSearchRequest(BaseModel):
     # Filters
     min_score: int | None = None
     any_groups: list[str] | None = None
+    trigger_groups: list[str] | None = None
+    trigger_keys: list[str] | None = None
     tiers: list[str] | None = None
 
     # Pagination
@@ -334,11 +336,19 @@ def rollups_search(payload: RollupsSearchRequest) -> RollupsSearchResponse:
     db_path = _get_db_path()
     store = SQLiteStore(str(db_path))
     try:
+        groups = set((payload.any_groups or []))
+        groups |= set((payload.trigger_groups or []))
+        effective_groups = sorted(g for g in groups if str(g or "").strip())
+
+        keys = set((payload.trigger_keys or []))
+        effective_keys = sorted(k for k in keys if str(k or "").strip())
+
         rows = store.search_rollups(
             county=county_key,
             parcel_ids=candidate_ids,
             min_score=payload.min_score,
-            require_any_groups=payload.any_groups,
+            require_any_groups=effective_groups or None,
+            require_trigger_keys=effective_keys or None,
             require_tiers=payload.tiers,
             limit=int(payload.limit),
             offset=int(payload.offset),

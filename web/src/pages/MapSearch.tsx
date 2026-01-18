@@ -445,6 +445,10 @@ export default function MapSearch({
   const [rollupsMinScore, setRollupsMinScore] = useState('');
   const [rollupsGroupOfficialRecords, setRollupsGroupOfficialRecords] = useState(false);
   const [rollupsGroupPermits, setRollupsGroupPermits] = useState(false);
+  const [rollupsTriggerGroups, setRollupsTriggerGroups] = useState<string[]>([]);
+  const [rollupsTriggerGroupsQuery, setRollupsTriggerGroupsQuery] = useState('');
+  const [rollupsTriggerKeys, setRollupsTriggerKeys] = useState<string[]>([]);
+  const [rollupsTriggerKeysQuery, setRollupsTriggerKeysQuery] = useState('');
   const [rollupsTierCritical, setRollupsTierCritical] = useState(false);
   const [rollupsTierStrong, setRollupsTierStrong] = useState(false);
   const [rollupsTierSupport, setRollupsTierSupport] = useState(false);
@@ -671,6 +675,10 @@ export default function MapSearch({
     setRollupsMinScore('');
     setRollupsGroupOfficialRecords(false);
     setRollupsGroupPermits(false);
+    setRollupsTriggerGroups([]);
+    setRollupsTriggerGroupsQuery('');
+    setRollupsTriggerKeys([]);
+    setRollupsTriggerKeysQuery('');
     setRollupsTierCritical(false);
     setRollupsTierStrong(false);
     setRollupsTierSupport(false);
@@ -1131,12 +1139,23 @@ export default function MapSearch({
     const rollupsAnyGroups: string[] = [];
     if (rollupsGroupOfficialRecords) rollupsAnyGroups.push('official_records');
     if (rollupsGroupPermits) rollupsAnyGroups.push('permits');
+    for (const g of rollupsTriggerGroups) {
+      const gg = String(g || '').trim();
+      if (gg) rollupsAnyGroups.push(gg);
+    }
+
+    const rollupsKeys: string[] = [];
+    for (const k of rollupsTriggerKeys) {
+      const kk = String(k || '').trim();
+      if (kk) rollupsKeys.push(kk);
+    }
     const rollupsTiers: string[] = [];
     if (rollupsTierCritical) rollupsTiers.push('critical');
     if (rollupsTierStrong) rollupsTiers.push('strong');
     if (rollupsTierSupport) rollupsTiers.push('support');
     const rollupsActive =
-      rollupsEnabled && (rollupsMinScoreN !== null || rollupsAnyGroups.length > 0 || rollupsTiers.length > 0);
+      rollupsEnabled &&
+      (rollupsMinScoreN !== null || rollupsAnyGroups.length > 0 || rollupsTiers.length > 0 || rollupsKeys.length > 0);
 
     if (rollupsEnabled && !rollupsActive) {
       setRollupsError('Select at least one trigger filter (group/tier/min score).');
@@ -1148,6 +1167,8 @@ export default function MapSearch({
           county,
           min_score: rollupsMinScoreN,
           any_groups: rollupsAnyGroups.length ? rollupsAnyGroups : null,
+          trigger_groups: rollupsAnyGroups.length ? rollupsAnyGroups : null,
+          trigger_keys: rollupsKeys.length ? rollupsKeys : null,
           tiers: rollupsTiers.length ? rollupsTiers : null,
           limit: 2000,
           offset: 0,
@@ -1202,6 +1223,8 @@ export default function MapSearch({
                 rollups_enabled: true,
                 min_score: rollupsMinScoreN,
                 any_groups: rollupsAnyGroups,
+                trigger_groups: rollupsAnyGroups,
+                trigger_keys: rollupsKeys,
                 tiers: rollupsTiers,
               }
             : { rollups_enabled: false },
@@ -1814,6 +1837,79 @@ export default function MapSearch({
                     Permits
                   </label>
                 </div>
+              </div>
+
+              <div className="col-span-2 grid grid-cols-2 gap-2">
+                <MultiSelectFilter
+                  title="Trigger Families"
+                  options={[
+                    'permits',
+                    'official_records',
+                    'tax',
+                    'code_enforcement',
+                    'courts',
+                    'gis_planning',
+                    'property_appraiser',
+                  ]}
+                  selected={rollupsTriggerGroups}
+                  query={rollupsTriggerGroupsQuery}
+                  onQuery={setRollupsTriggerGroupsQuery}
+                  onSelected={setRollupsTriggerGroups}
+                  renderOption={(v) =>
+                    v
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, (c) => c.toUpperCase())
+                  }
+                />
+                <MultiSelectFilter
+                  title="Trigger Keys"
+                  options={[
+                    // Permits
+                    'permit_demolition',
+                    'permit_structural',
+                    'permit_roof',
+                    'permit_hvac',
+                    'permit_electrical',
+                    'permit_plumbing',
+                    'permit_pool',
+                    'permit_fire',
+                    'permit_sitework',
+                    'permit_tenant_improvement',
+                    'permit_remodel',
+                    'permit_generator',
+                    'permit_windows',
+                    'permit_doors',
+                    'permit_solar',
+                    'permit_fence',
+                    'permit_sign',
+                    // Property appraiser
+                    'owner_mailing_changed',
+                    'owner_name_changed',
+                    // Code enforcement
+                    'code_case_opened',
+                    'fines_imposed',
+                    'demolition_order',
+                    'abatement_order',
+                    'board_hearing_set',
+                    'reinspection_failed',
+                    'lien_recorded',
+                    // Tax
+                    'delinquent_tax',
+                    'tax_certificate_issued',
+                    // Courts
+                    'probate_opened',
+                    'divorce_filed',
+                    'eviction_filing',
+                    // Official records
+                    'lis_pendens',
+                    'foreclosure',
+                  ]}
+                  selected={rollupsTriggerKeys}
+                  query={rollupsTriggerKeysQuery}
+                  onQuery={setRollupsTriggerKeysQuery}
+                  onSelected={setRollupsTriggerKeys}
+                  renderOption={(v) => v.replace(/_/g, ' ')}
+                />
               </div>
 
               <div className="col-span-2 space-y-1">

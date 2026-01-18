@@ -2159,6 +2159,8 @@ class SQLiteStore:
             kk = (k or "").strip().lower()
             if kk.startswith("permit_"):
                 return "permits"
+            if kk.startswith("owner_"):
+                return "property_appraiser"
             if kk.startswith("deed_"):
                 return "official_records"
             if kk.startswith("mortgage") or kk.startswith("heloc"):
@@ -2173,6 +2175,11 @@ class SQLiteStore:
             if kk.startswith("code_") or kk in {
                 "unsafe_structure",
                 "condemnation",
+                "demolition_order",
+                "abatement_order",
+                "board_hearing_set",
+                "reinspection_failed",
+                "lien_recorded",
                 "fines_imposed",
                 "lien_released",
                 "compliance_achieved",
@@ -2211,6 +2218,8 @@ class SQLiteStore:
                     "count_critical": 0,
                     "count_strong": 0,
                     "count_support": 0,
+                    "trigger_keys": set(),
+                    "groups": set(),
                 }
                 agg[pid] = d
 
@@ -2220,6 +2229,16 @@ class SQLiteStore:
                     d["last_seen_any"] = trigger_at
 
             group = _group_for_trigger_key(str(r["trigger_key"] or ""))
+
+            try:
+                d["trigger_keys"].add(str(r["trigger_key"] or "").strip())
+            except Exception:
+                pass
+            if group in {"permits", "official_records", "tax", "code_enforcement", "courts", "gis_planning", "property_appraiser"}:
+                try:
+                    d["groups"].add(group)
+                except Exception:
+                    pass
             if group == "permits":
                 d["has_permits"] = 1
                 if trigger_at and (d["last_seen_permits"] is None or trigger_at > d["last_seen_permits"]):
@@ -2289,6 +2308,11 @@ class SQLiteStore:
                     },
                 }
             }
+            try:
+                details["trigger_keys"] = sorted(str(x) for x in (d.get("trigger_keys") or set()) if str(x).strip())
+                details["groups"] = sorted(str(x) for x in (d.get("groups") or set()) if str(x).strip())
+            except Exception:
+                pass
             out_rows.append(
                 (
                     county_key,
@@ -2368,6 +2392,7 @@ class SQLiteStore:
         parcel_ids: List[str] | None = None,
         min_score: int | None = None,
         require_any_groups: List[str] | None = None,
+        require_trigger_keys: List[str] | None = None,
         require_tiers: List[str] | None = None,
         limit: int = 250,
         offset: int = 0,
@@ -2424,8 +2449,24 @@ class SQLiteStore:
                 group_clauses.append("has_courts=1")
             elif gg in {"gis", "gis_planning"}:
                 group_clauses.append("has_gis_planning=1")
+            else:
+                # Backstop for groups without dedicated columns (e.g., property_appraiser)
+                group_clauses.append("details_json LIKE ?")
+                params.append(f"%\"{gg}\"%")
         if group_clauses:
             where.append("(" + " OR ".join(group_clauses) + ")")
+
+        keys = set((require_trigger_keys or []))
+        key_clauses: list[str] = []
+        for k in keys:
+            kk = str(k or "").strip().lower()
+            if not kk:
+                continue
+            # JSON string containment (deterministic + SQLite-friendly)
+            key_clauses.append("details_json LIKE ?")
+            params.append(f"%\"{kk}\"%")
+        if key_clauses:
+            where.append("(" + " OR ".join(key_clauses) + ")")
 
         tiers = set((require_tiers or []))
         tier_clauses: list[str] = []

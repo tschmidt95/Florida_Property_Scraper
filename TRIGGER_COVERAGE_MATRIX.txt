@@ -1,0 +1,64 @@
+TRIGGER COVERAGE MATRIX (deterministic-first)
+
+Last updated: 2026-01-18
+Branch: feature/address-lookup-ui
+
+UI FILTER SURFACE (current)
+- MapSearch rollups prefilter supports:
+  - any_groups: official_records, permits
+  - tiers: critical, strong, support
+  - min_score: numeric
+- MapSearch does NOT yet expose groups for: tax, code_enforcement, courts, liens, recorder.
+
+SELLER INTENT TIERS (backend)
+- Tiering is derived from TriggerKey severity (see src/florida_property_scraper/triggers/taxonomy.py).
+  - critical (sev=5): seller_intent_critical
+  - strong stack (sev=4): seller_intent_strong_stack (rule: strong>=2)
+  - support stack (sev=2): seller_intent_support_stack (rule: support>=3)
+
+COVERAGE TABLE
+Legend:
+- Status: LIVE (real scrape planned/available), STUB (deterministic demo), RESERVED (taxonomy only), PLANNED (next implementation)
+- Cadence: hourly/daily = recommended cadence for scheduler polling.
+- Saved-search support: whether alerts/inbox can be generated for saved searches (yes/no).
+
+| Family | TriggerKey(s) (normalized) | Data source type | Connector | Status | Cadence | Saved-search support | Alert rules (seller intent tier) |
+|---|---|---|---|---|---|---|---|
+| Demo / smoke | (varies) -> alert_keys: owner_moved, permit_activity, redevelopment_signal | internal demo | fake | STUB | n/a | n/a | not seller_intent (direct alert keys) |
+| Permits (baseline) | permit_issued (support) + permit_* categories (strong/support) | permits portal / permits DB | permits_db | LIVE (DB-backed) | hourly | yes | permit_* (sev=4/2) contribute to seller_intent stack; permit_activity is a direct alert |
+| Official records (Orange) | deed_warranty, mortgage_recorded, mortgage_satisfaction, mechanics_lien, lis_pendens | recorder / official records site | official_records_stub | STUB | daily | yes | lis_pendens -> critical; deed_*/liens/mortgage_satisfaction -> strong; mortgage_recorded -> support |
+| Recorder expansion (Seminole) | notice_of_default, lis_pendens, mortgage_assignment, mortgage_satisfaction | recorder / official records site | recorder_stub | STUB | daily | yes | lis_pendens -> critical; mortgage_assignment + notice_of_default -> support; mortgage_satisfaction -> strong |
+| Liens (Seminole) | mechanics_lien, hoa_lien, irs_tax_lien, judgment_lien, lien_release | recorder / liens index | liens_stub | STUB | daily | yes | liens + lien_release -> strong (stack drives seller_intent_strong_stack) |
+| Courts (Seminole) | probate_opened, divorce_filed, eviction_filing, foreclosure_filing | court docket | courts_stub | STUB | daily | yes | all are critical (sev=5) -> seller_intent_critical |
+| Tax collector (Orange) | delinquent_tax, tax_certificate_issued | tax collector | tax_collector_stub | STUB | daily | yes | delinquent_tax -> critical; tax_certificate_issued -> strong |
+| Code enforcement (Orange) | code_case_opened, fines_imposed | code enforcement / city portal | code_enforcement_stub | STUB | daily | yes | both strong -> seller_intent_strong_stack (when >=2) |
+| Saved-search alerts plumbing | seller_intent_* alerts + inbox records | internal DB | scheduler runner | LIVE | hourly | yes | seller_intent_* derived from rollup tier counts |
+
+NEXT 3 FAMILIES (chosen for Step 3 implementation)
+
+1) Property appraiser ownership/mailing change
+- TriggerKey(s): owner_mailing_changed (sev=3)
+- Data source type: property appraiser parcel detail page / cached PA DB snapshot
+- Connector (planned): property_appraiser_stub (+ real adapter skeleton behind feature flag)
+- Status: PLANNED
+- Cadence: daily
+- Saved-search support: yes
+- Seller intent: contributes mid-tier score (sev=3); does not directly trigger seller_intent tier unless stacked with other events
+
+2) Code enforcement expansions (more event types)
+- TriggerKey(s): unsafe_structure, condemnation, code_enforcement_lien (critical); lien_released, compliance_achieved (support); repeat_violation (strong)
+- Data source type: code enforcement portal
+- Connector (planned): code_enforcement_stub (extend) + code_enforcement_real (skeleton behind flag)
+- Status: PLANNED
+- Cadence: daily
+- Saved-search support: yes
+- Seller intent: critical keys immediately drive seller_intent_critical; strong/support stack as per tier rules
+
+3) Permits expansions (more categories)
+- TriggerKey(s): permit_demolition, permit_structural, permit_roof, permit_hvac, permit_electrical, permit_plumbing (strong); permit_windows, permit_doors, permit_solar (support)
+- Data source type: permits portal / permits DB
+- Connector (planned): permits_db (extend normalization) + permits_real (skeleton behind flag)
+- Status: PLANNED
+- Cadence: hourly
+- Saved-search support: yes
+- Seller intent: strong/support stacks contribute to seller_intent tiers (strong>=2, support>=3)

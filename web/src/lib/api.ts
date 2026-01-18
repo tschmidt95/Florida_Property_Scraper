@@ -414,6 +414,8 @@ export type TriggerRollupsSearchRequest = {
   radius_m?: number;
   min_score?: number | null;
   any_groups?: string[] | null;
+  trigger_groups?: string[] | null;
+  trigger_keys?: string[] | null;
   tiers?: string[] | null;
   limit?: number;
   offset?: number;

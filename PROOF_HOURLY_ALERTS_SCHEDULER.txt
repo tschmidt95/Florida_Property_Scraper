@@ -1,10 +1,10 @@
-Starting hourly alerts scheduler proof using DB: /tmp/tmp.x1vk3xz35W/leads.sqlite
+Starting hourly alerts scheduler proof using DB: /tmp/tmp.R8rCqrMO6o/leads.sqlite
 
 $ python - <<'PY' (seed saved search + member + permit)
-{'ok': True, 'saved_search_id': 'bedf0e446382'}
+{'ok': True, 'saved_search_id': 'ee6a76728552'}
 
 $ python -m florida_property_scraper scheduler run --once (tick #1)
-ALERT[1] saved_search=bedf0e446382 parcel=P-HOURLY-1 key=permit_activity sev=2
+ALERT[1] saved_search=ee6a76728552 parcel=P-HOURLY-1 key=permit_activity sev=2
 {
   "alerts_inserted": 1,
   "alerts_updated": 0,
@@ -16,14 +16,14 @@ ALERT[1] saved_search=bedf0e446382 parcel=P-HOURLY-1 key=permit_activity sev=2
       "now": "2026-01-02T00:00:00+00:00",
       "ok": true,
       "raw_events": 1,
-      "run_id": "triggers:permits_db:orange:bf23daad6f",
+      "run_id": "triggers:permits_db:orange:d1eae74fdc",
       "trigger_events": 1
     }
   ],
   "counties": [
     "orange"
   ],
-  "db": "/tmp/tmp.x1vk3xz35W/leads.sqlite",
+  "db": "/tmp/tmp.R8rCqrMO6o/leads.sqlite",
   "delivery": {
     "attempted": 1,
     "by_channel": {
@@ -36,7 +36,7 @@ ALERT[1] saved_search=bedf0e446382 parcel=P-HOURLY-1 key=permit_activity sev=2
     {
       "inserted": 1,
       "ok": true,
-      "run_id": "6121368a0487",
+      "run_id": "e1d4d4daa8ed",
       "since": "1970-01-01T00:00:00+00:00",
       "updated": 0,
       "watched": 1
@@ -44,7 +44,7 @@ ALERT[1] saved_search=bedf0e446382 parcel=P-HOURLY-1 key=permit_activity sev=2
   ],
   "lock": {
     "acquired": true,
-    "held_by_pid": 29897,
+    "held_by_pid": 62572,
     "ok": true,
     "stolen": false
   },
@@ -77,14 +77,14 @@ $ python -m florida_property_scraper scheduler run --once (tick #2, same now -> 
       "now": "2026-01-02T00:00:00+00:00",
       "ok": true,
       "raw_events": 1,
-      "run_id": "triggers:permits_db:orange:1cce910c7c",
+      "run_id": "triggers:permits_db:orange:648fdaa24a",
       "trigger_events": 1
     }
   ],
   "counties": [
     "orange"
   ],
-  "db": "/tmp/tmp.x1vk3xz35W/leads.sqlite",
+  "db": "/tmp/tmp.R8rCqrMO6o/leads.sqlite",
   "delivery": {
     "attempted": 1,
     "by_channel": {
@@ -97,7 +97,7 @@ $ python -m florida_property_scraper scheduler run --once (tick #2, same now -> 
     {
       "inserted": 0,
       "ok": true,
-      "run_id": "e591eec0bbae",
+      "run_id": "cc4720b8dd84",
       "since": "2026-01-02T00:00:00+00:00",
       "updated": 0,
       "watched": 1
@@ -105,7 +105,7 @@ $ python -m florida_property_scraper scheduler run --once (tick #2, same now -> 
   ],
   "lock": {
     "acquired": true,
-    "held_by_pid": 29898,
+    "held_by_pid": 62576,
     "ok": true,
     "stolen": false
   },

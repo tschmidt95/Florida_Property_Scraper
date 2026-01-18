@@ -27,6 +27,8 @@ class CodeEnforcementStubConnector(TriggerConnector):
 
     def poll(self, *, county: str, now_iso: str, limit: int) -> list[RawEvent]:
         county_key = (county or "").strip().lower()
+        if county_key != "seminole":
+            return []
         now_iso = (now_iso or "").strip()
         try:
             lim = int(limit)
@@ -69,11 +71,11 @@ class CodeEnforcementStubConnector(TriggerConnector):
                     source,
                     raw_json
                 FROM code_enforcement_events
-                WHERE county=? AND observed_at>=?
+                WHERE county=? AND parcel_id=? AND observed_at>=?
                 ORDER BY observed_at DESC
                 LIMIT ?
                 """,
-                (county_key, since_iso, lim),
+                (county_key, "XYZ789", since_iso, lim),
             ).fetchall()
 
             out: list[RawEvent] = []

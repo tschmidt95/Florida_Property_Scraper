@@ -1,13 +1,13 @@
 == seed code enforcement events ==
 
-$ python -m florida_property_scraper triggers run --county orange --connector code_enforcement_stub --limit 50 --now 2026-01-16T00:00:00+00:00
-{"ok": true, "run_id": "triggers:code_enforcement_stub:orange:4b9588d8ce", "county": "orange", "connector": "code_enforcement_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 2, "trigger_events": 2, "alerts_written": 1}
+$ python -m florida_property_scraper triggers run --county seminole --connector code_enforcement_stub --limit 50 --now 2026-01-16T00:00:00+00:00
+{"ok": true, "run_id": "triggers:code_enforcement_stub:seminole:86c0974c0e", "county": "seminole", "connector": "code_enforcement_stub", "now": "2026-01-16T00:00:00+00:00", "raw_events": 7, "trigger_events": 7, "alerts_written": 1}
 
-$ python -m florida_property_scraper triggers rollups --county orange --rebuilt_at 2026-01-16T00:00:00+00:00
-{"ok": true, "county": "orange", "rows": 1}
+$ python -m florida_property_scraper triggers rollups --county seminole --rebuilt_at 2026-01-16T00:00:00+00:00
+{"ok": true, "county": "seminole", "rows": 1}
 
 $ python - <<'PY' (verify rollup + trigger key)
-{'trigger_keys': ['code_case_opened', 'fines_imposed']}
-{'has_code_enforcement': 1, 'count_critical': 0, 'count_strong': 2, 'count_support': 0, 'seller_score': 85, 'seller_intent_rule': 'strong>=2'}
+{'trigger_keys': ['abatement_order', 'board_hearing_set', 'code_case_opened', 'demolition_order', 'fines_imposed', 'lien_recorded', 'reinspection_failed']}
+{'has_code_enforcement': 1, 'count_critical': 3, 'count_strong': 4, 'count_support': 0, 'seller_score': 100, 'seller_intent_rule': 'critical>=1'}
 
 PASS code_enforcement_stub

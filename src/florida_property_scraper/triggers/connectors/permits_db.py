@@ -28,6 +28,24 @@ def _classify_permit_trigger_key(payload: dict) -> TriggerKey:
     if not t:
         return TriggerKey.PERMIT_ISSUED
 
+    # Expanded categories (prefer specific matches before broad structural bucket)
+    if re.search(r"\bpool\b|\bspa\b|\bhot\s*tub\b", t):
+        return TriggerKey.PERMIT_POOL
+    if re.search(r"\bfire\b|\bfire\s*alarm\b|\bsprinkler\b|\bstandpipe\b", t):
+        return TriggerKey.PERMIT_FIRE
+    if re.search(r"\bsite\s*work\b|\bsitework\b|\bgrading\b|\bexcavat\w*\b|\bdrainage\b", t):
+        return TriggerKey.PERMIT_SITEWORK
+    if re.search(r"\bsign\b|\bsignage\b|\bbanner\b", t):
+        return TriggerKey.PERMIT_SIGN
+    if re.search(r"\btenant\s*improvement\b|\bti\b", t):
+        return TriggerKey.PERMIT_TENANT_IMPROVEMENT
+    if re.search(r"\bremodel\b|\binterior\s*remodel\b|\brenovat(e|ion)\b", t):
+        return TriggerKey.PERMIT_REMODEL
+    if re.search(r"\bfence\b|\bgate\b", t):
+        return TriggerKey.PERMIT_FENCE
+    if re.search(r"\bgenerator\b|\bstandby\s*generator\b", t):
+        return TriggerKey.PERMIT_GENERATOR
+
     # Strong signals
     if re.search(r"\bdemo(lition)?\b|\btear\s*down\b|\bdeconstruction\b", t):
         return TriggerKey.PERMIT_DEMOLITION
