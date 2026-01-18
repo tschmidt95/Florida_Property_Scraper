@@ -1,0 +1,132 @@
+Starting hourly alerts scheduler proof using DB: /tmp/tmp.qArjR4eed6/leads.sqlite
+
+$ python - <<'PY' (seed saved search + member + permit)
+{'ok': True, 'saved_search_id': '44428562868a'}
+
+$ python -m florida_property_scraper scheduler run --once (tick #1)
+ALERT[1] saved_search=44428562868a parcel=P-HOURLY-1 key=permit_activity sev=2
+{
+  "alerts_inserted": 1,
+  "alerts_updated": 0,
+  "connectors": [
+    {
+      "alerts_written": 1,
+      "connector": "permits_db",
+      "county": "orange",
+      "now": "2026-01-02T00:00:00+00:00",
+      "ok": true,
+      "raw_events": 1,
+      "run_id": "triggers:permits_db:orange:14d03676e8",
+      "trigger_events": 1
+    }
+  ],
+  "counties": [
+    "orange"
+  ],
+  "db": "/tmp/tmp.qArjR4eed6/leads.sqlite",
+  "delivery": {
+    "attempted": 1,
+    "by_channel": {
+      "console": 1
+    },
+    "delivered": 1,
+    "ok": true
+  },
+  "inbox": [
+    {
+      "inserted": 1,
+      "ok": true,
+      "run_id": "13b0a73e8976",
+      "since": "1970-01-01T00:00:00+00:00",
+      "updated": 0,
+      "watched": 1
+    }
+  ],
+  "lock": {
+    "acquired": true,
+    "held_by_pid": 17439,
+    "ok": true,
+    "stolen": false
+  },
+  "mode": "once",
+  "now": "2026-01-02T00:00:00+00:00",
+  "ok": true,
+  "rollups": [
+    {
+      "county": "orange",
+      "ok": true,
+      "result": {
+        "county": "orange",
+        "ok": true,
+        "rows": 1
+      }
+    }
+  ],
+  "saved_searches": 1
+}
+
+$ python -m florida_property_scraper scheduler run --once (tick #2, same now -> dedupe delivery)
+{
+  "alerts_inserted": 0,
+  "alerts_updated": 0,
+  "connectors": [
+    {
+      "alerts_written": 2,
+      "connector": "permits_db",
+      "county": "orange",
+      "now": "2026-01-02T00:00:00+00:00",
+      "ok": true,
+      "raw_events": 1,
+      "run_id": "triggers:permits_db:orange:0b9c4bd089",
+      "trigger_events": 1
+    }
+  ],
+  "counties": [
+    "orange"
+  ],
+  "db": "/tmp/tmp.qArjR4eed6/leads.sqlite",
+  "delivery": {
+    "attempted": 1,
+    "by_channel": {
+      "console": 0
+    },
+    "delivered": 0,
+    "ok": true
+  },
+  "inbox": [
+    {
+      "inserted": 0,
+      "ok": true,
+      "run_id": "a477e950a2fc",
+      "since": "2026-01-02T00:00:00+00:00",
+      "updated": 0,
+      "watched": 1
+    }
+  ],
+  "lock": {
+    "acquired": true,
+    "held_by_pid": 17453,
+    "ok": true,
+    "stolen": false
+  },
+  "mode": "once",
+  "now": "2026-01-02T00:00:00+00:00",
+  "ok": true,
+  "rollups": [
+    {
+      "county": "orange",
+      "ok": true,
+      "result": {
+        "county": "orange",
+        "ok": true,
+        "rows": 1
+      }
+    }
+  ],
+  "saved_searches": 1
+}
+
+$ python - <<'PY' (assert inbox > 0 and delivery dedupe)
+{'ok': True, 'hourly_alerts_scheduler': 'PASS'}
+
+PASS hourly_alerts_scheduler

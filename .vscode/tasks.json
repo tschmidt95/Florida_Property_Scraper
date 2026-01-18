@@ -406,47 +406,51 @@ echo; git status --porcelain=v1 && echo && git status"
       "command": "bash",
       "args": [
         "-lc",
+        "set -euo pipefail; git status --porcelain=v1 -b; echo; git --no-pager diff --stat; echo; git --no-pager diff --name-only; echo; git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Hourly Scheduler Alerts)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
         "set -euo pipefail; \
 git update-index --no-skip-worktree --no-assume-unchanged \
+  .gitignore \
   .vscode/tasks.json \
   src/florida_property_scraper/storage.py \
-  src/florida_property_scraper/api/app.py \
   src/florida_property_scraper/api/routes/watchlists.py \
-  src/florida_property_scraper/__main__.py \
-  src/florida_property_scraper/scheduler/__init__.py \
   src/florida_property_scraper/scheduler/cli.py \
   src/florida_property_scraper/scheduler/runner.py \
   src/florida_property_scraper/triggers/engine.py \
-  tests/test_api_watchlists_alerts.py \
-  tests/test_scheduler_runner.py \
-  tests/test_triggers_seller_intent_rules.py \
-  scripts/prove_watchlists_alerts.sh \
-  PROOF_WATCHLISTS_ALERTS.txt \
-  PROOF_TRIGGERS_ENGINE.txt \
-  PROOF_OFFICIAL_RECORDS_ENGINE.txt \
-  PROOF_TAX_COLLECTOR_ENGINE.txt \
-  PROOF_CODE_ENFORCEMENT_ENGINE.txt \
+  tests/test_scheduler_hourly_alerts_delivery.py \
+  scripts/prove_hourly_alerts_scheduler.sh \
+  PROOF_HOURLY_ALERTS_SCHEDULER.txt \
+  PROOF_SAVED_SEARCHES_ALERTS_E2E.txt \
   2>/dev/null || true; \
 git add \
+  .gitignore \
   .vscode/tasks.json \
   src/florida_property_scraper/storage.py \
-  src/florida_property_scraper/api/app.py \
   src/florida_property_scraper/api/routes/watchlists.py \
-  src/florida_property_scraper/__main__.py \
-  src/florida_property_scraper/scheduler/__init__.py \
   src/florida_property_scraper/scheduler/cli.py \
   src/florida_property_scraper/scheduler/runner.py \
   src/florida_property_scraper/triggers/engine.py \
-  tests/test_api_watchlists_alerts.py \
-  tests/test_scheduler_runner.py \
-  tests/test_triggers_seller_intent_rules.py \
-  scripts/prove_watchlists_alerts.sh \
-  PROOF_WATCHLISTS_ALERTS.txt \
-  PROOF_TRIGGERS_ENGINE.txt \
-  PROOF_OFFICIAL_RECORDS_ENGINE.txt \
-  PROOF_TAX_COLLECTOR_ENGINE.txt \
-  PROOF_CODE_ENFORCEMENT_ENGINE.txt; \
-git commit -m \"feat: saved searches alerts inbox + scheduler runner\"; \
+  tests/test_scheduler_hourly_alerts_delivery.py \
+  scripts/prove_hourly_alerts_scheduler.sh \
+  PROOF_HOURLY_ALERTS_SCHEDULER.txt \
+  PROOF_SAVED_SEARCHES_ALERTS_E2E.txt; \
+git commit -m \"feat: hourly saved-search alerts scheduler + delivery dedupe\"; \
 git push; \
 echo; git --no-pager log -1 --oneline; \
 echo; git status --porcelain=v1 && echo && git status"
