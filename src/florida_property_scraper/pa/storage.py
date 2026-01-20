@@ -316,4 +316,49 @@ class PASQLite:
                 "mortgage_amount": None,
             }
 
+        def ensure_hover_fields(self, county: str, parcel_ids: list[str]) -> None:
+    # Only enrich missing/blank hover fields
+    if not parcel_ids:
+        return
+
+    # find which parcel_ids are missing hover fields right now
+    existing = self.get_hover_fields_many(county=county, parcel_ids=parcel_ids)
+    missing = []
+    for pid in parcel_ids:
+        hf = existing.get(pid) or {}
+        if not (hf.get("owner_name") or hf.get("situs_address")):
+            missing.append(pid)
+
+    if not missing:
+        return
+
+    from florida_property_scraper.parcels.live.fdor_parcel_polygons import fetch_fdor_attrs_by_parcel_ids
+
+    attrs = fetch_fdor_attrs_by_parcel_ids(missing)
+    if not attrs:
+        return
+
+    # upsert into pa_properties as record_json so hover reads it immediately
+    import json
+    db = self._conn  # whatever your sqlite conn is named
+    cur = db.cursor()
+
+    for pid, row in attrs.items():
+        record = {
+            "county": county,
+            "parcel_id": pid,
+            "owner_name": row.get("owner_name", "") or "",
+            "situs_address": row.get("situs_address", "") or "",
+        }
+        cur.execute(
+            """
+            INSERT INTO pa_properties (county, parcel_id, record_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(county, parcel_id) DO UPDATE SET
+              record_json = excluded.record_json
+            """,
+            (county, pid, json.dumps(record)),
+        )
+
+    db.commit()
         return out
