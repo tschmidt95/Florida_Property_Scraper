@@ -640,50 +640,78 @@ if app:
         if bbox_t is None:
             raise HTTPException(status_code=400, detail="geometry has no coordinates")
 
-        provider = get_geometry_provider(county_key)
-        provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
-        fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
-            "1",
-            "true",
-            "True",
-        }
-        provider_warnings: list[str] = []
-        try:
-            candidates = provider.query(bbox_t)
-        except Exception as e:
-            # FDOR centroid service is best-effort and can occasionally return transient
-            # HTTP errors (ex: 421). For Orange/Seminole we have local GeoJSON fallbacks
-            # that keep UI + proofs deterministic.
-            candidates = []
+
+        # --- BEGIN PATCH: Use parcels.sqlite + RTree for polygon search ---
+        import sqlite3
+        from shapely.geometry import shape
+        import json as _json
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        intersecting = []
+        provider_warnings = []
+        candidates = []
+        if county_key == "seminole" and geometry:
+            db_path = str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite")
             try:
-                provider_warnings.append(
-                    f"geometry_provider_error:{type(e).__name__}"
-                )
-            except Exception:
-                provider_warnings.append("geometry_provider_error")
-
-            if provider_is_live and county_key in {"orange", "seminole"}:
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                minx, miny, maxx, maxy = bbox_t
+                q = """
+                    SELECT p.parcel_id, p.geom_geojson
+                    FROM parcels_rtree r
+                    JOIN parcels p ON p.rowid = r.rowid
+                    WHERE r.minx <= ? AND r.maxx >= ? AND r.miny <= ? AND r.maxy >= ? AND p.county = ?
+                """
+                rows = conn.execute(q, (maxx, minx, maxy, miny, county_key)).fetchall()
+                poly = shape(geometry) if isinstance(geometry, dict) else geometry
+                for row in rows:
+                    try:
+                        parcel_geom = _json.loads(row["geom_geojson"])
+                        parcel_shape = shape(parcel_geom)
+                        if poly.intersects(parcel_shape):
+                            intersecting.append(SimpleNamespace(parcel_id=row["parcel_id"], geometry=parcel_shape))
+                    except Exception:
+                        continue
+                conn.close()
+            except Exception as e:
+                provider_warnings.append(f"parcels_sqlite_error:{e}")
+        else:
+            # fallback to original provider logic for other counties
+            provider = get_geometry_provider(county_key)
+            provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
+            fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
+                "1",
+                "true",
+                "True",
+            }
+            try:
+                candidates = provider.query(bbox_t)
+            except Exception as e:
+                candidates = []
                 try:
-                    from florida_property_scraper.parcels.geometry_registry import _default_geojson_dir
-                    from florida_property_scraper.parcels.providers.orange import OrangeProvider
-                    from florida_property_scraper.parcels.providers.seminole import SeminoleProvider
-
-                    geo_dir = _default_geojson_dir()
-                    if county_key == "orange":
-                        fallback = OrangeProvider(geojson_path=geo_dir / "orange.geojson")
-                    else:
-                        fallback = SeminoleProvider(geojson_path=geo_dir / "seminole.geojson")
-                    fallback.load()
-                    candidates = fallback.query(bbox_t)
-                    provider_warnings.append("geometry_provider_fallback:local_geojson")
+                    provider_warnings.append(f"geometry_provider_error:{type(e).__name__}")
                 except Exception:
-                    # Keep the original error warning and proceed with empty candidates.
-                    pass
-
-                _mark("candidate_query")
-
-        # Filter to true intersections when possible.
-        intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
+                    provider_warnings.append("geometry_provider_error")
+                if provider_is_live and county_key in {"orange", "seminole"}:
+                    try:
+                        from florida_property_scraper.parcels.geometry_registry import _default_geojson_dir
+                        from florida_property_scraper.parcels.providers.orange import OrangeProvider
+                        from florida_property_scraper.parcels.providers.seminole import SeminoleProvider
+                        geo_dir = _default_geojson_dir()
+                        if county_key == "orange":
+                            fallback = OrangeProvider(geojson_path=geo_dir / "orange.geojson")
+                        else:
+                            fallback = SeminoleProvider(geojson_path=geo_dir / "seminole.geojson")
+                        fallback.load()
+                        candidates = fallback.query(bbox_t)
+                        provider_warnings.append("geometry_provider_fallback:local_geojson")
+                    except Exception:
+                        pass
+            _mark("candidate_query")
+            # Filter to true intersections when possible.
+            intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
+        # --- END PATCH ---
 
         _mark("geometry_filter")
 
