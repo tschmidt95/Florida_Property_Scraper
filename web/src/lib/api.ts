@@ -1,3 +1,9 @@
+// ...existing code...
+export async function getParcelsCoverage(county: string) {
+  const res = await fetch(`/api/debug/parcels_coverage?county=${encodeURIComponent(county)}`);
+  if (!res.ok) throw new Error("Failed to fetch coverage");
+  return await res.json();
+}
 export type SearchResult = {
   owner: string;
   address: string;
@@ -499,6 +505,154 @@ export async function triggersRollupByParcel(params: {
   const data: unknown = await resp.json();
   if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
   return data as TriggerRollupRecord;
+}
+
+export type SavedSearchRecord = {
+  id: string;
+  name: string;
+  county: string;
+  watchlist_id: string;
+  polygon_geojson_json: string;
+  filters_json: string;
+  enrich: number;
+  sort: string;
+  created_at: string;
+  updated_at: string;
+  last_run_at: string | null;
+  is_enabled: number;
+};
+
+export async function listSavedSearches(params?: { county?: string }): Promise<SavedSearchRecord[]> {
+  const qs = new URLSearchParams();
+  if (params?.county && params.county.trim()) qs.set('county', params.county.trim());
+
+  const resp = await fetch(`/api/saved-searches?${qs.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  const items = (data as any).saved_searches;
+  if (!Array.isArray(items)) throw new Error('Unexpected response: expected saved_searches[]');
+  return items as SavedSearchRecord[];
+}
+
+export async function createSavedSearch(payload: {
+  name: string;
+  county: string;
+  geometry: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  enrich?: boolean;
+  sort?: string | null;
+  watchlist_id?: string | null;
+}): Promise<SavedSearchRecord> {
+  const resp = await fetch('/api/saved-searches', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  const ss = (data as any).saved_search;
+  if (!ss || typeof ss !== 'object') throw new Error('Unexpected response: expected saved_search');
+  return ss as SavedSearchRecord;
+}
+
+export async function runSavedSearch(params: {
+  saved_search_id: string;
+  limit?: number;
+}): Promise<Record<string, unknown>> {
+  const sid = params.saved_search_id.trim();
+  if (!sid) throw new Error('saved_search_id is required');
+
+  const qs = new URLSearchParams();
+  if (typeof params.limit === 'number' && Number.isFinite(params.limit)) {
+    qs.set('limit', String(params.limit));
+  }
+
+  const resp = await fetch(`/api/saved-searches/${encodeURIComponent(sid)}/run?${qs.toString()}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  return data as Record<string, unknown>;
+}
+
+export type AlertsInboxRecord = {
+  id: number;
+  saved_search_id: string;
+  county: string;
+  parcel_id: string;
+  alert_key: string;
+  severity: number;
+  status: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  title?: string | null;
+  body_json?: string | null;
+  fingerprint?: string | null;
+};
+
+export async function listAlerts(params: {
+  saved_search_id: string;
+  county?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<AlertsInboxRecord[]> {
+  const qs = new URLSearchParams({
+    saved_search_id: params.saved_search_id,
+  });
+  if (params.county && params.county.trim()) qs.set('county', params.county.trim());
+  if (params.status && params.status.trim()) qs.set('status', params.status.trim());
+  if (typeof params.limit === 'number') qs.set('limit', String(params.limit));
+  if (typeof params.offset === 'number') qs.set('offset', String(params.offset));
+
+  const resp = await fetch(`/api/alerts?${qs.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  const items = (data as any).alerts;
+  if (!Array.isArray(items)) throw new Error('Unexpected response: expected alerts[]');
+  return items as AlertsInboxRecord[];
+}
+
+export async function markAlertRead(alertId: number): Promise<void> {
+  const resp = await fetch(`/api/alerts/${encodeURIComponent(String(alertId))}/read`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
 }
 
 export type AdvancedSearchFilters = {

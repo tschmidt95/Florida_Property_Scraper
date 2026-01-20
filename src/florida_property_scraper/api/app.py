@@ -2745,6 +2745,29 @@ if app:
             },
         }
 
+    @app.get("/api/debug/parcels_coverage")
+    def debug_parcels_coverage(county: str):
+        import sqlite3, os
+        db_path = os.getenv("PARCELS_DB_PATH", "data/parcels/parcels.sqlite")
+        db_path_abs = os.path.abspath(db_path)
+        has_data = False
+        row_count = 0
+        bbox = {"minx": None, "miny": None, "maxx": None, "maxy": None}
+        if os.path.exists(db_path_abs):
+            con = sqlite3.connect(db_path_abs)
+            cur = con.cursor()
+            row_count = cur.execute("select count(*) from parcels where county=?", (county.lower(),)).fetchone()[0]
+            if row_count > 0:
+                has_data = True
+                minx, miny, maxx, maxy = cur.execute(
+                    "select min(minx), min(miny), max(maxx), max(maxy) from parcels where county=?",
+                    (county.lower(),),
+                ).fetchone()
+                bbox = {"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy}
+            con.close()
+        return {"county": county.lower(), "db_path_used": db_path_abs, "row_count": row_count, "bbox": bbox, "has_data": has_data}
+
+
     @app.get("/api/parcels/{parcel_id}")
     def api_parcel_detail(parcel_id: str, county: str = ""):
         """Return full PA normalized detail + user meta.

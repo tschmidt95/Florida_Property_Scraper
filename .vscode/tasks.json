@@ -2,6 +2,91 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Checkpoint: Reality Snapshot (proc)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/reality_snapshot.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Stop: Kill 8000+5173 (proc)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/stop_8000_5173.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Start: Backend Minimal 8000 (proc)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/start_backend_minimal.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Watch: Ping 20s (proc)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/ping_20s_watch.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Start: Vite Only 5173 + HTML Proof (proc)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "scripts/start_vite_only.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Start: Fullstack (8000)",
       "type": "shell",
       "command": "bash",
@@ -25,7 +110,203 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && { echo \"==== Repo State ====\" && pwd && echo \"\" && echo \"==== branch ====\" && git rev-parse --abbrev-ref HEAD && echo \"\" && echo \"==== git status --porcelain=v1 -b ====\" && git status --porcelain=v1 -b && echo \"\" && echo \"==== git --no-pager diff --stat ====\" && git --no-pager diff --stat && echo \"\" && echo \"==== git --no-pager diff --name-only ====\" && git --no-pager diff --name-only && echo \"\" && echo \"==== git --no-pager log -5 --oneline --decorate ====\" && git --no-pager log -5 --oneline --decorate && echo \"\" && echo \"==== git fetch --prune ====\" && git fetch --prune && echo \"\" && echo \"HEAD=$(git rev-parse --short HEAD) upstream=$(git rev-parse --short @{u})\" && echo \"\" && echo \"==== git --no-pager diff -- .vscode/tasks.json ====\" && git --no-pager diff -- .vscode/tasks.json; } 2>&1 | tee .checkpoint_repo_state.txt"
+        "set -euo pipefail && { \
+          pwd; \
+          git rev-parse --abbrev-ref HEAD; \
+          git rev-parse --short HEAD; \
+          git fetch --prune; \
+          git rev-parse --short @{u}; \
+          git status --porcelain=v1 -b; \
+          git --no-pager log -3 --oneline --decorate; \
+        } 2>&1 | tee .checkpoint_repo_state.txt"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Phase 0: Git Snapshot (exact)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "cd \"${workspaceFolder}\" && git rev-parse --abbrev-ref HEAD && git rev-parse --short HEAD && git status --porcelain=v1 -b"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 0 HARD REALITY CHECK (print everything)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; pwd; git rev-parse --abbrev-ref HEAD; git rev-parse --short HEAD; git fetch --prune; git rev-parse --short @{u}; git status --porcelain=v1 -b; git --no-pager log -3 --oneline --decorate"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 0 Snapshot (git + lsof ports)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; echo 'git rev-parse --abbrev-ref HEAD'; git rev-parse --abbrev-ref HEAD; echo; echo 'git rev-parse --short HEAD'; git rev-parse --short HEAD; echo; echo 'git status --porcelain=v1 -b'; git status --porcelain=v1 -b; echo; echo 'lsof -tiTCP:8000 -sTCP:LISTEN || true'; lsof -tiTCP:8000 -sTCP:LISTEN || true; echo; echo 'lsof -tiTCP:5173 -sTCP:LISTEN || true'; lsof -tiTCP:5173 -sTCP:LISTEN || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 0 Snapshot (NO lsof; ss+ps)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; pwd; git rev-parse --abbrev-ref HEAD; git rev-parse --short HEAD; git status --porcelain=v1 -b; echo \"== LISTENERS (ss) ==\"; ss -ltnp | grep -E ':8000|:5173' || true; echo \"== PROCESSES (ps) ==\"; ps aux | grep -E 'uvicorn|vite|node .*5173' | grep -v grep || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 1 Kill 8000/5173 (pkill + ss)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; pkill -f \"uvicorn.*8000\" || true; pkill -f \"florida_property_scraper.api.app:app\" || true; pkill -f \"vite.*5173\" || true; pkill -f \"node.*5173\" || true; sleep 1; echo \"== LISTENERS AFTER KILL ==\"; ss -ltnp | grep -E ':8000|:5173' || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 2 Start minimal uvicorn (nohup -> .uvicorn_minimal.log)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; rm -f .uvicorn_minimal.log || true; export PYTHONUNBUFFERED=1; export WEB_CONCURRENCY=1; nohup python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info > .uvicorn_minimal.log 2>&1 & echo \"uvicorn_pid=$!\"; sleep 1; ss -ltnp | grep ':8000' || true; curl -sS http://127.0.0.1:8000/api/debug/ping || true"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 3 20s ping loop (diagnostics on FAIL)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -eo pipefail; cd \"${workspaceFolder}\"; for i in $(seq 1 20); do if curl -sS http://127.0.0.1:8000/api/debug/ping >/dev/null; then echo \"OK $i\"; else echo \"FAIL $i\"; echo \"== MEMORY ==\"; free -h || true; echo \"== TOP RAM ==\"; ps aux --sort=-%mem | head -n 16 || true; echo \"== LAST UVICORN LOGS ==\"; tail -n 80 .uvicorn_minimal.log || true; break; fi; sleep 1; done"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 4 Start Vite only (nohup -> .vite_only.log) + curl proof",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -eo pipefail; cd \"${workspaceFolder}/web\"; rm -f ../.vite_only.log || true; nohup npm run dev -- --host 0.0.0.0 --port 5173 > ../.vite_only.log 2>&1 & echo \"vite_pid=$!\"; sleep 2; echo '== HTML (first 40) =='; curl -sS http://127.0.0.1:5173/ | head -n 40; echo; echo '== HEADERS (first 12) =='; curl -I http://127.0.0.1:5173/ | head -n 12"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 1 VERIFY ping SHA == HEAD",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; cd \"${workspaceFolder}\"; bash scripts/agent_step1_verify_ping_sha.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Agent: Step 2 VERIFY frontend serving current source",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; cd \"${workspaceFolder}\"; bash scripts/agent_step2_verify_frontend_serving_current.sh"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -441,8 +722,34 @@ echo; git status --porcelain=v1 && echo && git status"
       "type": "shell",
       "command": "bash",
       "args": [
-        "-lc",
-        "set -euo pipefail; git status --porcelain=v1 -b; echo; git --no-pager diff --stat; echo; git --no-pager diff --name-only; echo; git status"
+        "-c",
+        "set -eo pipefail; \
+          git status --porcelain=v1 -b; \
+          echo; git --no-pager diff --stat; \
+          echo; git --no-pager diff --name-only; \
+          echo; git status; \
+          echo; \
+          echo '== curl -I http://127.0.0.1:5173/ | head -n 10 =='; \
+          curl -I http://127.0.0.1:5173/ | head -n 10; \
+          echo; \
+          echo '== rg -n "Legacy map panel disabled" web/src -S =='; \
+          rg -n "Legacy map panel disabled" web/src -S || true; \
+          echo; \
+          echo '== sed -n 1,60p web/src/pages/MapSearch.tsx =='; \
+          sed -n '1,60p' web/src/pages/MapSearch.tsx; \
+          echo; \
+          echo '== rg -n "export default function MapSearch|function MapSearch" web/src/pages/MapSearch.tsx =='; \
+          rg -n 'export default function MapSearch|function MapSearch' web/src/pages/MapSearch.tsx || true; \
+          echo; \
+          ret_line=$(rg -n 'return \(' web/src/pages/MapSearch.tsx | head -n 1 | cut -d: -f1 || true); \
+          if [ -n "${ret_line}" ]; then \
+            start=$((ret_line-20)); if [ $start -lt 1 ]; then start=1; fi; \
+            end=$((ret_line+140)); \
+            echo "== MapSearch return block (~160 lines around return), starting at line ${start} =="; \
+            sed -n "${start},${end}p" web/src/pages/MapSearch.tsx; \
+          else \
+            echo 'Could not locate return( in MapSearch.tsx' >&2; \
+          fi"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

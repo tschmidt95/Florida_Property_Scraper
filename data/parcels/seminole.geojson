@@ -16,7 +16,9 @@
         ]
       },
       "properties": {
-        "parcel_id": "SEM-0001"
+        "parcel_id": "SEM-0001",
+        "situs_address": "100 Main St",
+        "owner_name": "John Doe"
       }
     },
     {
@@ -34,7 +36,369 @@
         ]
       },
       "properties": {
-        "parcel_id": "SEM-0002"
+        "parcel_id": "SEM-0002",
+        "situs_address": "200 Main St",
+        "owner_name": "Jane Smith"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3600, 28.6460],
+            [-81.3580, 28.6460],
+            [-81.3580, 28.6480],
+            [-81.3600, 28.6480],
+            [-81.3600, 28.6460]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0003",
+        "situs_address": "300 Main St",
+        "owner_name": "Alice Johnson"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3550, 28.6440],
+            [-81.3530, 28.6440],
+            [-81.3530, 28.6460],
+            [-81.3550, 28.6460],
+            [-81.3550, 28.6440]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0004",
+        "situs_address": "400 Main St",
+        "owner_name": "Bob Lee"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3500, 28.6420],
+            [-81.3480, 28.6420],
+            [-81.3480, 28.6440],
+            [-81.3500, 28.6440],
+            [-81.3500, 28.6420]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0005",
+        "situs_address": "500 Main St",
+        "owner_name": "Carol King"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3450, 28.6400],
+            [-81.3430, 28.6400],
+            [-81.3430, 28.6420],
+            [-81.3450, 28.6420],
+            [-81.3450, 28.6400]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0006",
+        "situs_address": "600 Main St",
+        "owner_name": "David Kim"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3400, 28.6380],
+            [-81.3380, 28.6380],
+            [-81.3380, 28.6400],
+            [-81.3400, 28.6400],
+            [-81.3400, 28.6380]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0007",
+        "situs_address": "700 Main St",
+        "owner_name": "Eva Green"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3350, 28.6360],
+            [-81.3330, 28.6360],
+            [-81.3330, 28.6380],
+            [-81.3350, 28.6380],
+            [-81.3350, 28.6360]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0008",
+        "situs_address": "800 Main St",
+        "owner_name": "Frank Hall"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3300, 28.6340],
+            [-81.3280, 28.6340],
+            [-81.3280, 28.6360],
+            [-81.3300, 28.6360],
+            [-81.3300, 28.6340]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0009",
+        "situs_address": "900 Main St",
+        "owner_name": "Grace Lee"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3250, 28.6320],
+            [-81.3230, 28.6320],
+            [-81.3230, 28.6340],
+            [-81.3250, 28.6340],
+            [-81.3250, 28.6320]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0010",
+        "situs_address": "1000 Main St",
+        "owner_name": "Henry Ford"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3200, 28.6300],
+            [-81.3180, 28.6300],
+            [-81.3180, 28.6320],
+            [-81.3200, 28.6320],
+            [-81.3200, 28.6300]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0011",
+        "situs_address": "1100 Main St",
+        "owner_name": "Irene Adler"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3150, 28.6280],
+            [-81.3130, 28.6280],
+            [-81.3130, 28.6300],
+            [-81.3150, 28.6300],
+            [-81.3150, 28.6280]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0012",
+        "situs_address": "1200 Main St",
+        "owner_name": "James Moriarty"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3100, 28.6260],
+            [-81.3080, 28.6260],
+            [-81.3080, 28.6280],
+            [-81.3100, 28.6280],
+            [-81.3100, 28.6260]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0013",
+        "situs_address": "1300 Main St",
+        "owner_name": "Sherlock Holmes"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3050, 28.6240],
+            [-81.3030, 28.6240],
+            [-81.3030, 28.6260],
+            [-81.3050, 28.6260],
+            [-81.3050, 28.6240]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0014",
+        "situs_address": "1400 Main St",
+        "owner_name": "Dr. Watson"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.3000, 28.6220],
+            [-81.2980, 28.6220],
+            [-81.2980, 28.6240],
+            [-81.3000, 28.6240],
+            [-81.3000, 28.6220]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0015",
+        "situs_address": "1500 Main St",
+        "owner_name": "Hercule Poirot"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.2950, 28.6200],
+            [-81.2930, 28.6200],
+            [-81.2930, 28.6220],
+            [-81.2950, 28.6220],
+            [-81.2950, 28.6200]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0016",
+        "situs_address": "1600 Main St",
+        "owner_name": "Miss Marple"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.2900, 28.6180],
+            [-81.2880, 28.6180],
+            [-81.2880, 28.6200],
+            [-81.2900, 28.6200],
+            [-81.2900, 28.6180]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0017",
+        "situs_address": "1700 Main St",
+        "owner_name": "Sam Spade"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.2850, 28.6160],
+            [-81.2830, 28.6160],
+            [-81.2830, 28.6180],
+            [-81.2850, 28.6180],
+            [-81.2850, 28.6160]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0018",
+        "situs_address": "1800 Main St",
+        "owner_name": "Philip Marlowe"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.2800, 28.6140],
+            [-81.2780, 28.6140],
+            [-81.2780, 28.6160],
+            [-81.2800, 28.6160],
+            [-81.2800, 28.6140]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0019",
+        "situs_address": "1900 Main St",
+        "owner_name": "Mike Hammer"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-81.2750, 28.6120],
+            [-81.2730, 28.6120],
+            [-81.2730, 28.6140],
+            [-81.2750, 28.6140],
+            [-81.2750, 28.6120]
+          ]
+        ]
+      },
+      "properties": {
+        "parcel_id": "SEM-0020",
+        "situs_address": "2000 Main St",
+        "owner_name": "Jessica Jones"
       }
     }
   ]

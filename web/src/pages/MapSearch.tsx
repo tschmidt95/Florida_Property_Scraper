@@ -1,21 +1,28 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 
 import L from 'leaflet';
 import type { LatLngLiteral } from 'leaflet';
 import { CircleMarker, GeoJSON, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 
 import {
+  createSavedSearch,
+  listAlerts,
+  listSavedSearches,
+  markAlertRead,
   parcelsEnrich,
   parcelsGeometry,
   parcelsSearchNormalized,
   permitsByParcel,
+  runSavedSearch,
   triggersByParcel,
   triggersRollupByParcel,
   triggersRollupsSearch,
+  type AlertsInboxRecord,
   type ParcelAttributeFilters,
   type ParcelRecord,
   type ParcelSearchListItem,
   type PermitRecord,
+  type SavedSearchRecord,
   type TriggerAlertRecord,
   type TriggerEventRecord,
   type TriggerRollupRecord,
@@ -391,6 +398,84 @@ function MultiSelectFilter({
   );
 }
 
+type SignalCatalogItem = {
+  key: string;
+  label: string;
+  group: string;
+  tier: 'critical' | 'strong' | 'support' | 'info';
+  comingSoon?: boolean;
+};
+
+// NOTE: This is a frontend mirror of the backend trigger taxonomy
+// (see src/florida_property_scraper/triggers/taxonomy.py). This catalog is
+// intentionally stable and always renders, even when counts are zero.
+const SIGNALS_CATALOG: SignalCatalogItem[] = [
+  // Permits
+  { key: 'permit_demolition', label: 'Permit: demolition', group: 'Permits', tier: 'critical' },
+  { key: 'permit_structural', label: 'Permit: structural', group: 'Permits', tier: 'critical' },
+  { key: 'permit_roof', label: 'Permit: roof', group: 'Permits', tier: 'strong' },
+  { key: 'permit_hvac', label: 'Permit: HVAC', group: 'Permits', tier: 'strong' },
+  { key: 'permit_electrical', label: 'Permit: electrical', group: 'Permits', tier: 'strong' },
+  { key: 'permit_plumbing', label: 'Permit: plumbing', group: 'Permits', tier: 'strong' },
+  { key: 'permit_pool', label: 'Permit: pool', group: 'Permits', tier: 'strong' },
+  { key: 'permit_fire', label: 'Permit: fire', group: 'Permits', tier: 'strong' },
+  { key: 'permit_sitework', label: 'Permit: sitework', group: 'Permits', tier: 'strong' },
+  { key: 'permit_tenant_improvement', label: 'Permit: tenant improvement', group: 'Permits', tier: 'strong' },
+  { key: 'permit_remodel', label: 'Permit: remodel', group: 'Permits', tier: 'strong' },
+  { key: 'permit_generator', label: 'Permit: generator', group: 'Permits', tier: 'support' },
+  { key: 'permit_windows', label: 'Permit: windows', group: 'Permits', tier: 'support' },
+  { key: 'permit_doors', label: 'Permit: doors', group: 'Permits', tier: 'support' },
+  { key: 'permit_solar', label: 'Permit: solar', group: 'Permits', tier: 'support' },
+  { key: 'permit_fence', label: 'Permit: fence', group: 'Permits', tier: 'support' },
+  { key: 'permit_sign', label: 'Permit: sign', group: 'Permits', tier: 'support' },
+
+  // Official records (distress + transactions)
+  { key: 'lis_pendens', label: 'Lis pendens', group: 'Official Records', tier: 'critical' },
+  { key: 'foreclosure_filing', label: 'Foreclosure: filing', group: 'Official Records', tier: 'critical' },
+  { key: 'foreclosure_judgment', label: 'Foreclosure: judgment', group: 'Official Records', tier: 'critical' },
+  { key: 'foreclosure', label: 'Foreclosure (generic)', group: 'Official Records', tier: 'critical' },
+  { key: 'deed_recorded', label: 'Deed recorded', group: 'Official Records', tier: 'strong' },
+  { key: 'deed_warranty', label: 'Deed: warranty', group: 'Official Records', tier: 'strong' },
+  { key: 'deed_quitclaim', label: 'Deed: quitclaim', group: 'Official Records', tier: 'strong' },
+  { key: 'mortgage_recorded', label: 'Mortgage recorded', group: 'Official Records', tier: 'support' },
+  { key: 'mortgage_satisfaction', label: 'Mortgage satisfaction', group: 'Official Records', tier: 'strong' },
+  { key: 'mortgage_assignment', label: 'Mortgage assignment', group: 'Official Records', tier: 'support' },
+
+  // Liens
+  { key: 'mechanics_lien', label: "Mechanic's lien", group: 'Liens', tier: 'strong' },
+  { key: 'hoa_lien', label: 'HOA lien', group: 'Liens', tier: 'strong' },
+  { key: 'irs_tax_lien', label: 'IRS tax lien', group: 'Liens', tier: 'strong' },
+  { key: 'state_tax_lien', label: 'State tax lien', group: 'Liens', tier: 'strong' },
+  { key: 'code_enforcement_lien', label: 'Code enforcement lien', group: 'Liens', tier: 'critical' },
+  { key: 'judgment_lien', label: 'Judgment lien', group: 'Liens', tier: 'strong' },
+  { key: 'utility_lien', label: 'Utility lien', group: 'Liens', tier: 'strong' },
+  { key: 'lien_recorded', label: 'Lien recorded (generic)', group: 'Liens', tier: 'critical' },
+
+  // Tax collector
+  { key: 'delinquent_tax', label: 'Delinquent tax', group: 'Tax Collector', tier: 'critical' },
+  { key: 'tax_certificate_issued', label: 'Tax certificate issued', group: 'Tax Collector', tier: 'strong' },
+  { key: 'tax_certificate_redeemed', label: 'Tax certificate redeemed', group: 'Tax Collector', tier: 'strong' },
+  { key: 'payment_plan_started', label: 'Payment plan started', group: 'Tax Collector', tier: 'strong' },
+  { key: 'payment_plan_defaulted', label: 'Payment plan defaulted', group: 'Tax Collector', tier: 'strong' },
+  { key: 'tax_deed_application', label: 'Tax deed application', group: 'Tax Collector', tier: 'critical', comingSoon: true },
+
+  // Code enforcement
+  { key: 'code_case_opened', label: 'Code case opened', group: 'Code Enforcement', tier: 'strong' },
+  { key: 'unsafe_structure', label: 'Unsafe structure', group: 'Code Enforcement', tier: 'critical' },
+  { key: 'condemnation', label: 'Condemnation', group: 'Code Enforcement', tier: 'critical' },
+  { key: 'demolition_order', label: 'Demolition order', group: 'Code Enforcement', tier: 'critical' },
+  { key: 'abatement_order', label: 'Abatement order', group: 'Code Enforcement', tier: 'critical' },
+  { key: 'board_hearing_set', label: 'Board hearing set', group: 'Code Enforcement', tier: 'strong' },
+  { key: 'fines_imposed', label: 'Fines imposed', group: 'Code Enforcement', tier: 'strong' },
+  { key: 'reinspection_failed', label: 'Reinspection failed', group: 'Code Enforcement', tier: 'strong' },
+  { key: 'repeat_violation', label: 'Repeat violation', group: 'Code Enforcement', tier: 'strong' },
+
+  // Courts (placeholders)
+  { key: 'probate_opened', label: 'Probate opened', group: 'Courts', tier: 'critical', comingSoon: true },
+  { key: 'divorce_filed', label: 'Divorce filed', group: 'Courts', tier: 'critical', comingSoon: true },
+  { key: 'eviction_filing', label: 'Eviction filing', group: 'Courts', tier: 'critical', comingSoon: true },
+];
+
 export default function MapSearch({
   onMapStatus,
 }: {
@@ -441,6 +526,8 @@ export default function MapSearch({
 
   const [triggerLookupParcelId, setTriggerLookupParcelId] = useState('');
 
+  const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
+
   const [rollupsEnabled, setRollupsEnabled] = useState(false);
   const [rollupsMinScore, setRollupsMinScore] = useState('');
   const [rollupsGroupOfficialRecords, setRollupsGroupOfficialRecords] = useState(false);
@@ -461,6 +548,8 @@ export default function MapSearch({
     | null
   >(null);
   const [rollupsError, setRollupsError] = useState<string | null>(null);
+
+  const [rollupsMap, setRollupsMap] = useState<Record<string, TriggerRollupRecord>>({});
 
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(
@@ -548,6 +637,7 @@ export default function MapSearch({
   }, []);
 
   const [lastRequest, setLastRequest] = useState<any | null>(null);
+  const [lastResponseSummary, setLastResponseSummary] = useState<any | null>(null);
   const [debugEvidence, setDebugEvidence] = useState<
     | {
         requestJson: string;
@@ -571,7 +661,47 @@ export default function MapSearch({
   const [lastError, setLastError] = useState<string | null>(null);
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
 
-  const [ownersQuery, setOwnersQuery] = useState('');
+  const [resultsQuery, setResultsQuery] = useState('');
+
+  const [toast, setToast] = useState<string | null>(null);
+
+  const signalCatalogKeysSet = useMemo(() => new Set(SIGNALS_CATALOG.map((x) => x.key)), []);
+  const signalCatalogByGroup = useMemo(() => {
+    const m = new Map<string, SignalCatalogItem[]>();
+    for (const it of SIGNALS_CATALOG) {
+      const arr = m.get(it.group) || [];
+      arr.push(it);
+      m.set(it.group, arr);
+    }
+    for (const [g, items] of m.entries()) {
+      items.sort((a, b) => a.label.localeCompare(b.label));
+      m.set(g, items);
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, []);
+
+  const unknownSelectedTriggerKeys = useMemo(() => {
+    const unknown: string[] = [];
+    for (const k of rollupsTriggerKeys) {
+      if (!signalCatalogKeysSet.has(k)) unknown.push(k);
+    }
+    return unknown;
+  }, [rollupsTriggerKeys, signalCatalogKeysSet]);
+
+  const comingSoonSelectedTriggerKeys = useMemo(() => {
+    const cs = new Set(SIGNALS_CATALOG.filter((x) => x.comingSoon).map((x) => x.key));
+    return rollupsTriggerKeys.filter((k) => cs.has(k));
+  }, [rollupsTriggerKeys]);
+
+  const [savedSearches, setSavedSearches] = useState<SavedSearchRecord[]>([]);
+  const [savedSearchesLoading, setSavedSearchesLoading] = useState(false);
+  const [savedSearchesError, setSavedSearchesError] = useState<string | null>(null);
+  const [selectedSavedSearchId, setSelectedSavedSearchId] = useState<string>('');
+
+  const [alertsStatus, setAlertsStatus] = useState<string>('new');
+  const [alertsInbox, setAlertsInbox] = useState<AlertsInboxRecord[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
 
   const [parcelLinesEnabled, setParcelLinesEnabled] = useState(false);
   const [parcelLinesLoading, setParcelLinesLoading] = useState(false);
@@ -585,6 +715,7 @@ export default function MapSearch({
 
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
+  const toastTimerRef = useRef<number | null>(null);
 
   const recordById = useMemo(() => {
     const m = new Map<string, ParcelRecord>();
@@ -603,16 +734,15 @@ export default function MapSearch({
     });
   }, [parcels, showCache, showLive]);
 
-  const ownersRows = useMemo(() => {
-    const q = ownersQuery.trim().toLowerCase();
-    const base = parcels;
-    if (!q) return base;
-    return base.filter((p) => {
+  const visibleRows = useMemo(() => {
+    const q = resultsQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((p) => {
       const owner = (p.owner_name || '').toLowerCase();
       const addr = (p.address || '').toLowerCase();
       return owner.includes(q) || addr.includes(q) || p.parcel_id.toLowerCase().includes(q);
     });
-  }, [ownersQuery, parcels]);
+  }, [resultsQuery, rows]);
 
   const geometryStatus = useMemo(() => {
     if (drawnPolygon) return 'Polygon selected';
@@ -706,6 +836,161 @@ export default function MapSearch({
     setFutureLandUseQuery('');
     setSelectedZoning([]);
     setSelectedFutureLandUse([]);
+  }
+
+  function showToast(msg: string) {
+    setToast(msg);
+    try {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToast(null), 2600);
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      try {
+        if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  const refreshSavedSearches = useCallback(
+    async (nextCounty?: string) => {
+      const c = (nextCounty ?? county).trim();
+      setSavedSearchesError(null);
+      setSavedSearchesLoading(true);
+      try {
+        const items = await listSavedSearches({ county: c });
+        setSavedSearches(items);
+
+        const ids = items.map((s) => String(s.id || '')).filter(Boolean);
+        setSelectedSavedSearchId((prev) => {
+          const p = (prev || '').trim();
+          if (p && ids.includes(p)) return p;
+          return ids.length ? ids[0] : '';
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setSavedSearchesError(msg);
+        setSavedSearches([]);
+        setSelectedSavedSearchId('');
+      } finally {
+        setSavedSearchesLoading(false);
+      }
+    },
+    [county]
+  );
+
+  const refreshAlerts = useCallback(
+    async (nextSavedSearchId?: string, nextStatus?: string) => {
+      const sid = (nextSavedSearchId ?? selectedSavedSearchId).trim();
+      if (!sid) {
+        setAlertsInbox([]);
+        setAlertsError(null);
+        return;
+      }
+
+      setAlertsError(null);
+      setAlertsLoading(true);
+      try {
+        const st = (nextStatus ?? alertsStatus).trim();
+        const items = await listAlerts({
+          saved_search_id: sid,
+          county,
+          status: st ? st : undefined,
+          limit: 200,
+          offset: 0,
+        });
+        setAlertsInbox(items);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setAlertsError(msg);
+        setAlertsInbox([]);
+      } finally {
+        setAlertsLoading(false);
+      }
+    },
+    [alertsStatus, county, selectedSavedSearchId]
+  );
+
+  useEffect(() => {
+    void refreshSavedSearches(county);
+  }, [county, refreshSavedSearches]);
+
+  useEffect(() => {
+    void refreshAlerts(selectedSavedSearchId, alertsStatus);
+  }, [alertsStatus, county, refreshAlerts, selectedSavedSearchId]);
+
+  async function runSelectedSavedSearch() {
+    const sid = selectedSavedSearchId.trim();
+    if (!sid) return;
+    try {
+      const resp = await runSavedSearch({ saved_search_id: sid, limit: 2000 });
+      const ok = Boolean((resp as any).ok);
+      if (ok) {
+        const added = Number((resp as any).added || 0);
+        const removed = Number((resp as any).removed || 0);
+        showToast(`Saved search ran: +${added} / -${removed}`);
+      } else {
+        showToast('Saved search run returned non-ok');
+      }
+      await refreshAlerts(sid, alertsStatus);
+      await refreshSavedSearches(county);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`Run failed: ${msg}`);
+    }
+  }
+
+  async function saveCurrentSearch() {
+    const poly = drawnPolygonRef.current ?? drawnPolygon;
+    if (!poly) {
+      showToast('Draw a polygon to save a search.');
+      return;
+    }
+
+    const built = buildSearchPayloadForMap();
+    if ('error' in built) {
+      showToast(built.error);
+      return;
+    }
+
+    const defaultName = `${county.toUpperCase()} Saved Search`;
+    const name = (typeof window !== 'undefined' ? window.prompt('Saved Search name', defaultName) : defaultName) || defaultName;
+
+    try {
+      const payload = built.payload as any;
+      const filters = (payload?.filters && typeof payload.filters === 'object') ? payload.filters : {};
+      const sort = typeof payload?.sort === 'string' ? payload.sort : null;
+      const ss = await createSavedSearch({
+        name,
+        county,
+        geometry: poly as any,
+        filters,
+        enrich: false,
+        sort,
+      });
+      showToast('Saved search created.');
+      await refreshSavedSearches(county);
+      setSelectedSavedSearchId(String(ss.id || '').trim());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`Save failed: ${msg}`);
+    }
+  }
+
+  async function markInboxAlertRead(a: AlertsInboxRecord) {
+    try {
+      await markAlertRead(Number(a.id));
+      await refreshAlerts(selectedSavedSearchId, alertsStatus);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`Mark read failed: ${msg}`);
+    }
   }
 
   useEffect(() => {
@@ -860,7 +1145,7 @@ export default function MapSearch({
   }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels]);
 
   function buildSearchPayloadForMap(): { payload: any } | { error: string } {
-    const poly = drawnPolygonRef.current ?? drawnPolygon;
+    let poly = drawnPolygonRef.current ?? drawnPolygon;
     const circle = drawnCircleRef.current ?? drawnCircle;
 
     if (!poly && !circle) {
@@ -948,11 +1233,43 @@ export default function MapSearch({
       sort: sortKey,
     };
 
+    // Proof + forward-compat: include selected trigger keys in the request payload.
+    // Filtering by signals is currently applied via the rollups prefilter (when enabled).
+    // Always include trigger_keys as an array (never null)
+    try {
+      const keys = (rollupsTriggerKeys || []).map((k) => String(k || '').trim()).filter((k) => k);
+      payload.trigger_keys = keys;
+    } catch {
+      payload.trigger_keys = [];
+    }
+
     if (debugUiEnabled) {
       payload.debug = true;
     }
 
     if (poly) {
+      // Ensure coordinates are [lng, lat] (GeoJSON order)
+      if (
+        poly &&
+        Array.isArray(poly.coordinates) &&
+        Array.isArray(poly.coordinates[0]) &&
+        poly.coordinates[0].length > 0
+      ) {
+        // If any coordinate is [lat, lng], swap to [lng, lat]
+        const ring = poly.coordinates[0];
+        // Heuristic: if abs(first[0]) < 31 and abs(first[1]) > 60, it's [lat, lng] (Florida)
+        const first = ring[0];
+        if (
+          Array.isArray(first) &&
+          first.length === 2 &&
+          Math.abs(first[0]) < 31 &&
+          Math.abs(first[1]) > 60
+        ) {
+          // Detected [lat, lng], swap all
+          const swapped = ring.map(([lat, lng]: [number, number]) => [lng, lat]);
+          poly = { ...poly, coordinates: [swapped] };
+        }
+      }
       payload.polygon_geojson = poly;
     } else if (circle) {
       payload.center = circle.center;
@@ -982,6 +1299,7 @@ export default function MapSearch({
         | { minLng: number; minLat: number; maxLng: number; maxLat: number }
         | null
         | undefined;
+      let coordOrderSample: any = null;
 
       try {
         const poly = payload?.polygon_geojson;
@@ -1003,6 +1321,9 @@ export default function MapSearch({
           } else {
             polygonFirst = null;
           }
+
+          // Sample first 5 coordinate pairs for debug
+          coordOrderSample = ring.slice(0, 5);
 
           let minLng = Infinity;
           let maxLng = -Infinity;
@@ -1054,6 +1375,8 @@ export default function MapSearch({
         sample,
         zoningOptionsLen: zoningOpts.filter((x) => typeof x === 'string' && x.trim()).length,
         futureLandUseOptionsLen: fluOpts.filter((x) => typeof x === 'string' && x.trim()).length,
+        coord_order_sample: coordOrderSample,
+        coord_order_label: 'expected [lng,lat]',
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1181,6 +1504,17 @@ export default function MapSearch({
 
         const rollupsResp = await triggersRollupsSearch(rollupsReq);
         const ids = Array.isArray(rollupsResp.parcel_ids) ? rollupsResp.parcel_ids : [];
+        try {
+          const nextMap: Record<string, TriggerRollupRecord> = {};
+          const rr = Array.isArray((rollupsResp as any).rollups) ? ((rollupsResp as any).rollups as TriggerRollupRecord[]) : [];
+          for (const r of rr) {
+            const pid = (r?.parcel_id || '').trim();
+            if (pid) nextMap[pid] = r;
+          }
+          setRollupsMap(nextMap);
+        } catch {
+          setRollupsMap({});
+        }
         setRollupsLastSummary({
           candidate_count: Number(rollupsResp.candidate_count || 0),
           returned_count: Number(rollupsResp.returned_count || 0),
@@ -1204,6 +1538,9 @@ export default function MapSearch({
         return;
       }
     }
+    if (!rollupsActive) {
+      setRollupsMap({});
+    }
     const requestOrigin = (() => {
       try {
         return typeof window !== 'undefined' ? String(window.location.origin || '') : '';
@@ -1213,6 +1550,7 @@ export default function MapSearch({
     })();
     const requestVia = requestOrigin.includes(':5173') ? 'vite-proxy' : 'direct';
     setLastRequest(payload);
+    setLastResponseSummary(null);
     if (debugUiEnabled) {
       try {
         setDebugEvidence({
@@ -1418,6 +1756,33 @@ export default function MapSearch({
         cache: Number(rawCounts.cache || 0),
       });
 
+      try {
+        const warnings = Array.isArray((resp as any).warnings) ? ((resp as any).warnings as string[]) : [];
+        setLastResponseSummary({
+          request_via: requestVia,
+          search_id: (resp as any).search_id,
+          returned_count: list.length || recs.length,
+          candidate_count: candidateCount,
+          filtered_count: filteredCount,
+          records_truncated: Boolean((resp as any).records_truncated),
+          source_counts: {
+            live: Number(rawCounts.live || 0),
+            cache: Number(rawCounts.cache || 0),
+          },
+          warnings,
+          error_reason: (resp as any).error_reason ?? null,
+          request: {
+            has_polygon: Boolean((payload as any)?.polygon_geojson),
+            min_sqft: (payload as any)?.filters?.min_sqft ?? null,
+            trigger_keys: (payload as any)?.trigger_keys ?? null,
+          },
+          unsupported_trigger_keys: unknownSelectedTriggerKeys.length ? unknownSelectedTriggerKeys : null,
+          coming_soon_selected_keys: comingSoonSelectedTriggerKeys.length ? comingSoonSelectedTriggerKeys : null,
+        });
+      } catch {
+        // ignore
+      }
+
       if (!list.length && !recs.length) {
         const hint =
           hadFilters && candidateCount && candidateCount > 0 && filteredCount === 0
@@ -1445,8 +1810,8 @@ export default function MapSearch({
       setParcels(list);
       setRecords(recs);
 
-      // Refresh owner-list query results immediately.
-      setOwnersQuery('');
+      // Refresh list filter immediately.
+      setResultsQuery('');
 
       // If parcel lines are enabled, refresh them based on the new parcel_ids.
       setParcelLinesError(null);
@@ -1457,6 +1822,15 @@ export default function MapSearch({
       const msg = e instanceof Error ? e.message : String(e);
       setLastError(msg);
       setErrorBanner(`Request failed (${requestVia}): ${msg}`);
+      try {
+        setLastResponseSummary({
+          request_via: requestVia,
+          error: msg,
+          request: lastRequest,
+        });
+      } catch {
+        // ignore
+      }
       setParcels([]);
       setRecords([]);
       setParcelLinesFC(null);
@@ -1468,26 +1842,89 @@ export default function MapSearch({
     }
   }
 
+  const signalGroupOptions = useMemo(
+    () => [
+      { key: 'permits', label: 'Permits' },
+      { key: 'official_records', label: 'Official Records' },
+      { key: 'courts', label: 'Courts' },
+      { key: 'tax', label: 'Tax' },
+      { key: 'code_enforcement', label: 'Code Enforcement' },
+      { key: 'gis_planning', label: 'Appraiser / Planning' },
+    ],
+    []
+  );
+
+  const distressPresets = useMemo(
+    () => [
+      { id: 'lis', label: 'Lis pendens', keys: ['lis_pendens'], groups: ['official_records'] },
+      {
+        id: 'foreclosure',
+        label: 'Foreclosure',
+        keys: ['foreclosure_filing', 'foreclosure_judgment', 'foreclosure'],
+        groups: ['official_records'],
+      },
+      { id: 'tax', label: 'Delinquent tax', keys: ['delinquent_tax', 'tax_certificate_issued'], groups: ['tax'] },
+      {
+        id: 'code',
+        label: 'Code case',
+        keys: ['code_case_opened', 'unsafe_structure', 'condemnation', 'demolition_order', 'abatement_order', 'lien_recorded'],
+        groups: ['code_enforcement'],
+      },
+      {
+        id: 'liens',
+        label: 'Liens',
+        keys: ['mechanics_lien', 'hoa_lien', 'irs_tax_lien', 'state_tax_lien', 'code_enforcement_lien', 'judgment_lien', 'utility_lien'],
+        groups: ['official_records'],
+      },
+      { id: 'probate', label: 'Probate', keys: ['probate_opened', 'probate'], groups: ['courts'] },
+      { id: 'divorce', label: 'Divorce', keys: ['divorce_filed', 'divorce'], groups: ['courts'] },
+    ],
+    []
+  );
+
+  const toggleValueInList = useCallback((prev: string[], raw: string): string[] => {
+    const v = String(raw || '').trim();
+    if (!v) return prev;
+    const exists = prev.includes(v);
+    return exists ? prev.filter((x) => x !== v) : [...prev, v];
+  }, []);
+
   return (
-    <div className="flex h-full min-h-[520px]">
-      <aside className="h-full w-[420px] shrink-0 overflow-y-auto border-r border-cre-border/40 bg-cre-surface p-4">
+    <div
+      className="flex h-full min-h-[520px]"
+      style={{
+        ['--cre-bg' as any]: '248 250 252',
+        ['--cre-surface' as any]: '255 255 255',
+        ['--cre-text' as any]: '15 23 42',
+        ['--cre-muted' as any]: '71 85 105',
+        ['--cre-border' as any]: '203 213 225',
+        ['--cre-accent' as any]: '59 130 246',
+      }}
+    >
+      {toast ? (
+        <div className="pointer-events-none fixed left-1/2 top-4 z-[1000] w-[420px] -translate-x-1/2 rounded-xl border border-cre-border/60 bg-cre-surface px-4 py-2 text-sm text-cre-text shadow-lg">
+          {toast}
+        </div>
+      ) : null}
+
+      <aside className="h-full w-[420px] shrink-0 overflow-y-auto border-r border-cre-border/60 bg-cre-bg p-4">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">
-              Map Search
-            </div>
-            <div className="text-sm text-cre-text">Polygon or radius → parcels</div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Map Search</div>
+            <div className="text-sm text-cre-text">Search → Area → Signals → Results</div>
           </div>
 
           <select
-            className="rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-sm text-cre-text"
+            className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-sm text-cre-text"
             value={county}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => {
-              setCounty(e.target.value);
+              const next = e.target.value;
+              setCounty(next);
               setParcels([]);
               setRecords([]);
               setSourceCounts({ live: 0, cache: 0 });
               setSelectedParcelId(null);
+              setSignalsDrawerOpen(false);
               setZoningOptions([]);
               setFutureLandUseOptions([]);
               setZoningQuery('');
@@ -1497,6 +1934,10 @@ export default function MapSearch({
               setRollupsEnabled(false);
               setRollupsLastSummary(null);
               setRollupsError(null);
+              setRollupsMap({});
+              setSelectedSavedSearchId('');
+              setAlertsInbox([]);
+              setAlertsError(null);
             }}
           >
             <option value="orange">Orange</option>
@@ -1507,999 +1948,717 @@ export default function MapSearch({
         </div>
 
         {errorBanner ? (
-          <div className="mt-3 rounded-xl border border-cre-accent/40 bg-cre-bg p-3 text-sm text-cre-text">
-            <div className="font-semibold text-cre-accent">Notice</div>
+          <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-surface p-3 text-sm text-cre-text">
+            <div className="font-semibold">Notice</div>
             <div className="mt-1 text-xs text-cre-muted">{errorBanner}</div>
           </div>
         ) : null}
 
-        <div className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3">
-          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Filters</div>
-          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Sqft</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minSqft}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minSqft: e.target.value }))}
-                placeholder="e.g. 2000"
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Sqft</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.maxSqft}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxSqft: e.target.value }))}
-                placeholder=""
-              />
-            </label>
+        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">1) Search</div>
 
-            <label className="space-y-1">
-              <div className="text-cre-muted">Sort</div>
-              <select
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                value={sortKey}
-                onChange={(e) =>
-                  setSortKey(
-                    (e.target.value as any) || 'relevance'
-                  )
-                }
-              >
-                <option value="relevance">Relevance (default)</option>
-                <option value="last_sale_date_desc">Last sale date (newest)</option>
-                <option value="year_built_desc">Year built (newest)</option>
-                <option value="sqft_desc">Living sqft (largest)</option>
-              </select>
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Parcel Size Unit</div>
-              <select
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                value={filterForm.lotSizeUnit}
-                onChange={(e) =>
-                  setFilterForm((p) => ({
-                    ...p,
-                    lotSizeUnit: (e.target.value === 'acres' ? 'acres' : 'sqft') as any,
-                  }))
-                }
-              >
-                <option value="sqft">Sqft</option>
-                <option value="acres">Acres</option>
-              </select>
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Parcel Size</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="decimal"
-                value={filterForm.minLotSize}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minLotSize: e.target.value }))}
-                placeholder={filterForm.lotSizeUnit === 'acres' ? 'e.g. 0.25' : 'e.g. 8000'}
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Parcel Size</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="decimal"
-                value={filterForm.maxLotSize}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxLotSize: e.target.value }))}
-                placeholder={filterForm.lotSizeUnit === 'acres' ? '' : ''}
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Beds</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minBeds}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minBeds: e.target.value }))}
-                placeholder="e.g. 3"
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Baths</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="decimal"
-                value={filterForm.minBaths}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minBaths: e.target.value }))}
-                placeholder="e.g. 2"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Year Built</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minYearBuilt}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minYearBuilt: e.target.value }))}
-                placeholder="e.g. 1990"
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Year Built</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.maxYearBuilt}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxYearBuilt: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Property Type</div>
-              <select
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                value={filterForm.propertyType}
-                onChange={(e) => setFilterForm((p) => ({ ...p, propertyType: e.target.value }))}
-              >
-                <option value="">Any</option>
-                <option value="residential">Residential</option>
-                <option value="commercial">Commercial</option>
-              </select>
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Zoning (contains)</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                value={filterForm.zoning}
-                onChange={(e) => setFilterForm((p) => ({ ...p, zoning: e.target.value }))}
-                placeholder="e.g. R-1"
-              />
-            </label>
-
-          <div className="col-span-2 mt-3 space-y-3">
-            <MultiSelectFilter
-              title="Current Zoning (multi-select)"
-              options={zoningOptions}
-              selected={selectedZoning}
-              query={zoningQuery}
-              onQuery={setZoningQuery}
-              onSelected={setSelectedZoning}
-              renderOption={formatCodeLabel}
-            />
-            <MultiSelectFilter
-              title="Future Land Use (multi-select)"
-              options={futureLandUseOptions}
-              selected={selectedFutureLandUse}
-              query={futureLandUseQuery}
-              onQuery={setFutureLandUseQuery}
-              onSelected={setSelectedFutureLandUse}
-              renderOption={formatCodeLabel}
-            />
-            <div className="text-[11px] text-cre-muted">
-              Tip: “Zoning contains” and multi-select both apply (AND).
-            </div>
-          </div>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Total Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minValue: e.target.value }))}
-                placeholder="e.g. 350000"
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Total Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.maxValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxValue: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Land Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minLandValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minLandValue: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Land Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.maxLandValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxLandValue: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Min Building Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.minBuildingValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, minBuildingValue: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Max Building Value</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                inputMode="numeric"
-                value={filterForm.maxBuildingValue}
-                onChange={(e) => setFilterForm((p) => ({ ...p, maxBuildingValue: e.target.value }))}
-                placeholder=""
-              />
-            </label>
-
-            <label className="space-y-1">
-              <div className="text-cre-muted">Last Sale Start</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                type="text"
-                inputMode="numeric"
-                value={filterForm.lastSaleStart}
-                onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleStart: e.target.value }))}
-                placeholder="YYYY-MM-DD or MM/DD/YYYY"
-              />
-            </label>
-            <label className="space-y-1">
-              <div className="text-cre-muted">Last Sale End</div>
-              <input
-                className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                type="text"
-                inputMode="numeric"
-                value={filterForm.lastSaleEnd}
-                onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleEnd: e.target.value }))}
-                placeholder="YYYY-MM-DD or MM/DD/YYYY"
-              />
-            </label>
-
-            {softWarnings.length ? (
-              <div className="col-span-2 -mt-1 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
-                {softWarnings.join(' / ')}
-              </div>
-            ) : null}
-          </div>
-
-          <label className="mt-3 flex items-center gap-2 text-xs text-cre-text">
+          <div className="mt-2 grid gap-2">
             <input
-              type="checkbox"
-              checked={autoEnrichMissing}
-              onChange={(e) => setAutoEnrichMissing(e.target.checked)}
+              className="w-full rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-sm text-cre-text"
+              placeholder="Filter results by owner, address, or parcel id"
+              value={resultsQuery}
+              onChange={(e) => setResultsQuery(e.target.value)}
             />
-            Auto-enrich missing (slower)
-          </label>
-        </div>
 
-        <div className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Triggers</div>
-            <label
-              className="flex items-center gap-2 text-xs text-cre-text"
-              title="Uses offline rollups; when enabled, the app pre-filters by parcel IDs before running the main search."
-            >
-              <input
-                type="checkbox"
-                checked={rollupsEnabled}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setRollupsEnabled(next);
-                  setRollupsLastSummary(null);
-                  setRollupsError(null);
-                }}
-              />
-              Enable
-            </label>
-          </div>
-
-          {rollupsEnabled ? (
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-              <label className="space-y-1">
-                <div className="text-cre-muted">Min Seller Score</div>
-                <input
-                  className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-cre-text"
-                  inputMode="numeric"
-                  value={rollupsMinScore}
-                  onChange={(e) => setRollupsMinScore(e.target.value)}
-                  placeholder="e.g. 70"
-                />
-              </label>
-
-              <div className="space-y-1">
-                <div className="text-cre-muted">Match any group</div>
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rollupsGroupOfficialRecords}
-                      onChange={(e) => setRollupsGroupOfficialRecords(e.target.checked)}
-                    />
-                    Official records
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rollupsGroupPermits}
-                      onChange={(e) => setRollupsGroupPermits(e.target.checked)}
-                    />
-                    Permits
-                  </label>
-                </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex flex-wrap gap-3 text-cre-text">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={showLive} onChange={(e) => setShowLive(e.target.checked)} />
+                  Live
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={showCache} onChange={(e) => setShowCache(e.target.checked)} />
+                  Cache
+                </label>
               </div>
-
-              <div className="col-span-2 grid grid-cols-2 gap-2">
-                <MultiSelectFilter
-                  title="Trigger Families"
-                  options={[
-                    'permits',
-                    'official_records',
-                    'tax',
-                    'code_enforcement',
-                    'courts',
-                    'gis_planning',
-                    'property_appraiser',
-                  ]}
-                  selected={rollupsTriggerGroups}
-                  query={rollupsTriggerGroupsQuery}
-                  onQuery={setRollupsTriggerGroupsQuery}
-                  onSelected={setRollupsTriggerGroups}
-                  renderOption={(v) =>
-                    v
-                      .replace(/_/g, ' ')
-                      .replace(/\b\w/g, (c) => c.toUpperCase())
-                  }
-                />
-                <MultiSelectFilter
-                  title="Trigger Keys"
-                  options={[
-                    // Permits
-                    'permit_demolition',
-                    'permit_structural',
-                    'permit_roof',
-                    'permit_hvac',
-                    'permit_electrical',
-                    'permit_plumbing',
-                    'permit_pool',
-                    'permit_fire',
-                    'permit_sitework',
-                    'permit_tenant_improvement',
-                    'permit_remodel',
-                    'permit_generator',
-                    'permit_windows',
-                    'permit_doors',
-                    'permit_solar',
-                    'permit_fence',
-                    'permit_sign',
-                    // Property appraiser
-                    'owner_mailing_changed',
-                    'owner_name_changed',
-                    // Code enforcement
-                    'code_case_opened',
-                    'fines_imposed',
-                    'demolition_order',
-                    'abatement_order',
-                    'board_hearing_set',
-                    'reinspection_failed',
-                    'lien_recorded',
-                    // Tax
-                    'delinquent_tax',
-                    'tax_certificate_issued',
-                    // Courts
-                    'probate_opened',
-                    'divorce_filed',
-                    'eviction_filing',
-                    // Official records
-                    'lis_pendens',
-                    'foreclosure',
-                  ]}
-                  selected={rollupsTriggerKeys}
-                  query={rollupsTriggerKeysQuery}
-                  onQuery={setRollupsTriggerKeysQuery}
-                  onSelected={setRollupsTriggerKeys}
-                  renderOption={(v) => v.replace(/_/g, ' ')}
-                />
-              </div>
-
-              <div className="col-span-2 space-y-1">
-                <div className="text-cre-muted">Any tier</div>
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rollupsTierCritical}
-                      onChange={(e) => setRollupsTierCritical(e.target.checked)}
-                    />
-                    Critical
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rollupsTierStrong}
-                      onChange={(e) => setRollupsTierStrong(e.target.checked)}
-                    />
-                    Strong
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={rollupsTierSupport}
-                      onChange={(e) => setRollupsTierSupport(e.target.checked)}
-                    />
-                    Support
-                  </label>
-                </div>
-              </div>
-
-              {rollupsError ? (
-                <div className="col-span-2 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
-                  Trigger rollups error: {rollupsError}
-                </div>
-              ) : rollupsLastSummary ? (
-                <div className="col-span-2 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
-                  Rollups: {rollupsLastSummary.returned_count} matched (of {rollupsLastSummary.candidate_count} candidates)
-                </div>
-              ) : (
-                <div className="col-span-2 text-[11px] text-cre-muted">Tip: pick a group, a tier, or a min score.</div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-2 text-[11px] text-cre-muted">Off by default (keeps baseline polygon search unchanged).</div>
-          )}
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-xl bg-cre-accent px-4 py-2 text-sm font-semibold text-black hover:brightness-95 disabled:opacity-60"
-            onClick={() => void run()}
-            disabled={loading}
-          >
-            {loading ? 'Running…' : 'Run'}
-          </button>
-
-          <button
-            type="button"
-            className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm font-semibold text-cre-text hover:bg-cre-surface disabled:opacity-60"
-            onClick={() => void runDebug()}
-            disabled={runDebugLoading}
-            title="Runs the same /api/parcels/search request but renders key fields on-screen"
-          >
-            {runDebugLoading ? 'Debug…' : 'Run (debug)'}
-          </button>
-
-          {debugUiEnabled ? (
-            <details className="w-full rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
-              <summary className="cursor-pointer select-none font-semibold">Debug (debug=1)</summary>
-              <div className="mt-2 grid gap-2">
-                <div>
-                  <div className="text-[11px] uppercase tracking-widest text-cre-muted">Request JSON</div>
-                  <pre className="mt-1 max-h-[220px] overflow-auto rounded-lg border border-cre-border/30 bg-black/20 p-2 text-[11px]">
-                    {debugEvidence?.requestJson || '(none)'}
-                  </pre>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-widest text-cre-muted">Response Meta</div>
-                  <pre className="mt-1 max-h-[160px] overflow-auto rounded-lg border border-cre-border/30 bg-black/20 p-2 text-[11px]">
-                    {debugEvidence
-                      ? JSON.stringify(
-                          {
-                            ...debugEvidence.responseMeta,
-                            last_sale_range_parsed: debugEvidence?.normalized_filters
-                              ? {
-                                  start: debugEvidence.normalized_filters.last_sale_date_start ?? null,
-                                  end: debugEvidence.normalized_filters.last_sale_date_end ?? null,
-                                }
-                              : null,
-                            debug_flags: debugEvidence.debug_flags ?? null,
-                            debug_counts: debugEvidence.debug_counts ?? null,
-                            debug_timing_ms: debugEvidence.debug_timing_ms ?? null,
-                            prefilter: debugEvidence.prefilter ?? null,
-                          },
-                          null,
-                          2
-                        )
-                      : '(none)'}
-                  </pre>
-                </div>
-              </div>
-            </details>
-          ) : null}
-
-          <button
-            type="button"
-            className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface"
-            onClick={clearDrawings}
-          >
-            Clear
-          </button>
-
-          <button
-            type="button"
-            className="rounded-xl border border-cre-border/40 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
-            onClick={() => void enrichVisible()}
-            disabled={loading || parcels.length === 0}
-            title="Fetch live attributes + cache"
-          >
-            Enrich results
-          </button>
-        </div>
-
-        <div className="mt-3 rounded-xl border border-cre-border/40 bg-cre-bg p-3">
-          <label className="flex items-center gap-2 text-xs text-cre-text" title="May be slower; available where supported.">
-            <input
-              type="checkbox"
-              checked={parcelLinesEnabled}
-              disabled={isDrawing || parcelLinesLoading}
-              onChange={(e) => {
-                const next = e.target.checked;
-                setParcelLinesError(null);
-                setParcelLinesFC(null);
-                setParcelLinesFeatureCount(0);
-                setParcelLinesLastIdsCount(0);
-                setParcelLinesStatus(next ? 'idle' : 'idle');
-                setParcelLinesEnabled(next);
-              }}
-            />
-            Parcel Lines
-            {parcelLinesLoading ? <span className="text-cre-muted">…</span> : null}
-          </label>
-          {parcelLinesEnabled ? (
-            <div className="mt-1 text-[11px] text-cre-muted">
-              status: {parcelLinesStatus} · ids: {parcelLinesLastIdsCount} · features: {parcelLinesFeatureCount}
-            </div>
-          ) : null}
-          {parcelLinesError ? (
-            <div className="mt-1 text-[11px] text-cre-muted">{parcelLinesError}</div>
-          ) : null}
-        </div>
-
-        {runDebugOut ? (
-          <div className="mt-3 rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
-            <div className="font-semibold">Run(debug) output</div>
-            {'error' in runDebugOut ? (
-              <div className="mt-1 text-cre-muted">Error: {runDebugOut.error}</div>
-            ) : (
-              <div className="mt-2 space-y-1">
-                <div className="text-cre-muted">polygon.ringLen: <span className="text-cre-text">{typeof runDebugOut.polygonRingLen === 'number' ? runDebugOut.polygonRingLen : '—'}</span></div>
-                <div className="text-cre-muted">polygon.first(lng,lat): <span className="text-cre-text">{runDebugOut.polygonFirst ? `${runDebugOut.polygonFirst[0]}, ${runDebugOut.polygonFirst[1]}` : '—'}</span></div>
-                <div className="text-cre-muted">polygon.closed: <span className="text-cre-text">{typeof runDebugOut.polygonClosed === 'boolean' ? String(runDebugOut.polygonClosed) : '—'}</span></div>
-                <div className="text-cre-muted">polygon.bbox: <span className="text-cre-text">{runDebugOut.polygonBbox ? `${runDebugOut.polygonBbox.minLng},${runDebugOut.polygonBbox.minLat} → ${runDebugOut.polygonBbox.maxLng},${runDebugOut.polygonBbox.maxLat}` : '—'}</span></div>
-                <div className="text-cre-muted">records.length: <span className="text-cre-text">{runDebugOut.recordsLen}</span></div>
-                <div className="text-cre-muted">zoning_options.length: <span className="text-cre-text">{runDebugOut.zoningOptionsLen}</span></div>
-                <div className="text-cre-muted">future_land_use_options.length: <span className="text-cre-text">{runDebugOut.futureLandUseOptionsLen}</span></div>
-                <div className="pt-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-widest text-cre-muted">Sample (first 3)</div>
-                  <div className="mt-1 space-y-1">
-                    {runDebugOut.sample.length ? runDebugOut.sample.map((s) => (
-                      <div key={`sample:${s.parcel_id}`} className="rounded-lg border border-cre-border/40 bg-cre-surface p-2">
-                        <div className="font-mono text-[11px] text-cre-text">{s.parcel_id || '—'}</div>
-                        <div className="text-cre-text">Owner: {s.owner || '—'}</div>
-                        <div className="text-cre-text">Addr: {s.address || '—'}</div>
-                      </div>
-                    )) : <div className="text-cre-muted">No records.</div>}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="mt-2">
-              <div className="text-[11px] font-semibold uppercase tracking-widest text-cre-muted">Payload</div>
-              <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-words text-[11px]">{JSON.stringify(runDebugOut.payload, null, 2)}</pre>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-4 overflow-hidden rounded-xl border border-cre-border/40">
-          <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs font-semibold uppercase tracking-widest text-cre-muted">
-            Owners (Polygon): {ownersRows.length}
-          </div>
-
-          <div className="border-b border-cre-border/40 bg-cre-bg px-3 py-2">
-            <input
-              className="w-full rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-xs text-cre-text"
-              placeholder="Filter by owner, address, or parcel id"
-              value={ownersQuery}
-              onChange={(e) => setOwnersQuery(e.target.value)}
-            />
-            {!parcels.length ? (
-              <div className="mt-2 text-xs text-cre-muted">No parcels found.</div>
-            ) : null}
-          </div>
-
-          <div className="max-h-[240px] overflow-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-cre-surface text-[11px] uppercase tracking-widest text-cre-muted">
-                <tr>
-                  <th className="px-2 py-2">Owner</th>
-                  <th className="px-2 py-2">Address</th>
-                  <th className="px-2 py-2">Parcel ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownersRows.map((p) => {
-                  const selected = selectedParcelId === p.parcel_id;
-                  return (
-                    <tr
-                      key={`owners:${p.parcel_id}`}
-                      className={
-                        selected
-                          ? 'bg-cre-accent/15'
-                          : 'border-t border-cre-border/30 hover:bg-cre-bg'
-                      }
-                      onClick={() => setSelectedParcelId(p.parcel_id)}
-                    >
-                      <td className="px-2 py-2 text-cre-text">{p.owner_name || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{p.address || '—'}</td>
-                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{p.parcel_id}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="mt-4 text-xs text-cre-muted">
-          Draw: polygon tool or circle tool (top-right on the map).
-        </div>
-
-        <div className="mt-2 text-xs text-cre-muted">
-          Status: <span className="font-semibold text-cre-text">{geometryStatus}</span>
-        </div>
-
-        <div className="mt-4 overflow-hidden rounded-xl border border-cre-border/40">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cre-border/40 bg-cre-bg px-3 py-2">
-            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">
-              {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null
-                ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}${drawnPolygon ? ' in polygon' : ''}`
-                : `Results: ${rows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
-            </div>
-
-            <div className="flex items-center gap-2 text-[11px]">
-              {filtersActive ? (
-                <span className="rounded-full border border-cre-border/40 bg-cre-surface px-2 py-1 text-cre-text">
-                  Filters active
-                </span>
-              ) : null}
               {filtersActive ? (
                 <button
                   type="button"
-                  className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-cre-text hover:bg-cre-bg"
+                  className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-xs text-cre-text hover:bg-cre-surface"
                   onClick={clearFilters}
                 >
                   Clear filters
                 </button>
               ) : null}
             </div>
-          </div>
 
-          <div className="flex flex-wrap gap-3 border-b border-cre-border/40 bg-cre-bg px-3 py-2 text-xs text-cre-text">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={showLive} onChange={(e) => setShowLive(e.target.checked)} />
-              Live
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={showCache} onChange={(e) => setShowCache(e.target.checked)} />
-              Cache
-            </label>
-          </div>
+            <details className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+              <summary className="cursor-pointer select-none text-xs font-semibold text-cre-text">
+                Property filters
+                {filtersActive ? <span className="ml-2 text-[11px] text-cre-muted">(active)</span> : null}
+              </summary>
 
-          <div className="max-h-[420px] overflow-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 bg-cre-surface text-[11px] uppercase tracking-widest text-cre-muted">
-                <tr>
-                  <th className="px-2 py-2">Parcel</th>
-                  <th className="px-2 py-2">Src</th>
-                  <th className="px-2 py-2">Address</th>
-                  <th className="px-2 py-2">Owner</th>
-                  <th className="px-2 py-2">Zoning</th>
-                  <th className="px-2 py-2">Land use</th>
-                  <th className="px-2 py-2">Sqft</th>
-                  <th className="px-2 py-2">Beds</th>
-                  <th className="px-2 py-2">Baths</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((p) => {
-                  const rec = recordById.get(p.parcel_id);
-                  const selected = selectedParcelId === p.parcel_id;
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Sqft</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minSqft}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minSqft: e.target.value }))}
+                    placeholder="e.g. 2000"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Sqft</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.maxSqft}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxSqft: e.target.value }))}
+                    placeholder=""
+                  />
+                </label>
 
-                  const addr = (p.address || rec?.situs_address || rec?.address || '').trim();
-                  const owner = (p.owner_name || rec?.owner_name || '').trim();
-                  const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
-                  const sqftLiving = rec?.sqft?.find((s) => s.type === 'living')?.value ?? rec?.living_area_sqft ?? null;
-                  const zoning = (rec?.zoning || '').trim();
-                  const landUse = ((rec as any)?.flu || rec?.land_use || '').toString().trim();
-                  const beds = rec?.beds ?? null;
-                  const baths = rec?.baths ?? null;
-                  return (
-                    <tr
-                      key={p.parcel_id}
-                      className={
-                        selected
-                          ? 'bg-cre-accent/15'
-                          : 'border-t border-cre-border/30 hover:bg-cre-bg'
-                      }
-                      onClick={() => setSelectedParcelId(p.parcel_id)}
-                    >
-                      <td className="px-2 py-2 font-mono text-[11px] text-cre-text">{p.parcel_id}</td>
-                      <td className="px-2 py-2 text-[11px] text-cre-text">{srcLabel}</td>
-                      <td className="px-2 py-2 text-cre-text">{addr || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{owner || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{zoning || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{landUse || '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{sqftLiving ?? '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{beds ?? '—'}</td>
-                      <td className="px-2 py-2 text-cre-text">{baths ?? '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Sort</div>
+                  <select
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={sortKey}
+                    onChange={(e) => setSortKey(((e.target.value as any) || 'relevance') as any)}
+                  >
+                    <option value="relevance">Relevance (default)</option>
+                    <option value="last_sale_date_desc">Last sale date (newest)</option>
+                    <option value="year_built_desc">Year built (newest)</option>
+                    <option value="sqft_desc">Living sqft (largest)</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Parcel Size Unit</div>
+                  <select
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={filterForm.lotSizeUnit}
+                    onChange={(e) =>
+                      setFilterForm((p) => ({
+                        ...p,
+                        lotSizeUnit: (e.target.value === 'acres' ? 'acres' : 'sqft') as any,
+                      }))
+                    }
+                  >
+                    <option value="sqft">Sqft</option>
+                    <option value="acres">Acres</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Parcel Size</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="decimal"
+                    value={filterForm.minLotSize}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minLotSize: e.target.value }))}
+                    placeholder={filterForm.lotSizeUnit === 'acres' ? 'e.g. 0.25' : 'e.g. 8000'}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Parcel Size</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="decimal"
+                    value={filterForm.maxLotSize}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxLotSize: e.target.value }))}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Beds</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minBeds}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minBeds: e.target.value }))}
+                    placeholder="e.g. 3"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Baths</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="decimal"
+                    value={filterForm.minBaths}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minBaths: e.target.value }))}
+                    placeholder="e.g. 2"
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Year Built</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minYearBuilt}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minYearBuilt: e.target.value }))}
+                    placeholder="e.g. 1990"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Year Built</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.maxYearBuilt}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxYearBuilt: e.target.value }))}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Property Type</div>
+                  <select
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={filterForm.propertyType}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, propertyType: e.target.value }))}
+                  >
+                    <option value="">Any</option>
+                    <option value="residential">Residential</option>
+                    <option value="commercial">Commercial</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Zoning (contains)</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={filterForm.zoning}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, zoning: e.target.value }))}
+                    placeholder="e.g. R-1"
+                  />
+                </label>
+
+                <div className="col-span-2 mt-3 space-y-3">
+                  <MultiSelectFilter
+                    title="Current Zoning (multi-select)"
+                    options={zoningOptions}
+                    selected={selectedZoning}
+                    query={zoningQuery}
+                    onQuery={setZoningQuery}
+                    onSelected={setSelectedZoning}
+                    renderOption={formatCodeLabel}
+                  />
+                  <MultiSelectFilter
+                    title="Future Land Use (multi-select)"
+                    options={futureLandUseOptions}
+                    selected={selectedFutureLandUse}
+                    query={futureLandUseQuery}
+                    onQuery={setFutureLandUseQuery}
+                    onSelected={setSelectedFutureLandUse}
+                    renderOption={formatCodeLabel}
+                  />
+                  <div className="text-[11px] text-cre-muted">Tip: “Zoning contains” and multi-select both apply (AND).</div>
+                </div>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Total Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minValue: e.target.value }))}
+                    placeholder="e.g. 350000"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Total Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.maxValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxValue: e.target.value }))}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Land Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minLandValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minLandValue: e.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Land Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.maxLandValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxLandValue: e.target.value }))}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Building Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minBuildingValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minBuildingValue: e.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Max Building Value</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.maxBuildingValue}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, maxBuildingValue: e.target.value }))}
+                  />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Last Sale Start</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    type="text"
+                    inputMode="numeric"
+                    value={filterForm.lastSaleStart}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleStart: e.target.value }))}
+                    placeholder="YYYY-MM-DD or MM/DD/YYYY"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Last Sale End</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    type="text"
+                    inputMode="numeric"
+                    value={filterForm.lastSaleEnd}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleEnd: e.target.value }))}
+                    placeholder="YYYY-MM-DD or MM/DD/YYYY"
+                  />
+                </label>
+
+                {softWarnings.length ? (
+                  <div className="col-span-2 -mt-1 rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+                    {softWarnings.join(' / ')}
+                  </div>
+                ) : null}
+              </div>
+
+              <label className="mt-3 flex items-center gap-2 text-xs text-cre-text">
+                <input type="checkbox" checked={autoEnrichMissing} onChange={(e) => setAutoEnrichMissing(e.target.checked)} />
+                Auto-enrich missing (slower)
+              </label>
+            </details>
           </div>
         </div>
 
-        {selectedParcelId ? (
-          <div className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3 text-xs text-cre-text">
-            {(() => {
-              const rec = records.find((r) => r.parcel_id === selectedParcelId);
-              const p = parcels.find((x) => x.parcel_id === selectedParcelId) || null;
-              if (!rec) {
-                if (!p) return <div className="text-cre-muted">Select a parcel to view details.</div>;
-                return (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-semibold">Details</div>
-                      <div className="text-[11px] text-cre-muted">Source: {(p.source || '—').toUpperCase()}</div>
-                    </div>
-                    <div className="font-mono text-[11px] text-cre-muted">{p.parcel_id}</div>
-                    <div>{p.address || '—'}</div>
-                    <div>Owner: {p.owner_name || '—'}</div>
-                    <div className="text-[11px] text-cre-muted">(More fields available after enrichment.)</div>
-                  </div>
-                );
-              }
-              const url = rec.raw_source_url || '';
-              const sources = (rec.data_sources || []).filter((s) => s && s.url);
-              const sqftLiving =
-                rec.sqft?.find((s) => s.type === 'living')?.value ?? rec.living_area_sqft ?? null;
-              const photoUrl = (rec.photo_url || '').trim();
-              const lender = (rec.mortgage_lender || '').trim();
-              const mortgageAmount = typeof rec.mortgage_amount === 'number' ? rec.mortgage_amount : null;
-              const mortgageDate = (rec.mortgage_date || '').trim();
-              return (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-semibold">Details</div>
-                    <div className="text-[11px] text-cre-muted">Source: {(rec.source || '—').toUpperCase()}</div>
-                  </div>
+        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">2) Draw / Area</div>
+          <div className="mt-2 text-xs text-cre-muted">Use polygon or circle tools (top-right of map).</div>
+          <div className="mt-2 text-xs text-cre-muted">
+            Status: <span className="font-semibold text-cre-text">{geometryStatus}</span>
+          </div>
 
-                  {photoUrl ? (
-                    <a href={photoUrl} target="_blank" rel="noreferrer">
-                      <img
-                        src={photoUrl}
-                        alt="Parcel photo"
-                        className="w-full rounded-lg border border-cre-border/40"
-                        loading="lazy"
-                      />
-                    </a>
-                  ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-xl border border-cre-border/60 bg-cre-bg px-3 py-2 text-sm text-cre-text hover:bg-cre-surface"
+              onClick={clearDrawings}
+            >
+              Clear area
+            </button>
+            <label className="flex items-center gap-2 rounded-xl border border-cre-border/60 bg-cre-bg px-3 py-2 text-xs text-cre-text">
+              <input
+                type="checkbox"
+                checked={parcelLinesEnabled}
+                disabled={isDrawing || parcelLinesLoading}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setParcelLinesError(null);
+                  setParcelLinesFC(null);
+                  setParcelLinesFeatureCount(0);
+                  setParcelLinesLastIdsCount(0);
+                  setParcelLinesStatus('idle');
+                  setParcelLinesEnabled(next);
+                }}
+              />
+              Parcel lines
+              {parcelLinesLoading ? <span className="text-cre-muted">…</span> : null}
+            </label>
+          </div>
+          {parcelLinesEnabled ? (
+            <div className="mt-2 text-[11px] text-cre-muted">
+              status: {parcelLinesStatus} · ids: {parcelLinesLastIdsCount} · features: {parcelLinesFeatureCount}
+            </div>
+          ) : null}
+          {parcelLinesError ? <div className="mt-1 text-[11px] text-cre-muted">{parcelLinesError}</div> : null}
+        </div>
 
-                  <div className="font-mono text-[11px] text-cre-muted">{rec.parcel_id}</div>
-                  <div>{rec.situs_address || rec.address || '—'}</div>
-                  <div>Owner: {rec.owner_name || '—'}</div>
-                  <div>Land use: {rec.land_use || '—'}</div>
-                  <div>Zoning: {rec.zoning || '—'}</div>
-                  <div>Year built: {rec.year_built ?? '—'}</div>
-                  <div>Living sqft: {sqftLiving ?? '—'}</div>
-                  <div>Total value: {rec.total_value ?? '—'}</div>
-                  <div>Last sale price: {rec.last_sale_price ?? '—'}</div>
+        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">3) Signals</div>
+          <div className="mt-3 space-y-3 text-xs">
+              <label className="space-y-1">
+                <div className="text-cre-muted">Seller intent</div>
+                <select
+                  className="w-full rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-sm text-cre-text"
+                  value={(rollupsMinScore || '').trim()}
+                  onChange={(e) => setRollupsMinScore(e.target.value)}
+                >
+                  <option value="">Any</option>
+                  <option value="30">Some intent (≥ 30)</option>
+                  <option value="50">Likely seller (≥ 50)</option>
+                  <option value="70">High intent (≥ 70)</option>
+                </select>
+              </label>
 
-                  <div className="pt-1">
-                    <div className="font-semibold">Mortgage</div>
-                    <div>Lender: {lender || '—'}</div>
-                    <div>Original amount: {mortgageAmount ?? '—'}</div>
-                    <div>Date: {mortgageDate || '—'}</div>
-                  </div>
-
-                  <div className="pt-1">
-                    <div className="font-semibold">Permits</div>
-                    {selectedPermitsLoading ? (
-                      <div className="text-cre-muted">Loading permits…</div>
-                    ) : selectedPermitsError ? (
-                      <div className="text-cre-muted">Permits unavailable: {selectedPermitsError}</div>
-                    ) : selectedPermits.length ? (
-                      <div className="space-y-1">
-                        <div className="text-[11px] text-cre-muted">{selectedPermits.length} record(s)</div>
-                        {selectedPermits.slice(0, 25).map((p) => (
-                          <div key={`${p.county}:${p.permit_number}`} className="rounded-lg border border-cre-border/40 bg-cre-surface p-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-mono text-[11px] text-cre-text">{p.permit_number}</div>
-                              <div className="text-[11px] text-cre-muted">{p.status || '—'}</div>
-                            </div>
-                            <div className="text-cre-text">{p.permit_type || '—'}</div>
-                            <div className="text-[11px] text-cre-muted">
-                              Issued: {p.issue_date || '—'} · Final: {p.final_date || '—'}
-                            </div>
-                            {p.description ? <div className="pt-1 text-cre-text">{p.description}</div> : null}
-                          </div>
-                        ))}
-                        {selectedPermits.length > 25 ? (
-                          <div className="text-[11px] text-cre-muted">
-                            Showing first 25 permits.
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="text-cre-muted">No permits found in DB for this parcel.</div>
-                    )}
-                  </div>
-
-                  <div className="pt-1">
-                    <div className="font-semibold">Triggers / Alerts</div>
-
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
+              <div className="space-y-1">
+                <div className="text-cre-muted">Signal groups</div>
+                <div className="flex flex-wrap gap-3 pt-1 text-cre-text">
+                  {signalGroupOptions.map((g) => (
+                    <label key={g.key} className="flex items-center gap-2">
                       <input
-                        className="min-w-[220px] flex-1 rounded-lg border border-cre-border/40 bg-cre-bg px-2 py-1 text-[12px] text-cre-text"
-                        value={triggerLookupParcelId}
-                        onChange={(e) => setTriggerLookupParcelId(e.target.value)}
-                        placeholder="Parcel ID (lookup)"
+                        type="checkbox"
+                        checked={rollupsTriggerGroups.includes(g.key)}
+                        onChange={() => setRollupsTriggerGroups((prev) => toggleValueInList(prev, g.key))}
                       />
+                      {g.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-cre-muted">Distress (quick picks)</div>
+                <div className="flex flex-wrap gap-2">
+                  {distressPresets.map((p) => {
+                    const active = p.keys.every((k) => rollupsTriggerKeys.includes(k));
+                    return (
                       <button
+                        key={p.id}
                         type="button"
-                        className="rounded-lg border border-cre-border/40 bg-cre-bg px-3 py-1 text-[12px] font-semibold text-cre-text hover:bg-cre-surface disabled:opacity-60"
-                        disabled={!triggerLookupParcelId.trim()}
+                        className={
+                          active
+                            ? 'rounded-full bg-cre-accent px-3 py-1 text-[12px] font-semibold text-white'
+                            : 'rounded-full border border-cre-border/60 bg-cre-bg px-3 py-1 text-[12px] text-cre-text hover:bg-cre-surface'
+                        }
                         onClick={() => {
-                          const next = triggerLookupParcelId.trim();
-                          if (!next) return;
-                          setSelectedParcelId(next);
+                          setRollupsEnabled(true);
+                          setRollupsTriggerGroups((prev) => {
+                            let next = prev;
+                            for (const g of p.groups) next = next.includes(g) ? next : [...next, g];
+                            return next;
+                          });
+                          setRollupsTriggerKeys((prev) => {
+                            const hasAll = p.keys.every((k) => prev.includes(k));
+                            if (hasAll) return prev.filter((k) => !p.keys.includes(k));
+                            const next = [...prev];
+                            for (const k of p.keys) if (!next.includes(k)) next.push(k);
+                            return next;
+                          });
                         }}
-                        title="Loads triggers/alerts for this parcel_id"
                       >
-                        Load
+                        {p.label}
                       </button>
-                    </div>
+                    );
+                  })}
+                </div>
+              </div>
 
-                    {selectedTriggersLoading ? (
-                      <div className="text-cre-muted">Loading triggers…</div>
-                    ) : selectedTriggersError ? (
-                      <div className="text-cre-muted">Triggers unavailable: {selectedTriggersError}</div>
-                    ) : selectedRollupLoading ? (
-                      <div className="text-cre-muted">Loading rollup…</div>
-                    ) : selectedAlerts.length || selectedTriggerEvents.length ? (
-                      <div className="space-y-2">
-                        <div className="rounded-lg border border-cre-border/40 bg-cre-surface p-2 text-[11px] text-cre-muted">
-                          {(() => {
-                            let rule: string | null = null;
-                            let counts: any = null;
-                            try {
-                              const d = selectedRollup?.details_json ? JSON.parse(selectedRollup.details_json) : null;
-                              rule = d?.seller_intent?.rule ?? null;
-                              counts = d?.seller_intent?.counts ?? null;
-                            } catch {
-                              rule = null;
-                              counts = null;
-                            }
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-cre-muted">Trigger catalog (taxonomy)</div>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-text hover:bg-cre-surface disabled:opacity-60"
+                    onClick={() => {
+                      setRollupsTriggerKeys([]);
+                      setRollupsLastSummary(null);
+                      setRollupsError(null);
+                    }}
+                    disabled={!rollupsTriggerKeys.length}
+                  >
+                    Clear selected
+                  </button>
+                </div>
 
-                            const uniqueKeys = Array.from(
-                              new Set((selectedTriggerEvents || []).map((t) => (t.trigger_key || '').trim()).filter(Boolean))
-                            ).sort();
-
-                            return (
-                              <div className="space-y-1">
-                                <div className="text-cre-text">
-                                  Seller score: {selectedRollup?.seller_score ?? '—'}
-                                  {rule ? ` · rule: ${rule}` : ''}
-                                </div>
-                                {counts ? (
-                                  <div>
-                                    tiers: c{counts.critical ?? 0} / s{counts.strong ?? 0} / p{counts.support ?? 0}
-                                  </div>
-                                ) : null}
-                                {selectedRollupError ? <div>rollup: {selectedRollupError}</div> : null}
-                                <div className="font-mono text-[11px] text-cre-muted break-words">
-                                  keys: {uniqueKeys.length ? uniqueKeys.join(', ') : '—'}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                        {selectedAlerts.length ? (
-                          <div className="space-y-1">
-                            <div className="text-[11px] text-cre-muted">{selectedAlerts.length} open alert(s)</div>
-                            {selectedAlerts.slice(0, 10).map((a) => (
-                              <div
-                                key={`${a.county}:${a.parcel_id}:${a.alert_key}:${a.id}`}
-                                className="rounded-lg border border-cre-border/40 bg-cre-surface p-2"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="font-mono text-[11px] text-cre-text">{a.alert_key}</div>
-                                  <div className="text-[11px] text-cre-muted">sev {a.severity}</div>
-                                </div>
-                                <div className="text-[11px] text-cre-muted">
-                                  First: {a.first_seen_at} · Last: {a.last_seen_at}
-                                </div>
-                              </div>
-                            ))}
-                            {selectedAlerts.length > 10 ? (
-                              <div className="text-[11px] text-cre-muted">Showing first 10 alerts.</div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="text-cre-muted">No open alerts for this parcel.</div>
-                        )}
-
-                        {selectedTriggerEvents.length ? (
-                          <div className="space-y-1">
-                            <div className="text-[11px] text-cre-muted">
-                              {selectedTriggerEvents.length} trigger event(s)
-                            </div>
-                            {selectedTriggerEvents.slice(0, 10).map((t) => (
-                              <div
-                                key={`${t.county}:${t.parcel_id}:${t.id}`}
-                                className="rounded-lg border border-cre-border/40 bg-cre-surface p-2"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="font-mono text-[11px] text-cre-text">{t.trigger_key}</div>
-                                  <div className="text-[11px] text-cre-muted">sev {t.severity}</div>
-                                </div>
-                                <div className="text-[11px] text-cre-muted">{t.trigger_at}</div>
-                                <div className="text-[11px] text-cre-muted">
-                                  {t.source_connector_key}:{t.source_event_type}
-                                </div>
-                              </div>
-                            ))}
-                            {selectedTriggerEvents.length > 10 ? (
-                              <div className="text-[11px] text-cre-muted">Showing first 10 triggers.</div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="text-cre-muted">No triggers found in DB for this parcel.</div>
-                    )}
+                <div className="rounded-lg border border-cre-border/60 bg-cre-bg">
+                  <div className="border-b border-cre-border/60 px-2 py-2 text-[11px] text-cre-muted">
+                    Selected: <span className="font-semibold text-cre-text">{rollupsTriggerKeys.length}</span>
+                    {comingSoonSelectedTriggerKeys.length ? (
+                      <span className="ml-2 text-amber-700">
+                        Coming soon selected: {comingSoonSelectedTriggerKeys.length}
+                      </span>
+                    ) : null}
                   </div>
-
-                  {sources.length ? (
-                    <div>
-                      Data sources:{' '}
-                      {sources.map((s, i) => (
-                        <span key={`${s.name}:${s.url}`}>
-                          {i ? ' / ' : ''}
-                          <a className="underline" href={s.url} target="_blank" rel="noreferrer">
-                            {s.name || 'source'}
-                          </a>
-                        </span>
+                  <div className="max-h-64 overflow-auto p-2">
+                    <div className="space-y-3">
+                      {signalCatalogByGroup.map(([group, items]) => (
+                        <div key={`cat:${group}`}>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-cre-muted">{group}</div>
+                          <div className="mt-1 space-y-1">
+                            {items.map((it) => {
+                              const checked = rollupsTriggerKeys.includes(it.key);
+                              return (
+                                <label
+                                  key={`sig:${it.key}`}
+                                  className="flex cursor-pointer select-none items-center gap-2 rounded-md px-1 py-1 text-xs text-cre-text hover:bg-cre-surface"
+                                  title={it.key}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setRollupsTriggerKeys((prev) => toggleValueInList(prev, it.key));
+                                    }}
+                                  />
+                                  <span className="truncate">{it.label}</span>
+                                  {it.comingSoon ? (
+                                    <span className="ml-auto rounded-full border border-amber-400/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                      Coming soon
+                                    </span>
+                                  ) : (
+                                    <span className="ml-auto font-mono text-[10px] text-cre-muted">{it.key}</span>
+                                  )}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
                       ))}
                     </div>
-                  ) : url ? (
-                    <div>
-                      Raw source:{' '}
-                      <a className="underline" href={url} target="_blank" rel="noreferrer">
-                        open
-                      </a>
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
-              );
-            })()}
-          </div>
-        ) : null}
+                {unknownSelectedTriggerKeys.length ? (
+                  <div className="text-[11px] text-amber-700">
+                    Unknown selected keys (will be sent but may not be supported):{' '}
+                    {unknownSelectedTriggerKeys.join(', ')}
+                  </div>
+                ) : null}
+              </div>
 
-        <details className="mt-4 rounded-xl border border-cre-border/40 bg-cre-bg p-3">
+              <div className="space-y-1">
+                <div className="text-cre-muted">Tier</div>
+                <div className="flex flex-wrap gap-3 pt-1 text-cre-text">
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={rollupsTierCritical} onChange={(e) => setRollupsTierCritical(e.target.checked)} />
+                    Critical
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={rollupsTierStrong} onChange={(e) => setRollupsTierStrong(e.target.checked)} />
+                    Strong
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={rollupsTierSupport} onChange={(e) => setRollupsTierSupport(e.target.checked)} />
+                    Support
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-[11px] text-cre-muted">
+                {rollupsError
+                  ? `Rollups: ${rollupsError}`
+                  : rollupsLastSummary
+                    ? `Rollups last run: ${rollupsLastSummary.returned_count} matched (of ${rollupsLastSummary.candidate_count})`
+                    : 'Active filters summary will show after you Run.'}
+              </div>
+            </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">4) Results</div>
+            <div className="text-xs text-cre-muted">
+              {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null
+                ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}`
+                : `Showing ${visibleRows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-xl bg-cre-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
+              onClick={() => void run()}
+              disabled={loading}
+            >
+              {loading ? 'Running…' : 'Run'}
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
+              onClick={() => void enrichVisible()}
+              disabled={loading || parcels.length === 0}
+            >
+              Enrich
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface"
+              onClick={() => void saveCurrentSearch()}
+              title="Saves the current polygon + filters as a saved search"
+            >
+              Save search
+            </button>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Saved searches + alerts</div>
+              <button
+                type="button"
+                className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text hover:bg-cre-bg disabled:opacity-60"
+                disabled={savedSearchesLoading}
+                onClick={() => void refreshSavedSearches(county)}
+              >
+                Refresh
+              </button>
+            </div>
+
+            {savedSearchesError ? <div className="mt-2 text-[11px] text-cre-muted">{savedSearchesError}</div> : null}
+
+            <div className="mt-2 grid gap-2">
+              <select
+                className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-2 text-sm text-cre-text"
+                value={selectedSavedSearchId}
+                onChange={(e) => setSelectedSavedSearchId(e.target.value)}
+              >
+                <option value="">(Select saved search)</option>
+                {savedSearches.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} · {s.id}
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg bg-cre-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  disabled={!selectedSavedSearchId}
+                  onClick={() => void runSelectedSavedSearch()}
+                >
+                  Run saved search
+                </button>
+                <select
+                  className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-2 text-xs text-cre-text"
+                  value={alertsStatus}
+                  onChange={(e) => setAlertsStatus(e.target.value)}
+                >
+                  <option value="new">New</option>
+                  <option value="read">Read</option>
+                  <option value="">All</option>
+                </select>
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-2 text-xs text-cre-text hover:bg-cre-bg disabled:opacity-60"
+                  disabled={!selectedSavedSearchId || alertsLoading}
+                  onClick={() => void refreshAlerts(selectedSavedSearchId, alertsStatus)}
+                >
+                  Refresh alerts
+                </button>
+              </div>
+
+              {alertsError ? <div className="text-[11px] text-cre-muted">{alertsError}</div> : null}
+              {selectedSavedSearchId ? (
+                alertsLoading ? (
+                  <div className="text-[11px] text-cre-muted">Loading alerts…</div>
+                ) : alertsInbox.length ? (
+                  <div className="max-h-[220px] space-y-2 overflow-auto">
+                    {alertsInbox.slice(0, 25).map((a) => (
+                      <div key={`alert:${a.id}`} className="rounded-lg border border-cre-border/60 bg-cre-surface p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-mono text-[11px] text-cre-text">{a.alert_key}</div>
+                            <div className="text-[11px] text-cre-muted">
+                              {a.county}:{a.parcel_id} · sev {a.severity} · {a.status}
+                            </div>
+                          </div>
+                          {String(a.status || '').toLowerCase() !== 'read' ? (
+                            <button
+                              type="button"
+                              className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-text hover:bg-cre-surface"
+                              onClick={() => void markInboxAlertRead(a)}
+                            >
+                              Mark read
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-[11px] text-cre-muted">Last: {a.last_seen_at}</div>
+                      </div>
+                    ))}
+                    {alertsInbox.length > 25 ? <div className="text-[11px] text-cre-muted">Showing first 25 alerts.</div> : null}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-cre-muted">No alerts.</div>
+                )
+              ) : (
+                <div className="text-[11px] text-cre-muted">Select a saved search to view alerts.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 max-h-[520px] space-y-2 overflow-auto">
+            {visibleRows.length ? (
+              visibleRows.slice(0, 250).map((p) => {
+                const rec = recordById.get(p.parcel_id);
+                const rollup = rollupsMap[p.parcel_id] || null;
+                const addr = (p.address || rec?.situs_address || rec?.address || '').trim() || '—';
+                const owner = (p.owner_name || rec?.owner_name || '').trim() || '—';
+                const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
+
+                const groupsBadges: Array<{ k: string; label: string }> = [];
+                if (rollup && Number(rollup.has_official_records || 0) > 0) groupsBadges.push({ k: 'or', label: 'Records' });
+                if (rollup && Number(rollup.has_permits || 0) > 0) groupsBadges.push({ k: 'p', label: 'Permits' });
+                if (rollup && Number(rollup.has_tax || 0) > 0) groupsBadges.push({ k: 't', label: 'Tax' });
+                if (rollup && Number(rollup.has_code_enforcement || 0) > 0) groupsBadges.push({ k: 'ce', label: 'Code' });
+                if (rollup && Number(rollup.has_courts || 0) > 0) groupsBadges.push({ k: 'ct', label: 'Courts' });
+                if (rollup && Number(rollup.has_gis_planning || 0) > 0) groupsBadges.push({ k: 'gp', label: 'Appraiser' });
+
+                return (
+                  <button
+                    key={`result:${p.parcel_id}`}
+                    type="button"
+                    className={
+                      selectedParcelId === p.parcel_id
+                        ? 'w-full rounded-xl border border-cre-accent bg-cre-bg p-3 text-left shadow-sm'
+                        : 'w-full rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-left hover:bg-cre-surface'
+                    }
+                    onClick={() => {
+                      setSelectedParcelId(p.parcel_id);
+                      setSignalsDrawerOpen(true);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-cre-text">{addr}</div>
+                        <div className="mt-1 text-xs text-cre-muted">{owner}</div>
+                        <div className="mt-1 font-mono text-[11px] text-cre-muted">{p.parcel_id}</div>
+                      </div>
+                      <div className="text-[11px] text-cre-muted">{srcLabel}</div>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {rollup ? (
+                        <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
+                          Score {rollup.seller_score} · c{rollup.count_critical} / s{rollup.count_strong} / p{rollup.count_support}
+                        </span>
+                      ) : null}
+                      {groupsBadges.map((g) => (
+                        <span key={`${p.parcel_id}:${g.k}`} className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
+                          {g.label}
+                        </span>
+                      ))}
+                      <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
+                        View signals →
+                      </span>
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-sm text-cre-muted">No results yet. Draw an area and Run.</div>
+            )}
+            {visibleRows.length > 250 ? (
+              <div className="text-[11px] text-cre-muted">Showing first 250 results.</div>
+            ) : null}
+          </div>
+        </div>
+
+        <details className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <summary className="cursor-pointer text-sm font-semibold text-cre-text">Debug</summary>
           <div className="mt-3 space-y-2 text-xs text-cre-muted">
             <div>
@@ -2510,22 +2669,44 @@ export default function MapSearch({
               <div className="font-semibold text-cre-text">Last error</div>
               <pre className="whitespace-pre-wrap break-words">{lastError || '—'}</pre>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-2 text-xs text-cre-text hover:bg-cre-surface disabled:opacity-60"
+                onClick={() => void runDebug()}
+                disabled={runDebugLoading}
+              >
+                {runDebugLoading ? 'Debug…' : 'Run (debug)'}
+              </button>
+            </div>
+            {runDebugOut ? (
+              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(runDebugOut, null, 2)}</pre>
+            ) : null}
+          </div>
+        </details>
+
+        <details className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3" open>
+          <summary className="cursor-pointer text-sm font-semibold text-cre-text">Last Request / Response Proof</summary>
+          <div className="mt-3 space-y-3 text-xs text-cre-muted">
             <div>
-              <div className="font-semibold text-cre-text">Last request JSON</div>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(lastRequest, null, 2) || '—'}</pre>
+              <div className="font-semibold text-cre-text">Last Request JSON</div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-cre-border/60 bg-cre-bg p-2">
+                {lastRequest ? JSON.stringify(lastRequest, null, 2) : '—'}
+              </pre>
+            </div>
+            <div>
+              <div className="font-semibold text-cre-text">Last Response Summary</div>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-cre-border/60 bg-cre-bg p-2">
+                {lastResponseSummary ? JSON.stringify(lastResponseSummary, null, 2) : '—'}
+              </pre>
             </div>
           </div>
         </details>
       </aside>
 
       <main className="flex-1 bg-cre-bg p-4">
-        <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/40 bg-cre-surface shadow-panel">
-          <MapContainer
-            center={[28.5383, -81.3792]}
-            zoom={12}
-            doubleClickZoom={false}
-            style={{ height: '100%', width: '100%' }}
-          >
+        <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/60 bg-cre-surface shadow-panel">
+          <MapContainer center={[28.5383, -81.3792]} zoom={12} doubleClickZoom={false} style={{ height: '100%', width: '100%' }}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -2540,6 +2721,7 @@ export default function MapSearch({
               onDrawingChange={(v) => setIsDrawing(v)}
               onPolygon={(geom) => {
                 setSelectedParcelId(null);
+                setSignalsDrawerOpen(false);
                 setErrorBanner(null);
                 drawnPolygonRef.current = geom;
                 drawnCircleRef.current = null;
@@ -2568,17 +2750,16 @@ export default function MapSearch({
                   const props: any = (feature as any)?.properties || {};
                   const pid = String(props.parcel_id || props.parcelId || '').trim();
                   const rec = pid ? recordById.get(pid) : undefined;
-                  const fallbackFromList = pid ? parcels.find((p) => p.parcel_id === pid) : undefined;
+                  const fallbackFromList = pid ? parcels.find((pp) => pp.parcel_id === pid) : undefined;
                   const addr = String(
-                    props.situs_address ||
-                      props.address ||
-                      rec?.situs_address ||
-                      rec?.address ||
-                      fallbackFromList?.address ||
-                      ''
+                    props.situs_address || props.address || rec?.situs_address || rec?.address || fallbackFromList?.address || ''
                   ).trim();
                   const owner = String(props.owner_name || props.owner || rec?.owner_name || fallbackFromList?.owner_name || '').trim();
-                  const lines = [owner ? `Owner: ${owner}` : 'Owner: —', addr ? `Address: ${addr}` : 'Address: —', pid ? `Parcel: ${pid}` : 'Parcel: —'];
+                  const lines = [
+                    owner ? `Owner: ${owner}` : 'Owner: —',
+                    addr ? `Address: ${addr}` : 'Address: —',
+                    pid ? `Parcel: ${pid}` : 'Parcel: —',
+                  ];
                   try {
                     (layer as any).bindTooltip(lines.join('\n'), {
                       sticky: true,
@@ -2593,7 +2774,7 @@ export default function MapSearch({
               />
             ) : null}
 
-            {rows.map((p) => {
+            {visibleRows.map((p) => {
               const lat = typeof p.lat === 'number' && Number.isFinite(p.lat) ? p.lat : null;
               const lng = typeof p.lng === 'number' && Number.isFinite(p.lng) ? p.lng : null;
               if (lat === null || lng === null) return null;
@@ -2601,14 +2782,7 @@ export default function MapSearch({
               const selected = selectedParcelId === p.parcel_id;
               const pos: [number, number] = [lat, lng];
               if (selected) {
-                return (
-                  <CircleMarker
-                    key={p.parcel_id}
-                    center={pos}
-                    radius={9}
-                    pathOptions={{ color: '#D08E02', weight: 2, fillOpacity: 0.35 }}
-                  />
-                );
+                return <CircleMarker key={p.parcel_id} center={pos} radius={9} pathOptions={{ color: '#2563eb', weight: 2, fillOpacity: 0.35 }} />;
               }
               return (
                 <Marker
@@ -2616,12 +2790,165 @@ export default function MapSearch({
                   position={pos}
                   interactive={!isDrawing}
                   eventHandlers={{
-                    click: () => setSelectedParcelId(p.parcel_id),
+                    click: () => {
+                      setSelectedParcelId(p.parcel_id);
+                      setSignalsDrawerOpen(true);
+                    },
                   }}
                 />
               );
             })}
           </MapContainer>
+
+          <div
+            className={
+              signalsDrawerOpen
+                ? 'pointer-events-auto absolute inset-0 bg-black/10'
+                : 'pointer-events-none absolute inset-0 bg-transparent'
+            }
+            onClick={() => setSignalsDrawerOpen(false)}
+          />
+
+          <div
+            className={
+              signalsDrawerOpen
+                ? 'absolute right-0 top-0 h-full w-[420px] translate-x-0 border-l border-cre-border/60 bg-cre-surface shadow-xl transition-transform'
+                : 'absolute right-0 top-0 h-full w-[420px] translate-x-full border-l border-cre-border/60 bg-cre-surface shadow-xl transition-transform'
+            }
+          >
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between gap-2 border-b border-cre-border/60 px-4 py-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Signals</div>
+                  <div className="font-mono text-[12px] text-cre-text">{selectedParcelId || '—'}</div>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-1 text-sm text-cre-text hover:bg-cre-surface"
+                  onClick={() => setSignalsDrawerOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-auto px-4 py-3">
+                {!selectedParcelId ? (
+                  <div className="text-sm text-cre-muted">Select a parcel to view signals.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {(() => {
+                      const rec = selectedParcelId ? records.find((r) => r.parcel_id === selectedParcelId) : null;
+                      const p = selectedParcelId ? parcels.find((x) => x.parcel_id === selectedParcelId) : null;
+                      const addr = (rec?.situs_address || rec?.address || p?.address || '').trim();
+                      const owner = (rec?.owner_name || p?.owner_name || '').trim();
+                      return (
+                        <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                          <div className="text-sm font-semibold text-cre-text">{addr || '—'}</div>
+                          <div className="mt-1 text-xs text-cre-muted">{owner || '—'}</div>
+                          {rec ? (
+                            <div className="mt-2 text-[11px] text-cre-muted">
+                              Year {rec.year_built ?? '—'} · Beds {rec.beds ?? '—'} · Baths {rec.baths ?? '—'} · Value {rec.total_value ?? '—'}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Rollup</div>
+                      {selectedRollupLoading ? (
+                        <div className="mt-2 text-sm text-cre-muted">Loading rollup…</div>
+                      ) : selectedRollup ? (
+                        <div className="mt-2 space-y-1 text-sm text-cre-text">
+                          <div>Seller score: {selectedRollup.seller_score}</div>
+                          <div className="text-xs text-cre-muted">Tier counts: c{selectedRollup.count_critical} / s{selectedRollup.count_strong} / p{selectedRollup.count_support}</div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-cre-muted">Rollup unavailable: {selectedRollupError || '—'}</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Alerts</div>
+                      {selectedTriggersLoading ? (
+                        <div className="mt-2 text-sm text-cre-muted">Loading alerts…</div>
+                      ) : selectedTriggersError ? (
+                        <div className="mt-2 text-sm text-cre-muted">{selectedTriggersError}</div>
+                      ) : selectedAlerts.length ? (
+                        <div className="mt-2 space-y-2">
+                          {selectedAlerts.slice(0, 25).map((a) => (
+                            <div key={`ta:${a.id}`} className="rounded-lg border border-cre-border/60 bg-cre-surface p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-mono text-[11px] text-cre-text">{a.alert_key}</div>
+                                <div className="text-[11px] text-cre-muted">sev {a.severity}</div>
+                              </div>
+                              <div className="text-[11px] text-cre-muted">Last: {a.last_seen_at}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-cre-muted">No open alerts for this parcel.</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Triggers timeline</div>
+                      {selectedTriggersLoading ? (
+                        <div className="mt-2 text-sm text-cre-muted">Loading triggers…</div>
+                      ) : selectedTriggersError ? (
+                        <div className="mt-2 text-sm text-cre-muted">{selectedTriggersError}</div>
+                      ) : selectedTriggerEvents.length ? (
+                        <div className="mt-2 space-y-2">
+                          {selectedTriggerEvents
+                            .slice()
+                            .sort((a, b) => String(b.trigger_at || '').localeCompare(String(a.trigger_at || '')))
+                            .slice(0, 50)
+                            .map((t) => (
+                              <div key={`te:${t.id}`} className="rounded-lg border border-cre-border/60 bg-cre-surface p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-mono text-[11px] text-cre-text">{t.trigger_key}</div>
+                                  <div className="text-[11px] text-cre-muted">sev {t.severity}</div>
+                                </div>
+                                <div className="text-[11px] text-cre-muted">{t.trigger_at}</div>
+                                <div className="text-[11px] text-cre-muted">{t.source_connector_key}:{t.source_event_type}</div>
+                              </div>
+                            ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-cre-muted">No triggers found.</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Permits</div>
+                      {selectedPermitsLoading ? (
+                        <div className="mt-2 text-sm text-cre-muted">Loading permits…</div>
+                      ) : selectedPermitsError ? (
+                        <div className="mt-2 text-sm text-cre-muted">{selectedPermitsError}</div>
+                      ) : selectedPermits.length ? (
+                        <div className="mt-2 space-y-2">
+                          <div className="text-[11px] text-cre-muted">{selectedPermits.length} record(s)</div>
+                          {selectedPermits.slice(0, 10).map((pp) => (
+                            <div key={`permit:${pp.county}:${pp.permit_number}`} className="rounded-lg border border-cre-border/60 bg-cre-surface p-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-mono text-[11px] text-cre-text">{pp.permit_number}</div>
+                                <div className="text-[11px] text-cre-muted">{pp.status || '—'}</div>
+                              </div>
+                              <div className="text-xs text-cre-text">{pp.permit_type || '—'}</div>
+                              <div className="text-[11px] text-cre-muted">Issued: {pp.issue_date || '—'} · Final: {pp.final_date || '—'}</div>
+                            </div>
+                          ))}
+                          {selectedPermits.length > 10 ? <div className="text-[11px] text-cre-muted">Showing first 10 permits.</div> : null}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-cre-muted">No permits found.</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </main>
     </div>

@@ -16,6 +16,21 @@ from florida_property_scraper.contacts import get_contact_enricher
 
 router = APIRouter(tags=["lookup"])
 
+# LIVE address lookup is intentionally narrow and opt-in.
+# If you enable it, you must explicitly set LIVE=1 and implement a provider.
+SUPPORTED_LIVE_LOOKUP_COUNTIES: set[str] = set()
+
+
+@router.get("/lookup/capabilities")
+def lookup_capabilities():
+    live_env_enabled = os.getenv("LIVE", "0") == "1"
+    supported = sorted(SUPPORTED_LIVE_LOOKUP_COUNTIES)
+    return {
+        "live_env_enabled": live_env_enabled,
+        "supported_live_lookup_counties": supported,
+        "live_lookup_available": bool(supported) and live_env_enabled,
+    }
+
 
 def _normalize_county(c: Optional[str]) -> str:
     return (c or "").strip().lower() or "seminole"
@@ -206,7 +221,17 @@ def lookup_address(payload: dict = Body(...)):
         store.close()
 
     # Not found locally
-    if not live and os.getenv("LIVE", "0") != "1":
+    live_env_enabled = os.getenv("LIVE", "0") == "1"
+    if live and not live_env_enabled:
+        raise HTTPException(
+            status_code=412,
+            detail={
+                "message": "LIVE lookup requested but server is not in LIVE mode (set LIVE=1).",
+                "contacts_unavailable": True,
+            },
+        )
+
+    if not live and not live_env_enabled:
         raise HTTPException(
             status_code=404,
             detail={
@@ -220,8 +245,7 @@ def lookup_address(payload: dict = Body(...)):
     # - it can hit the network during unit tests,
     # - it isn't a stable address-lookup contract,
     # - many counties have no suitable "start URL" for address search.
-    supported_live_lookup_counties: set[str] = set()
-    if county not in supported_live_lookup_counties:
+    if county not in SUPPORTED_LIVE_LOOKUP_COUNTIES:
         raise HTTPException(
             status_code=501,
             detail=f"No LIVE address lookup provider for county: {county}",

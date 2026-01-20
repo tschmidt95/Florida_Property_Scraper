@@ -129,11 +129,32 @@ export default function App() {
   // we end up with multiple Leaflet containers + duplicated controls.
   const showLegacyMapPanel = false;
 
+  // Default OFF: the legacy App shell renders a second (confusing) UI below
+  // MapSearch. If you need it for dev, use ?legacy=1.
+  const enableLegacyUi = useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      const v = new URLSearchParams(window.location.search).get('legacy');
+      return v === '1' || v === 'true';
+    } catch {
+      return false;
+    }
+  }, []);
+
   const [mode, setMode] = useState<'search' | 'map'>('map');
   const [query, setQuery] = useState('');
   const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
   const [selectedCounty, setSelectedCounty] = useState('Orange');
   const [liveFetchEnabled, setLiveFetchEnabled] = useState(false);
+  const [lookupCaps, setLookupCaps] = useState<
+    | {
+        live_env_enabled: boolean;
+        supported_live_lookup_counties: string[];
+        live_lookup_available: boolean;
+        capabilities_known: boolean;
+      }
+    | null
+  >(null);
   const [searchFields, setSearchFields] = useState({
     owner: true,
     address: true,
@@ -203,6 +224,64 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const resp = await fetch('/api/lookup/capabilities', {
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        if (cancelled) return;
+        setLookupCaps({
+          live_env_enabled: !!json.live_env_enabled,
+          supported_live_lookup_counties: Array.isArray(json.supported_live_lookup_counties)
+            ? json.supported_live_lookup_counties
+            : [],
+          live_lookup_available: !!json.live_lookup_available,
+          capabilities_known: true,
+        });
+      } catch {
+        if (cancelled) return;
+        setLookupCaps({
+          live_env_enabled: false,
+          supported_live_lookup_counties: [],
+          live_lookup_available: false,
+          capabilities_known: false,
+        });
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liveLookupSupportedForCounty = useMemo(() => {
+    const county = selectedCounty.toLowerCase();
+    const supported = lookupCaps?.supported_live_lookup_counties || [];
+    return supported.includes(county);
+  }, [lookupCaps, selectedCounty]);
+
+  const liveFetchToggleDisabled =
+    !lookupCaps || !lookupCaps.capabilities_known || !lookupCaps.live_env_enabled || !liveLookupSupportedForCounty;
+
+  const liveFetchStatusText = useMemo(() => {
+    if (!lookupCaps) return 'Checking server capabilities…';
+    if (!lookupCaps.capabilities_known) return 'DEMO MODE (backend not exposing capabilities; restart backend)';
+    if (!lookupCaps.live_env_enabled) return 'DEMO MODE (server LIVE=0)';
+    if (!lookupCaps.supported_live_lookup_counties.length) return 'DEMO MODE (no live lookup providers)';
+    if (!liveLookupSupportedForCounty) return 'Not supported for this county';
+    return 'LIVE enabled';
+  }, [lookupCaps, liveLookupSupportedForCounty]);
+
+  useEffect(() => {
+    if (liveFetchEnabled && liveFetchToggleDisabled) {
+      setLiveFetchEnabled(false);
+    }
+  }, [liveFetchEnabled, liveFetchToggleDisabled]);
+
   function runPrimaryAction() {
     if (mode === 'map') {
       void runLookup();
@@ -216,6 +295,9 @@ export default function App() {
     setLookupError(null);
     setLookupResult(null);
     try {
+      if (liveFetchEnabled && liveFetchToggleDisabled) {
+        throw new Error(`Live fetch is not available: ${liveFetchStatusText}`);
+      }
       const resp = await fetch('/api/lookup/address', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -367,6 +449,47 @@ export default function App() {
     setError(null);
     setHasSearched(false);
     setLoading(false);
+  }
+
+  if (!enableLegacyUi) {
+    return (
+      <div className="min-h-screen bg-cre-bg text-cre-text">
+        <div className="sticky top-0 z-50 border-b border-cre-border/30 bg-cre-surface px-4 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={apiOk ? 'text-emerald-300' : 'text-red-300'}>
+              Backend: {apiOk ? 'OK' : 'FAIL'}
+            </span>
+            <span
+              className={
+                mapStatus === 'loaded'
+                  ? 'text-emerald-300'
+                  : mapStatus === 'failed'
+                    ? 'text-red-300'
+                    : 'text-cre-muted'
+              }
+            >
+              Map: {mapStatus === 'loaded' ? 'Loaded' : mapStatus === 'failed' ? 'Failed' : 'Loading…'}
+            </span>
+            <span className="text-cre-muted">{buildBanner}</span>
+            {apiGit ? (
+              <span className="ml-auto text-cre-muted">
+                {apiGit.branch} • {apiGit.sha}
+              </span>
+            ) : (
+              <span className="ml-auto text-cre-muted">(no git info)</span>
+            )}
+          </div>
+        </div>
+
+        <MapErrorBoundary onSafeMapStatus={setMapStatus}>
+          <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
+            <div className="min-h-[520px]">
+              <LazyMapSearch onMapStatus={setMapStatus} />
+            </div>
+          </Suspense>
+        </MapErrorBoundary>
+      </div>
+    );
   }
 
   return (
@@ -531,6 +654,7 @@ export default function App() {
               <div>
                 <div className="text-sm font-medium">Live fetch</div>
                 <div className="text-xs text-cre-muted">Scrape/fetch when missing</div>
+                <div className="mt-1 text-[11px] font-semibold text-amber-700">{liveFetchStatusText}</div>
               </div>
 
               <label className="relative inline-flex cursor-pointer items-center">
@@ -539,6 +663,7 @@ export default function App() {
                   className="peer sr-only"
                   checked={liveFetchEnabled}
                   onChange={(e) => setLiveFetchEnabled(e.target.checked)}
+                  disabled={liveFetchToggleDisabled}
                 />
                 <div className="h-6 w-11 rounded-full bg-slate-300 peer-checked:bg-cre-accent after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
               </label>
