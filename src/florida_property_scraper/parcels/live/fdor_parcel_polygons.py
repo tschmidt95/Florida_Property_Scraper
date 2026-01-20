@@ -181,5 +181,73 @@ class FDORParcelPolygonClient:
                 if gj is None:
                     continue
                 out[pid] = gj
+import requests
 
-        return out
+def fetch_fdor_attrs_by_parcel_ids(parcel_ids: list[str]) -> dict[str, dict]:
+    """
+    Returns {parcel_id: {"owner_name": "...", "situs_address": "..."}}
+    Best-effort: field names vary, so we try common attribute keys.
+    """
+    if not parcel_ids:
+        return {}
+
+    url = parcel_polygon_layer_url()
+
+    # ArcGIS IN() can be picky; chunk it
+    out: dict[str, dict] = {}
+    CHUNK = 100
+    for i in range(0, len(parcel_ids), CHUNK):
+        chunk = parcel_ids[i : i + CHUNK]
+        quoted = ",".join([f"'{p}'" for p in chunk])
+        where = f"PARCELID IN ({quoted}) OR PARCEL_ID IN ({quoted}) OR PARCEL IN ({quoted})"
+
+        params = {
+            "f": "json",
+            "where": where,
+            "outFields": "*",
+            "returnGeometry": "false",
+        }
+        r = requests.get(f"{url}/query", params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        feats = data.get("features", []) or []
+
+        for feat in feats:
+            attrs = feat.get("attributes") or {}
+
+            # parcel id field (varies)
+            pid = (
+                attrs.get("PARCELID")
+                or attrs.get("PARCEL_ID")
+                or attrs.get("PARCEL")
+                or attrs.get("PARCELNO")
+                or attrs.get("PARCEL_NO")
+            )
+            if not pid:
+                continue
+            pid = str(pid)
+
+            # owner field (varies)
+            owner = (
+                attrs.get("OWNER")
+                or attrs.get("OWNER_NAME")
+                or attrs.get("OWNERNME1")
+                or attrs.get("OWNER1")
+                or attrs.get("OWN_NAME")
+            ) or ""
+
+            # situs field (varies)
+            situs = (
+                attrs.get("SITUS")
+                or attrs.get("SITUS_ADDRESS")
+                or attrs.get("SITE_ADDR")
+                or attrs.get("ADDRESS")
+                or attrs.get("PROP_ADDR")
+            ) or ""
+
+            out[pid] = {
+                "owner_name": (str(owner).strip() if owner is not None else ""),
+                "situs_address": (str(situs).strip() if situs is not None else ""),
+            }
+
+    return out
