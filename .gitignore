@@ -72,3 +72,4 @@ requirements.txt.bak
 # local dev-run artifacts
 .up_run.pid
 .up_run*.log
+data/sem_co/
