@@ -1266,7 +1266,7 @@ export default function MapSearch({
           Math.abs(first[1]) > 60
         ) {
           // Detected [lat, lng], swap all
-          const swapped = ring.map(([lat, lng]: [number, number]) => [lng, lat]);
+          const swapped = ring.map((p: any) => { const [lng, lat] = p as [number, number]; return [lat, lng]; });
           poly = { ...poly, coordinates: [swapped] };
         }
       }
@@ -1375,8 +1375,6 @@ export default function MapSearch({
         sample,
         zoningOptionsLen: zoningOpts.filter((x) => typeof x === 'string' && x.trim()).length,
         futureLandUseOptionsLen: fluOpts.filter((x) => typeof x === 'string' && x.trim()).length,
-        coord_order_sample: coordOrderSample,
-        coord_order_label: 'expected [lng,lat]',
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

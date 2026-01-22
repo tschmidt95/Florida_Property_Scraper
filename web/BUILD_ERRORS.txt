@@ -1,14 +1,9 @@
+
 > florida-property-scraper-web@0.0.0 build
 > tsc -p tsconfig.json --noEmit && vite build
 
-vite v5.4.21 building for production...
-transforming...
-✓ 90 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/index.html                         0.73 kB │ gzip:   0.40 kB
-dist/assets/spritesheet-DpIxuf5L.svg    5.55 kB │ gzip:   1.67 kB
-dist/assets/index-BRgixz26.css         41.06 kB │ gzip:  16.00 kB
-dist/assets/index-QMra8iSb.js         385.55 kB │ gzip: 115.24 kB
-✓ built in 2.58s
-node_modules/react-leaflet-draw/dist/esm/EditControl.js (8:7): "default" is not exported by "node_modules/leaflet-draw/dist/leaflet.draw.js", imported by "node_modules/react-leaflet-draw/dist/esm/EditControl.js".
+src/pages/MapSearch.tsx(1269,36): error TS2345: Argument of type '([lat, lng]: [number, number]) => number[]' is not assignable to parameter of type '(value: Position, index: number, array: Position[]) => number[]'.
+  Types of parameters '__0' and 'value' are incompatible.
+    Type 'Position' is not assignable to type '[number, number]'.
+      Target requires 2 element(s) but source may have fewer.
+src/pages/MapSearch.tsx(1378,9): error TS2353: Object literal may only specify known properties, and 'coord_order_sample' does not exist in type '{ payload: any; polygonRingLen?: number | undefined; polygonFirst?: [number, number] | null | undefined; polygonBbox?: { minLng: number; minLat: number; maxLng: number; maxLat: number; } | null | undefined; ... 4 more ...; futureLandUseOptionsLen: number; } | { ...; } | ((prevState: { ...; } | ... 1 more ... | null)...'.
