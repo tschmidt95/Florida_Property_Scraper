@@ -481,7 +481,7 @@ export default function MapSearch({
 }: {
   onMapStatus?: (status: MapStatus) => void;
 }) {
-  const [county, setCounty] = useState('orange');
+  const [county, setCounty] = useState('');
   const [drawnPolygon, setDrawnPolygon] = useState<GeoJSON.Polygon | null>(null);
   const [drawnCircle, setDrawnCircle] = useState<DrawnCircle | null>(null);
 
@@ -1223,15 +1223,18 @@ export default function MapSearch({
     const enrich = autoEnrichMissing;
 
     const payload: any = {
-      county,
-      live: true,
-      limit: 25,
-      include_geometry: false,
-      filters: hasAnyFilters ? filters : undefined,
-      enrich,
-      enrich_limit: enrich ? 10 : undefined,
-      sort: sortKey,
-    };
+  live: true,
+  limit: 25,
+  include_geometry: false,
+  filters: hasAnyFilters ? filters : undefined,
+  enrich,
+  enrich_limit: enrich ? 10 : undefined,
+  sort: sortKey,
+};
+
+if (county && county.trim()) {
+  payload.county = county;
+}
 
     // Proof + forward-compat: include selected trigger keys in the request payload.
     // Filtering by signals is currently applied via the rollups prefilter (when enabled).
@@ -1248,29 +1251,34 @@ export default function MapSearch({
     }
 
     if (poly) {
-      // Ensure coordinates are [lng, lat] (GeoJSON order)
-      if (
-        poly &&
-        Array.isArray(poly.coordinates) &&
-        Array.isArray(poly.coordinates[0]) &&
-        poly.coordinates[0].length > 0
-      ) {
-        // If any coordinate is [lat, lng], swap to [lng, lat]
-        const ring = poly.coordinates[0];
-        // Heuristic: if abs(first[0]) < 31 and abs(first[1]) > 60, it's [lat, lng] (Florida)
-        const first = ring[0];
-        if (
-          Array.isArray(first) &&
-          first.length === 2 &&
-          Math.abs(first[0]) < 31 &&
-          Math.abs(first[1]) > 60
-        ) {
-          // Detected [lat, lng], swap all
-          const swapped = ring.map((p: any) => { const [lng, lat] = p as [number, number]; return [lat, lng]; });
-          poly = { ...poly, coordinates: [swapped] };
-        }
-      }
-      payload.polygon_geojson = poly;
+      // Ensure coordinates are [lng, lat] (GeoJSON order) WITHOUT mutating state
+let polyOut = poly;
+
+if (
+  poly &&
+  Array.isArray(poly.coordinates) &&
+  Array.isArray(poly.coordinates[0]) &&
+  poly.coordinates[0].length > 0
+) {
+  const ring = poly.coordinates[0];
+  const first = ring[0];
+
+  // Heuristic: if abs(first[0]) < 31 and abs(first[1]) > 60, it's [lat, lng] (Florida)
+  if (
+    Array.isArray(first) &&
+    first.length === 2 &&
+    Math.abs(first[0]) < 31 &&
+    Math.abs(first[1]) > 60
+  ) {
+    const swapped = ring.map((p: any) => {
+      const [lat, lng] = p as [number, number];
+      return [lng, lat];
+    });
+    polyOut = { ...poly, coordinates: [swapped] };
+  }
+}
+
+payload.polygon_geojson = polyOut;
     } else if (circle) {
       payload.center = circle.center;
       payload.radius_m = circle.radius_m;

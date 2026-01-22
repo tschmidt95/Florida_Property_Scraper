@@ -338,6 +338,12 @@ if app:
         Missing fields are treated as unknown and do not match triggers.
         """
 
+
+        # Ensure these are ALWAYS defined (used later in multiple branches)
+        provider_is_live = False
+        fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1","true","True"}
+
+
         search_id = uuid.uuid4().hex[:12]
 
         debug_response_enabled = payload.get("debug") is True
@@ -651,7 +657,7 @@ if app:
         intersecting = []
         provider_warnings = []
         candidates = []
-        if county_key == "seminole" and geometry:
+        if county_key == "seminole" and geometry and os.getenv("FPS_USE_SEMINOLE_SQLITE","")=="1":
             db_path = str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite")
             try:
                 conn = sqlite3.connect(db_path)
