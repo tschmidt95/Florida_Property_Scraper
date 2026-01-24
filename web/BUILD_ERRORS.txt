@@ -2,27 +2,4 @@
 > florida-property-scraper-web@0.0.0 build
 > tsc -p tsconfig.json --noEmit && vite build
 
-src/pages/MapSearch.tsx(354,65): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,85): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,125): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,139): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,174): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,189): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,231): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,251): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,291): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,311): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,352): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,372): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,452): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,476): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,520): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,544): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,589): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,613): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,696): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,719): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,762): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,785): error TS2304: Cannot find name 'p'.
-src/pages/MapSearch.tsx(354,829): error TS2304: Cannot find name 'rec'.
-src/pages/MapSearch.tsx(354,852): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(2874,43): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
