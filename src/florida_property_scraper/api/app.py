@@ -2933,6 +2933,17 @@ if app:
             # PA-only: unknown unless explicitly present in PA.
             "mortgage_amount": None,
             "mortgage_lender": "",
+            "just_value": hover.get("just_value"),
+            "assessed_value": hover.get("assessed_value"),
+            "taxable_value": hover.get("taxable_value"),
+            "year_built": hover.get("year_built"),
+            "beds": hover.get("beds"),
+            "baths": hover.get("baths"),
+            "living_sf": hover.get("living_sf"),
+            "land_sf": hover.get("land_sf"),
+            "land_acres": hover.get("land_acres"),
+            "zoning": str(hover.get("zoning") or ""),
+            "future_land_use": str(hover.get("future_land_use") or ""),
         }
         cache_set(cache_key, payload, ttl=30)
         return JSONResponse(payload)
