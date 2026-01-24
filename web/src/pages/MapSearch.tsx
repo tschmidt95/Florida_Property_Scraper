@@ -2851,9 +2851,9 @@ payload.polygon_geojson = polyOut;
                         <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
                           <div className="text-sm font-semibold text-cre-text">{addr || '—'}</div>
                           <div className="mt-1 text-xs text-cre-muted">{owner || '—'}</div>
-                          {rec ? (
+                          {(rec || p) ? (
                             <div className="mt-2 text-[11px] text-cre-muted">
-                              Year {rec.year_built ?? '—'} · Beds {rec.beds ?? '—'} · Baths {rec.baths ?? '—'} · Value {rec.total_value ?? '—'}
+                              Year {(rec?.year_built ?? p?.year_built) ?? '—'} · Beds {(rec?.beds ?? p?.beds) ?? '—'} · Baths {(rec?.baths ?? p?.baths) ?? '—'} · Just {typeof (rec?.just_value ?? p?.just_value) === 'number' && (rec?.just_value ?? p?.just_value) ? `$${Math.round((rec?.just_value ?? p?.just_value)).toLocaleString()}` : '—'} · Assessed {typeof (rec?.assessed_value ?? p?.assessed_value) === 'number' && (rec?.assessed_value ?? p?.assessed_value) ? `$${Math.round((rec?.assessed_value ?? p?.assessed_value)).toLocaleString()}` : '—'} · Taxable {typeof (rec?.taxable_value ?? p?.taxable_value) === 'number' && (rec?.taxable_value ?? p?.taxable_value) ? `$${Math.round((rec?.taxable_value ?? p?.taxable_value)).toLocaleString()}` : '—'}
                             </div>
                           ) : null}
                         </div>

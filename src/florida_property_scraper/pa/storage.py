@@ -308,12 +308,31 @@ class PASQLite:
             rec = apply_defaults(raw)
             owner_name = "; ".join([n for n in (rec.owner_names or []) if n])
             out[str(row["parcel_id"])] = {
-                "situs_address": rec.situs_address or "",
-                "owner_name": owner_name,
-                "last_sale_date": rec.last_sale_date,
-                "last_sale_price": float(rec.last_sale_price or 0),
-                # PA-only: mortgage fields are unknown unless PA explicitly provides them.
-                "mortgage_amount": None,
+                  "situs_address": rec.situs_address or "",
+                  "owner_name": owner_name,
+                  "last_sale_date": rec.last_sale_date,
+                  "last_sale_price": float(rec.last_sale_price or 0),
+                  "year_built": int(rec.year_built or 0) if rec.year_built is not None else 0,
+                  "beds": int(rec.bedrooms or 0) if rec.bedrooms is not None else 0,
+                  "baths": float(rec.bathrooms or 0) if rec.bathrooms is not None else 0.0,
+                  "living_sf": float(rec.living_sf or 0),
+                  "land_sf": float(rec.land_sf or 0),
+                  "land_acres": float(rec.land_acres or 0),
+                  "zoning": rec.zoning or "",
+                  "future_land_use": rec.future_land_use or "",
+                  "land_value": float(rec.land_value or 0),
+                  "improvement_value": float(rec.improvement_value or 0),
+                  "assessed_value": float(rec.assessed_value or 0),
+                  "taxable_value": float(rec.taxable_value or 0),
+                  "just_value": float(rec.just_value or 0),
+                  "mortgage_amount": float(rec.mortgage_amount or 0) if rec.mortgage_amount is not None else None,
+                  "mortgage_date": rec.mortgage_date or "",
+                  "mortgage_lender": rec.mortgage_lender or "",
+                  "longitude": float(rec.longitude) if rec.longitude is not None else None,
+                  "latitude": float(rec.latitude) if rec.latitude is not None else None,
+                  "use_type": rec.use_type or "",
+                  "land_use_code": rec.land_use_code or "",
+
             }
 
         return out

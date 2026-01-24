@@ -161,6 +161,12 @@ export type ParcelRecord = {
   mortgage_lender?: string | null;
   mortgage_amount?: number | null;
   mortgage_date?: string | null;
+
+  // Extended valuation fields (optional)
+  just_value?: number | null;
+  assessed_value?: number | null;
+  taxable_value?: number | null;
+
 };
 
 export type PermitRecord = {
@@ -202,6 +208,24 @@ export type ParcelSearchListItem = {
   lng?: number;
   source?: 'live' | 'cache';
   raw?: unknown;
+  // Extended hover fields (optional)
+  year_built?: number | null;
+  beds?: number | null;
+  baths?: number | null;
+  living_sf?: number | null;
+  land_sf?: number | null;
+  land_acres?: number | null;
+  zoning?: string | null;
+  future_land_use?: string | null;
+  land_value?: number | null;
+  improvement_value?: number | null;
+  assessed_value?: number | null;
+  taxable_value?: number | null;
+  just_value?: number | null;
+  mortgage_amount?: number | null;
+  mortgage_date?: string | null;
+  mortgage_lender?: string | null;
+
 };
 
 export type ParcelSearchResponseNormalized = ParcelSearchResponse & {
@@ -286,6 +310,24 @@ function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchList
       const hoverAny = row.hover_fields;
       const hover = (hoverAny && typeof hoverAny === 'object') ? (hoverAny as Record<string, unknown>) : null;
       const address = _bestAddressFromHover(hover);
+
+      // Extended hover fields (optional)
+      const yearBuilt = _asNumber(hover?.year_built);
+      const beds = _asNumber(hover?.beds);
+      const baths = _asNumber(hover?.baths);
+      const livingSf = _asNumber(hover?.living_sf);
+      const landSf = _asNumber(hover?.land_sf);
+      const landAcres = _asNumber(hover?.land_acres);
+      const zoning = _asString(hover?.zoning).trim();
+      const futureLandUse = _asString(hover?.future_land_use).trim();
+      const landValue = _asNumber(hover?.land_value);
+      const improvementValue = _asNumber(hover?.improvement_value);
+      const assessedValue = _asNumber(hover?.assessed_value);
+      const taxableValue = _asNumber(hover?.taxable_value);
+      const justValue = _asNumber(hover?.just_value);
+      const mortgageAmount = _asNumber(hover?.mortgage_amount);
+      const mortgageDate = _asString(hover?.mortgage_date).trim();
+      const mortgageLender = _asString(hover?.mortgage_lender).trim();
       const owner = _bestOwnerFromHover(hover);
       const mailing = _bestMailingFromHover(hover);
 
@@ -296,6 +338,24 @@ function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchList
         owner_name: owner,
         owner_mailing_address: mailing || undefined,
         raw: item,
+        // Extended hover fields (optional)
+        year_built: yearBuilt,
+        beds,
+        baths,
+        living_sf: livingSf,
+        land_sf: landSf,
+        land_acres: landAcres,
+        zoning: zoning || null,
+        future_land_use: futureLandUse || null,
+        land_value: landValue,
+        improvement_value: improvementValue,
+        assessed_value: assessedValue,
+        taxable_value: taxableValue,
+        just_value: justValue,
+        mortgage_amount: mortgageAmount,
+        mortgage_date: mortgageDate || null,
+        mortgage_lender: mortgageLender || null,
+
       });
     }
   }

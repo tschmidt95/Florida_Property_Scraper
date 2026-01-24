@@ -2,8 +2,27 @@
 > florida-property-scraper-web@0.0.0 build
 > tsc -p tsconfig.json --noEmit && vite build
 
-src/pages/MapSearch.tsx(1269,36): error TS2345: Argument of type '([lat, lng]: [number, number]) => number[]' is not assignable to parameter of type '(value: Position, index: number, array: Position[]) => number[]'.
-  Types of parameters '__0' and 'value' are incompatible.
-    Type 'Position' is not assignable to type '[number, number]'.
-      Target requires 2 element(s) but source may have fewer.
-src/pages/MapSearch.tsx(1378,9): error TS2353: Object literal may only specify known properties, and 'coord_order_sample' does not exist in type '{ payload: any; polygonRingLen?: number | undefined; polygonFirst?: [number, number] | null | undefined; polygonBbox?: { minLng: number; minLat: number; maxLng: number; maxLat: number; } | null | undefined; ... 4 more ...; futureLandUseOptionsLen: number; } | { ...; } | ((prevState: { ...; } | ... 1 more ... | null)...'.
+src/pages/MapSearch.tsx(354,65): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,85): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,125): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,139): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,174): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,189): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,231): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,251): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,291): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,311): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,352): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,372): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,452): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,476): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,520): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,544): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,589): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,613): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,696): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,719): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,762): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,785): error TS2304: Cannot find name 'p'.
+src/pages/MapSearch.tsx(354,829): error TS2304: Cannot find name 'rec'.
+src/pages/MapSearch.tsx(354,852): error TS2304: Cannot find name 'p'.
