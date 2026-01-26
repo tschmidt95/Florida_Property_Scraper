@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -658,7 +658,7 @@ if app:
         provider_warnings = []
         candidates = []
         if county_key == "seminole" and geometry and os.getenv("FPS_USE_SEMINOLE_SQLITE","")=="1":
-            db_path = str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite")
+            db_path = os.getenv("PARCELS_DB_PATH", str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite"))
             try:
                 conn = sqlite3.connect(db_path)
                 conn.row_factory = sqlite3.Row
@@ -680,6 +680,8 @@ if app:
                     except Exception:
                         continue
                 conn.close()
+
+                candidates = intersecting
             except Exception as e:
                 provider_warnings.append(f"parcels_sqlite_error:{e}")
         else:
@@ -2889,46 +2891,9 @@ if app:
             meta_store.close()
         return JSONResponse(meta.to_dict())
 
-    
-    @app.get("/api/parcels/{county}/{parcel_id}/detail")
-    def api_parcel_detail(county: str, parcel_id: str):
-        """Return full PA record (DB-backed) for a parcel_id, if present."""
-        from florida_property_scraper.pa.storage import PASQLite
-
-        county_key = (county or "").strip().lower()
-        parcel_key = str(parcel_id)
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
-
-        store = PASQLite(db_path)
-        try:
-            rec = store.get(county=county_key, parcel_id=parcel_key)
-        finally:
-            store.close()
-
-        if rec is None:
-            return JSONResponse(
-                {
-                    "county": county_key,
-                    "parcel_id": parcel_key,
-                    "found": False,
-                    "pa": None,
-                },
-                status_code=404,
-            )
-
-        # rec is your normalized PA model; return the dict you already expose under /api/parcels/{parcel_id}
-        return JSONResponse(
-            {
-                "county": county_key,
-                "parcel_id": parcel_key,
-                "found": True,
-                "pa": rec.to_dict() if hasattr(rec, "to_dict") else rec.__dict__,
-            }
-        )
-
-
-@app.get("/api/parcels/{county}/{parcel_id}/hover")
+    @app.get("/api/parcels/{county}/{parcel_id}/hover")
     def api_parcel_hover(county: str, parcel_id: str):
+        hover = {}
         """Return minimal PA-only hover fields.
 
         Mortgage fields are always blank/0 unless PA explicitly provides them.
@@ -3161,3 +3126,23 @@ if app:
                 await t
             except asyncio.CancelledError:
                 pass
+
+# --- alias: county in path ---
+@app.get("/api/parcels/{county}/{parcel_id}/detail")
+def api_parcel_detail_alias(county: str, parcel_id: str):
+    hover = locals().get('hover') or locals().get('hover_fields') or locals().get('hover_data') or {}
+    return RedirectResponse(url=f"/api/parcels/{parcel_id}?county={county}", status_code=307)
+
+
+# --- ensure spa_fallback is last ---
+try:
+    routes = app.router.routes  # FastAPI / Starlette router
+    idx = None
+    for i, r in enumerate(list(routes)):
+        if getattr(r, "name", "") == "spa_fallback" or getattr(r, "path", "") == "/{full_path:path}":
+            idx = i
+            break
+    if idx is not None:
+        routes.append(routes.pop(idx))
+except Exception:
+    pass
