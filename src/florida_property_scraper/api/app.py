@@ -2889,7 +2889,45 @@ if app:
             meta_store.close()
         return JSONResponse(meta.to_dict())
 
-    @app.get("/api/parcels/{county}/{parcel_id}/hover")
+    
+    @app.get("/api/parcels/{county}/{parcel_id}/detail")
+    def api_parcel_detail(county: str, parcel_id: str):
+        """Return full PA record (DB-backed) for a parcel_id, if present."""
+        from florida_property_scraper.pa.storage import PASQLite
+
+        county_key = (county or "").strip().lower()
+        parcel_key = str(parcel_id)
+        db_path = os.getenv("PA_DB", "./leads.sqlite")
+
+        store = PASQLite(db_path)
+        try:
+            rec = store.get(county=county_key, parcel_id=parcel_key)
+        finally:
+            store.close()
+
+        if rec is None:
+            return JSONResponse(
+                {
+                    "county": county_key,
+                    "parcel_id": parcel_key,
+                    "found": False,
+                    "pa": None,
+                },
+                status_code=404,
+            )
+
+        # rec is your normalized PA model; return the dict you already expose under /api/parcels/{parcel_id}
+        return JSONResponse(
+            {
+                "county": county_key,
+                "parcel_id": parcel_key,
+                "found": True,
+                "pa": rec.to_dict() if hasattr(rec, "to_dict") else rec.__dict__,
+            }
+        )
+
+
+@app.get("/api/parcels/{county}/{parcel_id}/hover")
     def api_parcel_hover(county: str, parcel_id: str):
         """Return minimal PA-only hover fields.
 
