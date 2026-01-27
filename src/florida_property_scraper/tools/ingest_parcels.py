@@ -58,12 +58,12 @@ def ingest_geojson(county, input_path, conn):
         props = feat['properties']
 
         parcel_id = str(
-            props.get("parcel_id")
+            props.get("PARCEL")
+            or props.get("PARCEL_KEY")
+            or props.get("parcel_id")
             or props.get("PARCEL_ID")
-            or props.get("PARCEL")
             or props.get("strap")
             or props.get("pid")
-            or props.get("OBJECTID")
             or ""
         ).strip()
 

@@ -73,3 +73,7 @@ requirements.txt.bak
 .up_run.pid
 .up_run*.log
 data/sem_co/
+
+# big generated datasets (rebuild locally)
+data/parcels/seminole_full_from_gdb_wgs84.geojson
+data/parcels/_bak/

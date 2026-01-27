@@ -27,5 +27,5 @@ sqlite3 "$DB_PATH" <<SQL
 .headers on
 .mode column
 SELECT 'Total parcels' AS label, COUNT(*) AS count FROM parcels WHERE county='seminole';
-SELECT 'BBox (min/max)' AS label, MIN(lon), MIN(lat), MAX(lon), MAX(lat) FROM parcels WHERE county='seminole';
+SELECT 'BBox (min/max)' AS label, MIN(minx), MIN(miny), MAX(maxx), MAX(maxy) FROM parcels;
 SQL
