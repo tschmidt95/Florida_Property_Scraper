@@ -269,10 +269,6 @@ if app:
         Output:
           GeoJSON FeatureCollection with properties:
             {parcel_id, county, situs_address, owner_name}
-
-        Notes:
-        - Best-effort; counties without support return 404.
-        - Never loads full-county geometry; only requested parcel_ids.
         """
 
         county_key = (payload.county or "").strip().lower()
@@ -282,12 +278,62 @@ if app:
         if not parcel_ids:
             return JSONResponse({"type": "FeatureCollection", "features": []})
 
-        # Orange first (expand later).
-        if county_key not in {"orange"}:
-            raise HTTPException(
-                status_code=404,
-                detail="Parcel geometry not available for this county yet",
-            )
+        # Supported counties:
+        # - seminole: read geometry from parcels.sqlite (pre-ingested GeoJSON)
+        # - orange: live FDOR polygon fetch (existing behavior)
+        if county_key == "seminole":
+            import sqlite3, json as _json
+            from florida_property_scraper.pa.storage import PASQLite
+
+            parcels_db = os.getenv("PARCELS_DB_PATH", "")
+            if not parcels_db:
+                raise HTTPException(status_code=500, detail="PARCELS_DB_PATH is not set")
+
+            con = sqlite3.connect(parcels_db)
+            cur = con.cursor()
+            q = (
+                "SELECT parcel_id, geom_geojson "
+                "FROM parcels "
+                "WHERE county=? AND parcel_id IN ({})"
+            ).format(",".join(["?"] * len(parcel_ids)))
+            rows = cur.execute(q, ["seminole", *parcel_ids]).fetchall()
+            con.close()
+
+            geom_by_id = {}
+            for pid, gj in rows:
+                if not gj:
+                    continue
+                try:
+                    geom_by_id[str(pid)] = _json.loads(gj)
+                except Exception:
+                    pass
+
+            db_path = os.getenv("PA_DB", "./leads.sqlite")
+            hover_by_id: dict[str, dict] = {}
+            store = PASQLite(db_path)
+            try:
+                hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
+            finally:
+                store.close()
+
+            features_out: list[dict] = []
+            for pid in parcel_ids:
+                geom = geom_by_id.get(pid)
+                if not geom:
+                    continue
+                hover = hover_by_id.get(pid) or {}
+                props = {
+                    "parcel_id": pid,
+                    "county": county_key,
+                    "situs_address": str(hover.get("situs_address") or ""),
+                    "owner_name": str(hover.get("owner_name") or ""),
+                }
+                features_out.append({"type": "Feature", "geometry": geom, "properties": props})
+
+            return JSONResponse({"type": "FeatureCollection", "features": features_out})
+
+        if county_key != "orange":
+            raise HTTPException(status_code=404, detail="Parcel geometry not available for this county yet")
 
         from florida_property_scraper.parcels.live.fdor_parcel_polygons import FDORParcelPolygonClient
         from florida_property_scraper.pa.storage import PASQLite
@@ -318,6 +364,9 @@ if app:
             features_out.append({"type": "Feature", "geometry": geom, "properties": props})
 
         return JSONResponse({"type": "FeatureCollection", "features": features_out})
+
+
+
 
     @app.post("/api/parcels/search")
     def api_parcels_search(payload: dict = Body(...)):
