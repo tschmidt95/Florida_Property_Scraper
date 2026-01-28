@@ -2865,7 +2865,8 @@ if app:
         county_key = (county or "").strip().lower() or "seminole"
 
         # include_geometry: best-effort geometry attach (Seminole uses parcels.sqlite)
-        if include_geometry and (county_key == "seminole" or (county or "").strip().lower() == "seminole"):
+        geom = None
+        if include_geometry and county_key == "seminole":
             try:
                 import sqlite3, json as _json
                 parcels_db = os.getenv("PARCELS_DB_PATH", "")
@@ -2879,13 +2880,9 @@ if app:
                     con.close()
                     if row and row[0]:
                         geom = _json.loads(row[0])
-                        # attach onto the outgoing response dict if possible
-                        try:
-                            result["geometry"] = geom
-                        except Exception:
-                            pass
             except Exception:
-                pass
+                geom = None
+
         parcel_key = str(parcel_id)
         db_path = os.getenv("PA_DB", "./leads.sqlite")
 
@@ -2917,7 +2914,23 @@ if app:
             if meta is not None
             else empty_user_meta(county=county_key, parcel_id=parcel_key),
         }
-        return JSONResponse(payload)
+        result = payload
+
+        if isinstance(result, dict):
+            if geom is not None:
+                result["geometry"] = geom
+            pa = result.get("pa") or {}
+            result["situs_address"] = pa.get("situs_address") or ""
+            result["situs_city"] = pa.get("situs_city") or ""
+            result["situs_state"] = pa.get("situs_state") or ""
+            result["situs_zip"] = pa.get("situs_zip") or ""
+            owners = pa.get("owner_names") or []
+            result["owner_name"] = (owners[0] if owners else (pa.get("owner_name") or ""))
+            result["last_sale_date"] = pa.get("last_sale_date") or ""
+            result["last_sale_price"] = pa.get("last_sale_price") or 0
+            result["just_value"] = pa.get("just_value") or 0
+
+        return JSONResponse(result)
 
     @app.get("/api/parcels/{parcel_id}/meta")
     def api_parcel_meta_get(parcel_id: str, county: str = ""):
