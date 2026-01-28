@@ -2897,7 +2897,7 @@ if app:
         if rec is None and county_key == "seminole":
             try:
                 import sqlite3 as _sqlite3
-                _con = _sqlite3.connect(user_db)
+                _con = _sqlite3.connect(db_path)
                 _cur = _con.cursor()
                 _row = _cur.execute(
                     "SELECT pa_parcel_id FROM parcel_id_map WHERE county=? AND geom_parcel_id=? LIMIT 1",
