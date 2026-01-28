@@ -2854,7 +2854,7 @@ if app:
 
 
     @app.get("/api/parcels/{parcel_id}")
-    def api_parcel_detail(parcel_id: str, county: str = ""):
+    def api_parcel_detail(parcel_id: str, county: str = "", include_geometry: bool = False):
         """Return full PA normalized detail + user meta.
 
         PA-only: this endpoint never enriches outside PA.
@@ -2863,6 +2863,29 @@ if app:
         from florida_property_scraper.pa.storage import PASQLite
 
         county_key = (county or "").strip().lower() or "seminole"
+
+        # include_geometry: best-effort geometry attach (Seminole uses parcels.sqlite)
+        if include_geometry and (county_key == "seminole" or (county or "").strip().lower() == "seminole"):
+            try:
+                import sqlite3, json as _json
+                parcels_db = os.getenv("PARCELS_DB_PATH", "")
+                if parcels_db:
+                    con = sqlite3.connect(parcels_db)
+                    cur = con.cursor()
+                    row = cur.execute(
+                        "SELECT geom_geojson FROM parcels WHERE county=? AND parcel_id=?",
+                        ("seminole", str(parcel_id).strip()),
+                    ).fetchone()
+                    con.close()
+                    if row and row[0]:
+                        geom = _json.loads(row[0])
+                        # attach onto the outgoing response dict if possible
+                        try:
+                            result["geometry"] = geom
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         parcel_key = str(parcel_id)
         db_path = os.getenv("PA_DB", "./leads.sqlite")
 
