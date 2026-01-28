@@ -2932,6 +2932,27 @@ if app:
         }
         result = payload
 
+        # Seminole fallback: populate situs fields from sem_addr_index when PA record is missing
+        if county_key == "seminole" and (pa is None):
+            try:
+                import sqlite3 as _sqlite3
+                _con = _sqlite3.connect(db_path)
+                _cur = _con.cursor()
+                _row = _cur.execute(
+                    "SELECT situs_address, city, zip FROM sem_addr_index WHERE parcel_id=? LIMIT 1",
+                    (parcel_key,),
+                ).fetchone()
+                _con.close()
+                if _row:
+                    _addr, _city, _zip = _row
+                    result["situs_address"] = _addr or ""
+                    result["situs_city"] = _city or ""
+                    result["situs_state"] = "FL"
+                    result["situs_zip"] = _zip or ""
+            except Exception:
+                pass
+
+
         if isinstance(result, dict):
             if geom is not None:
                 result["geometry"] = geom
