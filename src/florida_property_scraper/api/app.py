@@ -2892,7 +2892,23 @@ if app:
         finally:
             pa_store.close()
 
-        pa = rec.to_dict() if rec is not None else None
+        
+        # Seminole bridge: geometry parcel_id -> PA parcel_id via parcel_id_map (address-built)
+        if rec is None and county_key == "seminole":
+            try:
+                import sqlite3 as _sqlite3
+                _con = _sqlite3.connect(user_db)
+                _cur = _con.cursor()
+                _row = _cur.execute(
+                    "SELECT pa_parcel_id FROM parcel_id_map WHERE county=? AND geom_parcel_id=? LIMIT 1",
+                    ("seminole", parcel_key),
+                ).fetchone()
+                _con.close()
+                if _row and _row[0]:
+                    rec = pa_store.get(county=county_key, parcel_id=str(_row[0]))
+            except Exception:
+                pass
+pa = rec.to_dict() if rec is not None else None
 
         user_db = os.getenv("USER_META_DB", db_path)
         meta_store = UserMetaSQLite(user_db)
