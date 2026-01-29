@@ -2972,6 +2972,59 @@ if app:
             if geom is not None:
                 result["geometry"] = geom
             pa = result.get("pa") or {}
+
+        # UI_TOPLEVEL_FROM_PA_FALLBACKS: populate UI top-level fields from PA with common key fallbacks
+        def _first(*vals):
+            for v in vals:
+                if v is None:
+                    continue
+                if isinstance(v, str) and v.strip() == "":
+                    continue
+                return v
+            return None
+
+        # living area / sqft
+        la = _first(
+            pa.get("living_area_sqft"),
+            pa.get("living_area"),
+            pa.get("heated_area"),
+            pa.get("building_area"),
+            pa.get("sqft"),
+        )
+        if la is not None and result.get("living_area_sqft") in (None, ""):
+            try:
+                result["living_area_sqft"] = int(float(la))
+            except Exception:
+                result["living_area_sqft"] = la
+
+        # lot size
+        ls = _first(pa.get("lot_size_sqft"), pa.get("lot_sqft"), pa.get("land_sqft"))
+        if ls is not None and result.get("lot_size_sqft") in (None, ""):
+            try:
+                result["lot_size_sqft"] = int(float(ls))
+            except Exception:
+                result["lot_size_sqft"] = ls
+
+        # mailing address (single string OR parts)
+        maddr = _first(pa.get("mailing_address"), pa.get("mail_address"))
+        if (not maddr):
+            ms = _first(pa.get("mailing_street"), pa.get("mailing_addr1"), pa.get("mail_addr1"))
+            mc = _first(pa.get("mailing_city"), pa.get("mail_city"))
+            mst = _first(pa.get("mailing_state"), pa.get("mail_state"))
+            mz = _first(pa.get("mailing_zip"), pa.get("mail_zip"))
+            parts = [x for x in [ms, mc, mst, mz] if x not in (None,"")]
+            if parts:
+                maddr = ", ".join([str(x) for x in parts])
+
+        if maddr and (result.get("mailing_address") in (None,"")):
+            result["mailing_address"] = str(maddr)
+
+        # ensure owner_names/year_built bubble up if UI reads top-level
+        if result.get("owner_names") in (None, [], "") and pa.get("owner_names"):
+            result["owner_names"] = pa.get("owner_names")
+        if result.get("year_built") in (None, "") and pa.get("year_built") is not None:
+            result["year_built"] = pa.get("year_built")
+
             # FLATTEN_PA_TOPLEVEL: expose key PA fields at top-level for UI panels
             # (Use setdefault so Seminole fallback / earlier values are not overwritten)
             _pa = pa if isinstance(pa, dict) else {}
