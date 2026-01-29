@@ -165,7 +165,18 @@ function DrawControls({
       try {
         drawnItems.clearLayers();
         if (e?.layer) drawnItems.addLayer(e.layer);
-      } catch {
+      
+        // IMPORTANT: disable draw mode after creating geometry so marker clicks work
+        try {
+          const tb = (drawControlRef.current as any)?._toolbars?.draw;
+          const poly = tb?._modes?.polygon?.handler;
+          const rect = tb?._modes?.rectangle?.handler;
+          const circ = tb?._modes?.circle?.handler;
+          poly?.disable?.();
+          rect?.disable?.();
+          circ?.disable?.();
+        } catch {}
+} catch {
         // ignore
       }
 
@@ -2809,7 +2820,7 @@ payload.polygon_geojson = polyOut;
           <div
             className={
               signalsDrawerOpen
-                ? 'pointer-events-auto absolute inset-0 bg-black/10'
+                ? 'pointer-events-none absolute inset-0 bg-black/10'
                 : 'pointer-events-none absolute inset-0 bg-transparent'
             }
             onClick={() => setSignalsDrawerOpen(false)}
