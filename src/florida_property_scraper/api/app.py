@@ -2987,7 +2987,10 @@ if app:
         la = _first(
             pa.get("living_area_sqft"),
             pa.get("living_area"),
+            pa.get("living_sf"),
             pa.get("heated_area"),
+            pa.get("building_sf"),
+            pa.get("gross_area"),
             pa.get("building_area"),
             pa.get("sqft"),
         )
