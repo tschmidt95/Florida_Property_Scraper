@@ -370,6 +370,12 @@ if app:
 
     @app.post("/api/parcels/search")
     def api_parcels_search(payload: dict = Body(...)):
+        # WRITE_UI_REQ_JSON: debug dump last UI payload to /tmp/ui_req.json
+        try:
+            import json as _json
+            open('/tmp/ui_req.json','w',encoding='utf-8').write(_json.dumps(payload))
+        except Exception:
+            pass
         """Search parcels by polygon geometry or radius.
 
         Input:
