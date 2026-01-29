@@ -2972,6 +2972,29 @@ if app:
             if geom is not None:
                 result["geometry"] = geom
             pa = result.get("pa") or {}
+            # FLATTEN_PA_TOPLEVEL: expose key PA fields at top-level for UI panels
+            # (Use setdefault so Seminole fallback / earlier values are not overwritten)
+            _pa = pa if isinstance(pa, dict) else {}
+            for _k in (
+                "owner_names",
+                "mailing_address",
+                "mailing_city",
+                "mailing_state",
+                "mailing_zip",
+                "year_built",
+                "living_area_sqft",
+                "lot_size_sqft",
+                "lot_size_acres",
+                "zoning",
+                "future_land_use",
+                "property_class",
+                "use_type",
+            ):
+                try:
+                    result.setdefault(_k, _pa.get(_k))
+                except Exception:
+                    pass
+
             result.setdefault("situs_address", pa.get("situs_address") or "")
             result.setdefault("situs_city", pa.get("situs_city") or "")
             result.setdefault("situs_state", pa.get("situs_state") or "")
