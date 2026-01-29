@@ -522,7 +522,11 @@ export default function MapSearch({
   const [records, setRecords] = useState<ParcelRecord[]>([]);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
 
-  const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
+  
+  const [selectedParcelDetail, setSelectedParcelDetail] = useState<any | null>(null);
+  const [selectedParcelDetailLoading, setSelectedParcelDetailLoading] = useState(false);
+  const [selectedParcelDetailError, setSelectedParcelDetailError] = useState<string | null>(null);
+const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
   const [selectedPermitsLoading, setSelectedPermitsLoading] = useState(false);
   const [selectedPermitsError, setSelectedPermitsError] = useState<string | null>(null);
 
@@ -1007,7 +1011,22 @@ export default function MapSearch({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadSelectedDetails(parcelId: string) {
+    
+  async function fetchSelectedParcelDetail(parcelId: string) {
+    if (!parcelId) return null;
+    try {
+      // Vite proxy: /api -> 8000
+      const url = `/api/parcels/${encodeURIComponent(parcelId)}?county=${encodeURIComponent(county)}&include_geometry=1`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`parcel_detail_http_${r.status}`);
+      return await r.json();
+    } catch (e: any) {
+      console.warn("parcel detail fetch failed", e);
+      throw e;
+    }
+  }
+
+async function loadSelectedDetails(parcelId: string) {
       setTriggerLookupParcelId(parcelId);
       setSelectedPermitsError(null);
       setSelectedPermitsLoading(true);
@@ -1091,7 +1110,28 @@ export default function MapSearch({
       return;
     }
 
-    void loadSelectedDetails(selectedParcelId);
+    
+    // Parcel detail (panel fields): fetch /api/parcels/{id}
+    setSelectedParcelDetail(null);
+    setSelectedParcelDetailError(null);
+    if (selectedParcelId) {
+      void (async () => {
+        try {
+          setSelectedParcelDetailLoading(true);
+          const detail = await fetchSelectedParcelDetail(selectedParcelId);
+          setSelectedParcelDetail(detail);
+        } catch (e: any) {
+          setSelectedParcelDetailError(String(e?.message || e || "parcel_detail_failed"));
+          setSelectedParcelDetail(null);
+        } finally {
+          setSelectedParcelDetailLoading(false);
+        }
+      })();
+    } else {
+      setSelectedParcelDetailLoading(false);
+    }
+
+void loadSelectedDetails(selectedParcelId);
     return () => {
       cancelled = true;
     };
@@ -2849,6 +2889,8 @@ payload.polygon_geojson = polyOut;
               </div>
 
               <div className="flex-1 overflow-auto px-4 py-3">
+                {selectedParcelDetailLoading ? (<div className="text-xs text-cre-muted">Parcel detail loading…</div>) : null}
+                {selectedParcelDetailError ? (<div className="text-xs text-red-600">{selectedParcelDetailError}</div>) : null}
                 {!selectedParcelId ? (
                   <div className="text-sm text-cre-muted">Select a parcel to view signals.</div>
                 ) : (
@@ -2856,6 +2898,7 @@ payload.polygon_geojson = polyOut;
                     {(() => {
                       const rec = selectedParcelId ? records.find((r) => r.parcel_id === selectedParcelId) : null;
                       const p = selectedParcelId ? parcels.find((x) => x.parcel_id === selectedParcelId) : null;
+                      const d = selectedParcelDetail;
                       const addr = (rec?.situs_address || rec?.address || p?.address || '').trim();
                       const owner = (rec?.owner_name || p?.owner_name || '').trim();
                       return (
@@ -2864,7 +2907,7 @@ payload.polygon_geojson = polyOut;
                           <div className="mt-1 text-xs text-cre-muted">{owner || '—'}</div>
                           {(rec || p) ? (
                             <div className="mt-2 text-[11px] text-cre-muted">
-                              Year {(rec?.year_built ?? p?.year_built) ?? '—'} · Beds {(rec?.beds ?? p?.beds) ?? '—'} · Baths {(rec?.baths ?? p?.baths) ?? '—'} · Just {typeof (rec?.just_value ?? p?.just_value) === 'number' && (rec?.just_value ?? p?.just_value) ? `$${Math.round((rec?.just_value ?? p?.just_value)).toLocaleString()}` : '—'} · Assessed {typeof (rec?.assessed_value ?? p?.assessed_value) === 'number' && (rec?.assessed_value ?? p?.assessed_value) ? `$${Math.round((rec?.assessed_value ?? p?.assessed_value)).toLocaleString()}` : '—'} · Taxable {typeof (rec?.taxable_value ?? p?.taxable_value) === 'number' && (rec?.taxable_value ?? p?.taxable_value) ? `$${Math.round((rec?.taxable_value ?? p?.taxable_value)).toLocaleString()}` : '—'}
+                              Year {(rec?.year_built ?? d?.year_built ?? p?.year_built) ?? '—'} · Beds {(rec?.beds ?? d?.beds ?? p?.beds) ?? '—'} · Baths {(rec?.baths ?? d?.baths ?? p?.baths) ?? '—'} · Just {typeof (rec?.just_value ?? d?.just_value ?? p?.just_value) === 'number' && (rec?.just_value ?? d?.just_value ?? p?.just_value) ? `$${Math.round((rec?.just_value ?? d?.just_value ?? p?.just_value)).toLocaleString()}` : '—'} · Assessed {typeof (rec?.assessed_value ?? d?.assessed_value ?? p?.assessed_value) === 'number' && (rec?.assessed_value ?? d?.assessed_value ?? p?.assessed_value) ? `$${Math.round((rec?.assessed_value ?? d?.assessed_value ?? p?.assessed_value)).toLocaleString()}` : '—'} · Taxable {typeof (rec?.taxable_value ?? d?.taxable_value ?? p?.taxable_value) === 'number' && (rec?.taxable_value ?? d?.taxable_value ?? p?.taxable_value) ? `$${Math.round((rec?.taxable_value ?? d?.taxable_value ?? p?.taxable_value)).toLocaleString()}` : '—'}
                             </div>
                           ) : null}
                         </div>
