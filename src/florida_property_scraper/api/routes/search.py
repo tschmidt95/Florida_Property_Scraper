@@ -393,6 +393,8 @@ def _search_from_leads(
 
 if router:
 
+    @router.post("/search")
+
     @router.get("/search", response_model=list[SearchResult])
     def search(q: str = "", county: str = "", limit: int = 50) -> list[SearchResult]:
         qn = _norm(q)
