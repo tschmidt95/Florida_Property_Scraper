@@ -695,6 +695,15 @@ if app:
         if bbox_t is None:
             raise HTTPException(status_code=400, detail="geometry has no coordinates")
 
+            # AUTO-SWAP LAT/LNG: UI sometimes sends [lat,lng] instead of GeoJSON [lng,lat]
+            # Florida sanity: lon ~ -87..-79, lat ~ 24..31
+            try:
+                minx, miny, maxx, maxy = bbox_t
+                if (24 <= float(minx) <= 31) and (-87 <= float(miny) <= -79) and (24 <= float(maxx) <= 31) and (-87 <= float(maxy) <= -79):
+                    bbox_t = (miny, minx, maxy, maxx)
+            except Exception:
+                pass
+
 
         # --- BEGIN PATCH: Use parcels.sqlite + RTree for polygon search ---
         import sqlite3
