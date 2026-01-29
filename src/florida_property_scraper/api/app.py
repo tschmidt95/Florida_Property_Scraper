@@ -2973,6 +2973,39 @@ if app:
                 result["geometry"] = geom
             pa = result.get("pa") or {}
 
+            # UI_FLATTEN_FROM_PA: map PA fields to UI keys
+            def _n(v):
+                return v if v not in (None,"",[],{}) else None
+
+            # Beds/Baths (UI uses beds/baths, PA uses bedrooms/bathrooms)
+            b = _n((pa.get("beds") if isinstance(pa, dict) else None))
+            if b is None: b = _n((pa.get("bedrooms") if isinstance(pa, dict) else None))
+            try:
+                b = int(float(b)) if b is not None else None
+            except Exception:
+                pass
+            if b is not None:
+                result.setdefault("beds", b)
+
+            ba = _n((pa.get("baths") if isinstance(pa, dict) else None))
+            if ba is None: ba = _n((pa.get("bathrooms") if isinstance(pa, dict) else None))
+            try:
+                ba = float(ba) if ba is not None else None
+            except Exception:
+                pass
+            if ba is not None:
+                result.setdefault("baths", ba)
+
+            # Values (UI uses just/assessed/taxable)
+            for k in ("just_value","assessed_value","taxable_value"):
+                v = _n((pa.get(k) if isinstance(pa, dict) else None))
+                try:
+                    v = float(v) if v is not None else None
+                except Exception:
+                    pass
+                if v is not None:
+                    result.setdefault(k, v)
+
         # UI_TOPLEVEL_FROM_PA_FALLBACKS: populate UI top-level fields from PA with common key fallbacks
         def _first(*vals):
             for v in vals:
