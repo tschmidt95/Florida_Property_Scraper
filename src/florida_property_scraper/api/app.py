@@ -2957,10 +2957,10 @@ if app:
             if geom is not None:
                 result["geometry"] = geom
             pa = result.get("pa") or {}
-            result["situs_address"] = pa.get("situs_address") or ""
-            result["situs_city"] = pa.get("situs_city") or ""
-            result["situs_state"] = pa.get("situs_state") or ""
-            result["situs_zip"] = pa.get("situs_zip") or ""
+            result.setdefault("situs_address", pa.get("situs_address") or "")
+            result.setdefault("situs_city", pa.get("situs_city") or "")
+            result.setdefault("situs_state", pa.get("situs_state") or "")
+            result.setdefault("situs_zip", pa.get("situs_zip") or "")
             owners = pa.get("owner_names") or []
             result["owner_name"] = (owners[0] if owners else (pa.get("owner_name") or ""))
             result["last_sale_date"] = pa.get("last_sale_date") or ""
