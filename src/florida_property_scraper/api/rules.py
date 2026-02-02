@@ -350,6 +350,12 @@ def compile_filters(raw: Any) -> List[Condition]:
         # Value filters (API naming: total/land/building)
         _add("total_value", ">=", _num(raw.get("min_value")))
         _add("total_value", "<=", _num(raw.get("max_value")))
+        _add("total_value", ">=", _num(raw.get("min_just_value")))
+        _add("total_value", "<=", _num(raw.get("max_just_value")))
+        _add("assessed_value", ">=", _num(raw.get("min_assessed_value")))
+        _add("assessed_value", "<=", _num(raw.get("max_assessed_value")))
+        _add("taxable_value", ">=", _num(raw.get("min_taxable_value")))
+        _add("taxable_value", "<=", _num(raw.get("max_taxable_value")))
         _add("land_value", ">=", _num(raw.get("min_land_value")))
         _add("land_value", "<=", _num(raw.get("max_land_value")))
         _add("building_value", ">=", _num(raw.get("min_building_value")))
@@ -455,6 +461,36 @@ def apply_filters(fields: Dict[str, Any], filters: Sequence[Condition]) -> bool:
         if not eval_condition(fields, f):
             return False
     return True
+
+
+def apply_filters_explain(
+    fields: Dict[str, Any],
+    filters: Sequence[Condition],
+) -> tuple[bool, str | None]:
+    """Evaluate filters and return (passed, reason).
+
+    Reason format:
+    - "<field>:missing" if required field is missing
+    - "<field>:<op>" if condition evaluated to False
+    """
+
+    missing_ok_raw = fields.get("__missing_ok_fields")
+    missing_ok: set[str] = set()
+    if isinstance(missing_ok_raw, (list, tuple, set)):
+        missing_ok = {str(x) for x in missing_ok_raw if str(x)}
+
+    for f in filters:
+        present, _v = _get_field(fields, f.field)
+        if (not present) and f.field in missing_ok:
+            continue
+        if not present:
+            return False, f"{f.field}:missing"
+        try:
+            if not eval_condition(fields, f):
+                return False, f"{f.field}:{f.op}"
+        except Exception:
+            return False, f"{f.field}:{f.op}"
+    return True, None
 
 
 def eval_triggers(fields: Dict[str, Any], triggers: Sequence[Trigger]) -> List[str]:

@@ -87,6 +87,26 @@
       }
     },
     {
+      "label": "Dev: Reset (api+ui)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "--noprofile",
+        "--norc",
+        "-c",
+        "cd \"${workspaceFolder}\" && bash scripts/dev_reset.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Start: Fullstack (8000)",
       "type": "shell",
       "command": "bash",

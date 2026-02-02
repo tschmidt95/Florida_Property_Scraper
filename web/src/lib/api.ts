@@ -1,7 +1,44 @@
 // ...existing code...
+const DEFAULT_COUNTY = 'seminole';
+
+type ApiUrlParams = Record<string, string | number | boolean | null | undefined>;
+
+function isDevEnv(): boolean {
+  try {
+    return Boolean((import.meta as any)?.env?.DEV);
+  } catch {
+    return false;
+  }
+}
+
+export function resolveCounty(raw?: string, context?: string): string {
+  const cleaned = String(raw || '').trim();
+  if (cleaned) return cleaned.toLowerCase();
+  if (isDevEnv()) {
+    const where = context ? ` (${context})` : '';
+    console.warn(`[api] county missing${where}; defaulting to ${DEFAULT_COUNTY}`);
+  }
+  return DEFAULT_COUNTY;
+}
+
+export function apiUrl(path: string, opts?: { county?: string; params?: ApiUrlParams }): string {
+  const params = new URLSearchParams();
+  if (opts?.params) {
+    for (const [k, v] of Object.entries(opts.params)) {
+      if (v === null || v === undefined) continue;
+      params.set(k, String(v));
+    }
+  }
+  if (opts && 'county' in opts) {
+    params.set('county', resolveCounty(opts.county, path));
+  }
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
 export async function getParcelsCoverage(county: string) {
-  const res = await fetch(`/api/debug/parcels_coverage?county=${encodeURIComponent(county)}`);
-  if (!res.ok) throw new Error("Failed to fetch coverage");
+  const res = await fetch(apiUrl('/api/debug/parcels_coverage', { county }));
+  if (!res.ok) throw new Error('Failed to fetch coverage');
   return await res.json();
 }
 export type SearchResult = {
@@ -81,6 +118,12 @@ export type ParcelAttributeFilters = {
   future_land_use_in?: string[] | null;
   min_value?: number | null;
   max_value?: number | null;
+  min_just_value?: number | null;
+  max_just_value?: number | null;
+  min_assessed_value?: number | null;
+  max_assessed_value?: number | null;
+  min_taxable_value?: number | null;
+  max_taxable_value?: number | null;
   min_land_value?: number | null;
   max_land_value?: number | null;
   min_building_value?: number | null;
@@ -139,7 +182,7 @@ export type ParcelRecord = {
   land_value?: number | null;
   building_value?: number | null;
   total_value?: number | null;
-  source: 'live' | 'cache';
+  source: 'live' | 'cache' | 'missing';
   raw_source_url?: string;
   data_sources?: Array<{ name: string; url: string }>;
   provenance?: Record<string, { source: string; url: string }>;
@@ -167,6 +210,21 @@ export type ParcelRecord = {
   assessed_value?: number | null;
   taxable_value?: number | null;
 
+};
+
+export type ParcelDetail = Partial<ParcelRecord> & {
+  parcel_id?: string;
+  county?: string;
+  owner_mailing_address?: string | null;
+  mailing_address?: string | null;
+  living_area_sqft?: number | null;
+  lot_size_sqft?: number | null;
+  lot_size_acres?: number | null;
+  zoning?: string | null;
+  future_land_use?: string | null;
+  assessed_value?: number | null;
+  taxable_value?: number | null;
+  just_value?: number | null;
 };
 
 export type PermitRecord = {
@@ -206,7 +264,7 @@ export type ParcelSearchListItem = {
   owner_mailing_address?: string;
   lat?: number;
   lng?: number;
-  source?: 'live' | 'cache';
+  source?: 'live' | 'cache' | 'missing';
   raw?: unknown;
   // Extended hover fields (optional)
   year_built?: number | null;
@@ -239,6 +297,74 @@ function _asString(v: unknown): string {
 function _asNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   return undefined;
+}
+
+function _firstNumber(...vals: unknown[]): number | undefined {
+  for (const v of vals) {
+    const n = _asNumber(v);
+    if (typeof n === 'number') return n;
+  }
+  return undefined;
+}
+
+function _centroidFromGeometry(geom: unknown): { lat: number; lng: number } | null {
+  if (!geom || typeof geom !== 'object') return null;
+  const g = geom as any;
+  const gtype = g.type;
+  const coords = g.coordinates;
+  if (gtype === 'Point' && Array.isArray(coords) && coords.length >= 2) {
+    const lng = Number(coords[0]);
+    const lat = Number(coords[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    return null;
+  }
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const walk = (obj: any) => {
+    if (Array.isArray(obj) && obj.length === 2 && obj.every((x) => typeof x === 'number')) {
+      xs.push(Number(obj[0]));
+      ys.push(Number(obj[1]));
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) walk(item);
+    }
+  };
+  walk(coords);
+  if (!xs.length || !ys.length) return null;
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const lng = (minX + maxX) / 2;
+  const lat = (minY + maxY) / 2;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function _extractLatLng(record: Record<string, unknown>): { lat?: number; lng?: number } {
+  const lat = _firstNumber(
+    record.lat,
+    (record as any).latitude,
+    (record as any).centroid_lat,
+    (record as any).center_lat,
+    (record as any)?.centroid?.lat,
+    (record as any)?.center?.lat,
+  );
+  const lng = _firstNumber(
+    record.lng,
+    (record as any).longitude,
+    (record as any).centroid_lng,
+    (record as any).center_lng,
+    (record as any)?.centroid?.lng,
+    (record as any)?.center?.lng,
+  );
+  if (typeof lat === 'number' && typeof lng === 'number') return { lat, lng };
+  const geom = (record as any).geometry || (record as any).geom || (record as any).geojson;
+  const centroid = _centroidFromGeometry(geom);
+  if (centroid) return centroid;
+  return { lat, lng };
 }
 
 function _bestAddressFromHover(hover: Record<string, unknown> | null | undefined): string {
@@ -281,8 +407,7 @@ function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchList
       const address = (r.situs_address || r.address || '').trim();
       const owner = (r.owner_name || '').trim();
       const mailing = (r as any).mailing_address || (r as any).owner_mailing_address;
-      const lat = _asNumber((r as any).lat);
-      const lng = _asNumber((r as any).lng);
+      const { lat, lng } = _extractLatLng(r as Record<string, unknown>);
 
       out.push({
         county: (r.county || resp.county || '').trim(),
@@ -330,6 +455,15 @@ function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchList
       const mortgageLender = _asString(hover?.mortgage_lender).trim();
       const owner = _bestOwnerFromHover(hover);
       const mailing = _bestMailingFromHover(hover);
+      const { lat, lng } = _extractLatLng({
+        lat: row.lat,
+        lng: row.lng,
+        latitude: (hover as any)?.lat,
+        longitude: (hover as any)?.lng,
+        centroid_lat: (hover as any)?.centroid_lat,
+        centroid_lng: (hover as any)?.centroid_lng,
+        geometry: (row as any).geometry,
+      });
 
       out.push({
         county,
@@ -338,6 +472,8 @@ function _normalizeParcelListItems(resp: ParcelSearchResponse): ParcelSearchList
         owner_name: owner,
         owner_mailing_address: mailing || undefined,
         raw: item,
+        lat,
+        lng,
         // Extended hover fields (optional)
         year_built: yearBuilt,
         beds,
@@ -367,11 +503,19 @@ export type ParcelsEnrichRequest = {
   county: string;
   parcel_ids: string[];
   limit?: number;
+  max_per_minute?: number;
 };
 
 export type ParcelsEnrichResponse = {
   county: string;
   count: number;
+  requested?: number;
+  cached?: number;
+  fetched_ok?: number;
+  fetched_failed?: number;
+  skipped?: number;
+  failures?: Array<Record<string, unknown>>;
+  elapsed_s?: number | null;
   records: ParcelRecord[];
   errors?: Record<string, unknown>;
 };
@@ -397,12 +541,13 @@ export async function permitsByParcel(params: {
   parcel_id: string;
   limit?: number;
 }): Promise<PermitRecord[]> {
-  const qs = new URLSearchParams({
+  const resp = await fetch(apiUrl('/api/permits/by_parcel', {
     county: params.county,
-    parcel_id: params.parcel_id,
-  });
-  if (typeof params.limit === 'number') qs.set('limit', String(params.limit));
-  const resp = await fetch(`/api/permits/by_parcel?${qs.toString()}`, {
+    params: {
+      parcel_id: params.parcel_id,
+      limit: typeof params.limit === 'number' ? params.limit : undefined,
+    },
+  }), {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
@@ -502,15 +647,15 @@ export async function triggersByParcel(params: {
   limit_alerts?: number;
   status?: string;
 }): Promise<TriggersByParcelResponse> {
-  const qs = new URLSearchParams({
+  const resp = await fetch(apiUrl('/api/triggers/by_parcel', {
     county: params.county,
-    parcel_id: params.parcel_id,
-  });
-  if (typeof params.limit_events === 'number') qs.set('limit_events', String(params.limit_events));
-  if (typeof params.limit_alerts === 'number') qs.set('limit_alerts', String(params.limit_alerts));
-  if (typeof params.status === 'string' && params.status.trim()) qs.set('status', params.status.trim());
-
-  const resp = await fetch(`/api/triggers/by_parcel?${qs.toString()}`, {
+    params: {
+      parcel_id: params.parcel_id,
+      limit_events: typeof params.limit_events === 'number' ? params.limit_events : undefined,
+      limit_alerts: typeof params.limit_alerts === 'number' ? params.limit_alerts : undefined,
+      status: typeof params.status === 'string' && params.status.trim() ? params.status.trim() : undefined,
+    },
+  }), {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
@@ -548,15 +693,19 @@ export async function triggersRollupsSearch(
 export async function triggersRollupByParcel(params: {
   county: string;
   parcel_id: string;
-}): Promise<TriggerRollupRecord> {
-  const qs = new URLSearchParams({
+}): Promise<TriggerRollupRecord | null> {
+  const resp = await fetch(apiUrl('/api/triggers/rollups/by_parcel', {
     county: params.county,
-    parcel_id: params.parcel_id,
-  });
-  const resp = await fetch(`/api/triggers/rollups/by_parcel?${qs.toString()}`, {
+    params: {
+      parcel_id: params.parcel_id,
+    },
+  }), {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
+  if (resp.status === 404) {
+    return null;
+  }
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     const detail = text ? `: ${text}` : '';
@@ -888,13 +1037,18 @@ export async function parcelsSearch(
     // ignore
   }
 
-  const resp = await fetch('/api/parcels/search', {
+  const resolvedCounty = resolveCounty((payload as any)?.county, 'parcelsSearch');
+  const resp = await fetch(apiUrl('/api/parcels/search', { county: resolvedCounty }), {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ ...payload, include_geometry: payload.include_geometry ?? true }),
+    body: JSON.stringify({
+      ...payload,
+      county: resolvedCounty,
+      include_geometry: payload.include_geometry ?? true,
+    }),
   });
 
   if (!resp.ok) {
@@ -968,13 +1122,21 @@ export async function parcelsGeometry(payload: ParcelsGeometryRequest): Promise<
 export async function parcelsEnrich(
   payload: ParcelsEnrichRequest,
 ): Promise<ParcelsEnrichResponse> {
-  const resp = await fetch('/api/parcels/enrich', {
+  const resolvedCounty = resolveCounty(payload?.county, 'parcelsEnrich');
+  const ids = Array.isArray(payload?.parcel_ids) ? payload.parcel_ids.filter((id) => String(id || '').trim()) : [];
+  if (!ids.length) {
+    if (isDevEnv()) {
+      console.warn('[api] parcelsEnrich called with empty parcel_ids; skipping request');
+    }
+    return { county: resolvedCounty, count: 0, records: [] };
+  }
+  const resp = await fetch(apiUrl('/api/parcels/enrich', { county: resolvedCounty }), {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, county: resolvedCounty, parcel_ids: ids }),
   })
 
   if (!resp.ok) {
@@ -988,4 +1150,25 @@ export async function parcelsEnrich(
     throw new Error('Unexpected response: expected {records: [...]}' )
   }
   return data
+}
+
+export async function fetchParcelDetail(params: {
+  parcel_id: string;
+  county?: string;
+  include_geometry?: boolean;
+  signal?: AbortSignal;
+}): Promise<ParcelDetail> {
+  const url = apiUrl(`/api/parcels/${encodeURIComponent(params.parcel_id)}`, {
+    county: params.county,
+    params: {
+      include_geometry: params.include_geometry ? 1 : 0,
+    },
+  });
+  const resp = await fetch(url, { signal: params.signal });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  return (await resp.json()) as ParcelDetail;
 }

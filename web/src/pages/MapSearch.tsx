@@ -12,13 +12,16 @@ import {
   parcelsEnrich,
   parcelsGeometry,
   parcelsSearchNormalized,
+  fetchParcelDetail,
   permitsByParcel,
+  resolveCounty,
   runSavedSearch,
   triggersByParcel,
   triggersRollupByParcel,
   triggersRollupsSearch,
   type AlertsInboxRecord,
   type ParcelAttributeFilters,
+  type ParcelDetail,
   type ParcelRecord,
   type ParcelSearchListItem,
   type PermitRecord,
@@ -535,6 +538,10 @@ export default function MapSearch({
   const [selectedRollupLoading, setSelectedRollupLoading] = useState(false);
   const [selectedRollupError, setSelectedRollupError] = useState<string | null>(null);
 
+  const [selectedParcelDetail, setSelectedParcelDetail] = useState<ParcelDetail | null>(null);
+  const [selectedParcelDetailLoading, setSelectedParcelDetailLoading] = useState(false);
+  const [selectedParcelDetailError, setSelectedParcelDetailError] = useState<string | null>(null);
+
   const [triggerLookupParcelId, setTriggerLookupParcelId] = useState('');
 
   const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
@@ -612,7 +619,6 @@ export default function MapSearch({
   };
 
   const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilterForm);
-  const [autoEnrichMissing, setAutoEnrichMissing] = useState(false);
 
   const [sortKey, setSortKey] = useState<
     'relevance' | 'last_sale_date_desc' | 'year_built_desc' | 'sqft_desc'
@@ -1006,6 +1012,7 @@ export default function MapSearch({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     async function loadSelectedDetails(parcelId: string) {
       setTriggerLookupParcelId(parcelId);
@@ -1052,7 +1059,13 @@ export default function MapSearch({
       try {
         const rollup = await triggersRollupByParcel({ county, parcel_id: parcelId });
         if (cancelled) return;
-        setSelectedRollup(rollup);
+        if (rollup) {
+          setSelectedRollup(rollup);
+          setSelectedRollupError(null);
+        } else {
+          setSelectedRollup(null);
+          setSelectedRollupError(null);
+        }
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1063,17 +1076,29 @@ export default function MapSearch({
         if (!cancelled) setSelectedRollupLoading(false);
       }
 
-      // Best-effort: enrich the selected parcel into PA cache for richer fields.
-      if (!['orange', 'seminole'].includes((county || '').toLowerCase())) return;
+    }
+
+    async function loadSelectedParcelDetail(parcelId: string) {
+      setSelectedParcelDetail(null);
+      setSelectedParcelDetailError(null);
+      setSelectedParcelDetailLoading(true);
       try {
-        const resp = await parcelsEnrich({ county, parcel_ids: [parcelId], limit: 1 });
+        const detail = await fetchParcelDetail({
+          parcel_id: parcelId,
+          county,
+          include_geometry: true,
+          signal: controller.signal,
+        });
         if (cancelled) return;
-        const enriched = resp.records || [];
-        if (!enriched.length) return;
-        const rec = enriched[0];
-        setRecords((prev) => prev.map((r) => (r.parcel_id === parcelId ? { ...r, ...rec } : r)));
-      } catch {
-        // ignore enrichment errors for the details panel
+        setSelectedParcelDetail(detail);
+      } catch (e: any) {
+        if (cancelled) return;
+        if (e?.name === 'AbortError') return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setSelectedParcelDetailError(msg || 'parcel_detail_failed');
+        setSelectedParcelDetail(null);
+      } finally {
+        if (!cancelled) setSelectedParcelDetailLoading(false);
       }
     }
 
@@ -1088,12 +1113,20 @@ export default function MapSearch({
       setSelectedRollup(null);
       setSelectedRollupLoading(false);
       setSelectedRollupError(null);
-      return;
+      setSelectedParcelDetail(null);
+      setSelectedParcelDetailLoading(false);
+      setSelectedParcelDetailError(null);
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
     }
 
+    void loadSelectedParcelDetail(selectedParcelId);
     void loadSelectedDetails(selectedParcelId);
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [county, selectedParcelId]);
 
@@ -1228,24 +1261,15 @@ export default function MapSearch({
     }
     const hasAnyFilters = Object.keys(filters).length > 0;
 
-    // If the user wants auto-enrichment, honor it even for baseline runs.
-    // This is especially important for counties where zoning/FLU options come
-    // from live enrichment.
-    const enrich = autoEnrichMissing;
-
+    const resolvedCounty = resolveCounty(county, 'map-search');
     const payload: any = {
-  live: true,
-  limit: 25,
-  include_geometry: false,
-  filters: hasAnyFilters ? filters : undefined,
-  enrich,
-  enrich_limit: enrich ? 10 : undefined,
-  sort: sortKey,
-};
-
-if (county && county.trim()) {
-  payload.county = county;
-}
+      limit: 250,
+      include_geometry: false,
+      filters: hasAnyFilters ? filters : undefined,
+      sort: sortKey,
+      county: resolvedCounty,
+      explain: true,
+    };
 
     // Proof + forward-compat: include selected trigger keys in the request payload.
     // Filtering by signals is currently applied via the rollups prefilter (when enabled).
@@ -1419,7 +1443,7 @@ payload.polygon_geojson = polyOut;
     setLoading(true);
     const reqId = ++activeReq.current;
     try {
-      const resp = await parcelsEnrich({ county, parcel_ids: ids, limit: ids.length });
+      const resp = await parcelsEnrich({ county, parcel_ids: ids, limit: ids.length, max_per_minute: 30 });
       if (reqId !== activeReq.current) return;
 
       const enriched = resp.records || [];
@@ -1436,7 +1460,12 @@ payload.polygon_geojson = polyOut;
         else if (r.source === 'cache') counts.cache++;
       }
       setSourceCounts(counts);
-      setErrorBanner('Enrichment complete (cached into PA DB).');
+      const fetchedOk = Number((resp as any).fetched_ok || 0);
+      const cached = Number((resp as any).cached || 0);
+      const failed = Number((resp as any).fetched_failed || 0);
+      setErrorBanner(
+        `Enrichment complete (cached=${cached}, fetched_ok=${fetchedOk}, failed=${failed}).`,
+      );
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -1773,11 +1802,28 @@ payload.polygon_geojson = polyOut;
         cache: Number(rawCounts.cache || 0),
       });
 
+      const markerEligible = list.filter((p) =>
+        typeof p.lat === 'number' && Number.isFinite(p.lat) && typeof p.lng === 'number' && Number.isFinite(p.lng)
+      );
+      const markersRendered = markerEligible.length;
+      const missingLatLngCount = Math.max(0, list.length - markersRendered);
+
+      const explain = (resp as any).explain || null;
+      const stageCounts = explain?.stage_counts || null;
+      const droppedReasons = explain?.dropped_reasons || null;
+      const missingFieldCounts = explain?.missing_field_counts || null;
+
       try {
         const warnings = Array.isArray((resp as any).warnings) ? ((resp as any).warnings as string[]) : [];
         setLastResponseSummary({
           request_via: requestVia,
           search_id: (resp as any).search_id,
+          records_count: recs.length,
+          markers_rendered: markersRendered,
+          missing_latlng_count: missingLatLngCount,
+          stage_counts: stageCounts,
+          dropped_reasons: droppedReasons,
+          missing_field_counts: missingFieldCounts,
           returned_count: list.length || recs.length,
           candidate_count: candidateCount,
           filtered_count: filteredCount,
@@ -2255,10 +2301,6 @@ payload.polygon_geojson = polyOut;
                 ) : null}
               </div>
 
-              <label className="mt-3 flex items-center gap-2 text-xs text-cre-text">
-                <input type="checkbox" checked={autoEnrichMissing} onChange={(e) => setAutoEnrichMissing(e.target.checked)} />
-                Auto-enrich missing (slower)
-              </label>
             </details>
           </div>
         </div>
@@ -2499,6 +2541,7 @@ payload.polygon_geojson = polyOut;
               className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
               onClick={() => void enrichVisible()}
               disabled={loading || parcels.length === 0}
+              title={parcels.length === 0 ? 'No parcels to enrich yet.' : 'Enrich visible parcels'}
             >
               Enrich
             </button>
@@ -2849,6 +2892,12 @@ payload.polygon_geojson = polyOut;
               </div>
 
               <div className="flex-1 overflow-auto px-4 py-3">
+                {selectedParcelDetailLoading ? (
+                  <div className="text-xs text-cre-muted">Parcel detail loading…</div>
+                ) : null}
+                {selectedParcelDetailError ? (
+                  <div className="text-xs text-red-600">{selectedParcelDetailError}</div>
+                ) : null}
                 {!selectedParcelId ? (
                   <div className="text-sm text-cre-muted">Select a parcel to view signals.</div>
                 ) : (
@@ -2856,17 +2905,58 @@ payload.polygon_geojson = polyOut;
                     {(() => {
                       const rec = selectedParcelId ? records.find((r) => r.parcel_id === selectedParcelId) : null;
                       const p = selectedParcelId ? parcels.find((x) => x.parcel_id === selectedParcelId) : null;
+                      const detail = selectedParcelDetail;
+                      const fmtNum = (val: number | null | undefined) =>
+                        typeof val === 'number' && Number.isFinite(val) ? val.toLocaleString() : '—';
+                      const fmtMoney = (val: number | null | undefined) =>
+                        typeof val === 'number' && Number.isFinite(val) && val > 0
+                          ? `$${Math.round(val).toLocaleString()}`
+                          : '—';
                       const addr = (rec?.situs_address || rec?.address || p?.address || '').trim();
                       const owner = (rec?.owner_name || p?.owner_name || '').trim();
+                      const mailing = (
+                        detail?.owner_mailing_address ||
+                        detail?.mailing_address ||
+                        (rec as any)?.owner_mailing_address ||
+                        p?.owner_mailing_address ||
+                        ''
+                      ).trim();
+                      const yearBuilt = detail?.year_built ?? rec?.year_built ?? p?.year_built ?? null;
+                      const beds = detail?.beds ?? rec?.beds ?? p?.beds ?? null;
+                      const baths = detail?.baths ?? rec?.baths ?? p?.baths ?? null;
+                      const livingArea = detail?.living_area_sqft ?? rec?.living_area_sqft ?? p?.living_sf ?? null;
+                      const lotSqft = detail?.lot_size_sqft ?? rec?.lot_size_sqft ?? p?.land_sf ?? null;
+                      const lotAcres = detail?.lot_size_acres ?? rec?.lot_size_acres ?? p?.land_acres ?? null;
+                      const zoning = (detail?.zoning ?? rec?.zoning ?? p?.zoning ?? '').trim();
+                      const futureLandUse = (detail?.future_land_use ?? rec?.future_land_use ?? p?.future_land_use ?? '').trim();
+                      const justValue = detail?.just_value ?? rec?.just_value ?? p?.just_value ?? null;
+                      const assessedValue = detail?.assessed_value ?? rec?.assessed_value ?? p?.assessed_value ?? null;
+                      const taxableValue = detail?.taxable_value ?? rec?.taxable_value ?? p?.taxable_value ?? null;
+                      const landValue = detail?.land_value ?? rec?.land_value ?? p?.land_value ?? null;
+                      const buildingValue = detail?.building_value ?? rec?.building_value ?? p?.improvement_value ?? null;
+                      const totalValue = detail?.total_value ?? rec?.total_value ?? null;
                       return (
                         <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
                           <div className="text-sm font-semibold text-cre-text">{addr || '—'}</div>
                           <div className="mt-1 text-xs text-cre-muted">{owner || '—'}</div>
-                          {(rec || p) ? (
+                          {mailing ? (
+                            <div className="mt-1 text-[11px] text-cre-muted">Mailing: {mailing}</div>
+                          ) : null}
+                          {(rec || p || detail) ? (
                             <div className="mt-2 text-[11px] text-cre-muted">
-                              Year {(rec?.year_built ?? p?.year_built) ?? '—'} · Beds {(rec?.beds ?? p?.beds) ?? '—'} · Baths {(rec?.baths ?? p?.baths) ?? '—'} · Just {typeof (rec?.just_value ?? p?.just_value) === 'number' && (rec?.just_value ?? p?.just_value) ? `$${Math.round((rec?.just_value ?? p?.just_value)).toLocaleString()}` : '—'} · Assessed {typeof (rec?.assessed_value ?? p?.assessed_value) === 'number' && (rec?.assessed_value ?? p?.assessed_value) ? `$${Math.round((rec?.assessed_value ?? p?.assessed_value)).toLocaleString()}` : '—'} · Taxable {typeof (rec?.taxable_value ?? p?.taxable_value) === 'number' && (rec?.taxable_value ?? p?.taxable_value) ? `$${Math.round((rec?.taxable_value ?? p?.taxable_value)).toLocaleString()}` : '—'}
+                              Year {yearBuilt ?? '—'} · Beds {beds ?? '—'} · Baths {baths ?? '—'} · Living {fmtNum(livingArea)} sqft · Lot {fmtNum(lotSqft)} sqft ({fmtNum(lotAcres)} ac)
                             </div>
                           ) : null}
+                          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-cre-muted">
+                            <div>Zoning: {zoning || '—'}</div>
+                            <div>FLU: {futureLandUse || '—'}</div>
+                            <div>Just: {fmtMoney(justValue)}</div>
+                            <div>Assessed: {fmtMoney(assessedValue)}</div>
+                            <div>Taxable: {fmtMoney(taxableValue)}</div>
+                            <div>Land: {fmtMoney(landValue)}</div>
+                            <div>Building: {fmtMoney(buildingValue)}</div>
+                            <div>Total: {fmtMoney(totalValue)}</div>
+                          </div>
                         </div>
                       );
                     })()}

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, HTTPException, Response, Request
 from fastapi.responses import RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -369,7 +369,7 @@ if app:
 
 
     @app.post("/api/parcels/search")
-    def api_parcels_search(payload: dict = Body(...)):
+    def api_parcels_search(payload: dict = Body(...), request: Request | None = None):
         # WRITE_UI_REQ_JSON: debug dump last UI payload to /tmp/ui_req.json
         try:
             import json as _json
@@ -400,6 +400,22 @@ if app:
 
 
         search_id = uuid.uuid4().hex[:12]
+
+        correlation_id = ""
+        try:
+            corr_payload = str(payload.get("correlation_id") or payload.get("request_id") or "").strip()
+            corr_query = ""
+            corr_header = ""
+            if request is not None:
+                corr_query = str(request.query_params.get("correlation_id") or "").strip()
+                corr_header = str(
+                    request.headers.get("x-correlation-id")
+                    or request.headers.get("x-request-id")
+                    or ""
+                ).strip()
+            correlation_id = corr_payload or corr_query or corr_header or search_id
+        except Exception:
+            correlation_id = search_id
 
         debug_response_enabled = payload.get("debug") is True
         debug_timing_ms: dict[str, int] | None = None
@@ -434,6 +450,21 @@ if app:
 
             def _mark(stage: str) -> None:
                 return
+
+        explain_enabled = False
+        try:
+            if payload.get("explain") is True:
+                explain_enabled = True
+            if not explain_enabled:
+                raw_explain = str(payload.get("explain") or "").strip().lower()
+                if raw_explain in {"1", "true", "yes"}:
+                    explain_enabled = True
+            if not explain_enabled and request is not None:
+                q = str(request.query_params.get("explain") or "").strip().lower()
+                if q in {"1", "true", "yes"}:
+                    explain_enabled = True
+        except Exception:
+            explain_enabled = False
 
         pre_warnings: list[str] = []
 
@@ -561,6 +592,7 @@ if app:
                 event_out = {
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "search_id": search_id,
+                    "correlation_id": correlation_id,
                     **(event or {}),
                 }
                 line = json.dumps(event_out, ensure_ascii=False, default=str)
@@ -578,6 +610,7 @@ if app:
 
         from florida_property_scraper.api.rules import (
             apply_filters,
+            apply_filters_explain,
             compile_filters,
             compile_triggers,
             eval_triggers,
@@ -591,13 +624,18 @@ if app:
         from florida_property_scraper.pa.ui_computed import compute_ui_fields
 
         county_key = (payload.get("county") or "").strip().lower() or "seminole"
+        requested_live = False
         if "live" in payload:
-            live = bool(payload.get("live", False))
+            requested_live = bool(payload.get("live", False))
         else:
-            live = (
+            requested_live = (
                 os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1", "true", "True"}
                 and county_key in {"orange", "seminole"}
             )
+        # Deterministic local-only search: never use live enrichment for /search.
+        live = False
+        if requested_live:
+            pre_warnings.append("live_disabled_local_only")
         include_geometry = bool(payload.get("include_geometry", False))
         limit = int(payload.get("limit", 200))
         if limit <= 0:
@@ -809,8 +847,90 @@ if app:
             warnings.append("No parcels intersected the drawn geometry")
 
         def _centroid_lat_lng(geom: Any) -> tuple[float, float]:
-            # Best-effort centroid using bbox center; avoids heavy deps.
+            # Best-effort centroid without heavy deps.
             try:
+                g = geom
+                if isinstance(g, dict):
+                    gtype = str(g.get("type") or "").lower()
+                    coords = g.get("coordinates")
+                else:
+                    gtype = ""
+                    coords = None
+
+                def _ring_area(ring: list) -> float:
+                    area = 0.0
+                    if not ring or len(ring) < 3:
+                        return area
+                    for i in range(len(ring)):
+                        x1, y1 = ring[i][0], ring[i][1]
+                        x2, y2 = ring[(i + 1) % len(ring)][0], ring[(i + 1) % len(ring)][1]
+                        area += (float(x1) * float(y2)) - (float(x2) * float(y1))
+                    return area / 2.0
+
+                def _ring_centroid(ring: list) -> tuple[float, float] | None:
+                    if not ring or len(ring) < 3:
+                        return None
+                    a = _ring_area(ring)
+                    if a == 0:
+                        return None
+                    cx = 0.0
+                    cy = 0.0
+                    for i in range(len(ring)):
+                        x1, y1 = float(ring[i][0]), float(ring[i][1])
+                        x2, y2 = float(ring[(i + 1) % len(ring)][0]), float(ring[(i + 1) % len(ring)][1])
+                        cross = (x1 * y2) - (x2 * y1)
+                        cx += (x1 + x2) * cross
+                        cy += (y1 + y2) * cross
+                    cx /= (6.0 * a)
+                    cy /= (6.0 * a)
+                    return cx, cy
+
+                if gtype == "point" and isinstance(coords, (list, tuple)) and len(coords) >= 2:
+                    lng = float(coords[0])
+                    lat = float(coords[1])
+                    return lat, lng
+
+                def _centroid_from_rings(rings: list) -> tuple[float, float] | None:
+                    best = None
+                    best_area = 0.0
+                    for ring in rings:
+                        if not isinstance(ring, list) or len(ring) < 3:
+                            continue
+                        area = abs(_ring_area(ring))
+                        if area <= 0:
+                            continue
+                        if area > best_area:
+                            cent = _ring_centroid(ring)
+                            if cent is not None:
+                                best = cent
+                                best_area = area
+                    return best
+
+                if gtype == "polygon" and isinstance(coords, list) and coords:
+                    cent = _centroid_from_rings(coords)
+                    if cent is not None:
+                        return float(cent[1]), float(cent[0])
+
+                if gtype == "multipolygon" and isinstance(coords, list) and coords:
+                    best = None
+                    best_area = 0.0
+                    for poly in coords:
+                        if not isinstance(poly, list) or not poly:
+                            continue
+                        cent = _centroid_from_rings(poly)
+                        if cent is None:
+                            continue
+                        area = 0.0
+                        try:
+                            area = abs(_ring_area(poly[0]))
+                        except Exception:
+                            area = 0.0
+                        if area > best_area:
+                            best_area = area
+                            best = cent
+                    if best is not None:
+                        return float(best[1]), float(best[0])
+
                 bbox = geometry_bbox(geom)
                 if bbox is not None:
                     minx, miny, maxx, maxy = bbox
@@ -868,8 +988,9 @@ if app:
             raw_filters = payload.get("filters")
             if not isinstance(raw_filters, dict):
                 raw_filters = {}
-            explicit_enrich = payload.get("enrich", None)
-            enrich_requested = bool(explicit_enrich) if explicit_enrich is not None else False
+            # Search never auto-enriches; enrichment is explicit via /api/parcels/enrich.
+            explicit_enrich = None
+            enrich_requested = False
 
             enrich_disabled_by_candidate_cap = False
             try:
@@ -901,10 +1022,11 @@ if app:
             # - When the user supplies any attribute filters (sqft/acres/beds/baths/year/zoning/FLU/etc),
             #   missing values MUST fail the filter.
             # - Soft-missing is only allowed for polygon-only browsing (no attribute filters).
-            strict_attribute_filters = bool(filters_present)
+            exclude_missing = bool(payload.get("exclude_missing", False))
+            if isinstance(raw_filters, dict) and raw_filters.get("exclude_missing") is True:
+                exclude_missing = True
 
-            if explicit_enrich is None and filters_present:
-                enrich_requested = True
+            strict_attribute_filters = bool(filters_present and exclude_missing)
 
             try:
                 if enrich_requested and len(intersecting) > 1500:
@@ -1732,6 +1854,15 @@ if app:
         raw_filters = payload.get("filters")
         filters = compile_filters(raw_filters)
 
+        filter_fields: list[str] = []
+        try:
+            for f in (filters or []):
+                name = str(getattr(f, "field", "") or "").strip()
+                if name:
+                    filter_fields.append(name)
+        except Exception:
+            filter_fields = []
+
         _mark("compile_filters")
 
         # Opt-in debug summary for filter parsing/normalization.
@@ -1779,7 +1910,7 @@ if app:
 
         results = []
         records = []
-        source_counts: dict[str, int] = {"live": 0, "cache": 0}
+        source_counts: dict[str, int] = {"live": 0, "cache": 0, "missing": 0}
         legacy_source_counts: dict[str, int] = {
             "local": 0,
             "live": 0,
@@ -1810,6 +1941,19 @@ if app:
             "trigger_failed": 0,
             "emitted": 0,
         }
+
+        filter_drop_reasons: dict[str, int] = {}
+        trigger_drop_reasons: dict[str, int] = {}
+
+        stage_counts: dict[str, int] = {
+            "candidates": int(len(intersecting)),
+            "with_pa": 0,
+            "filter_passed": 0,
+            "latlng_available": 0,
+            "returned": 0,
+        }
+
+        missing_field_counts: dict[str, int] = {}
 
         def _conf_meta(
             value: object,
@@ -1847,6 +1991,7 @@ if app:
 
             if pa_dict is not None:
                 filter_stage_counts["with_pa"] += 1
+                stage_counts["with_pa"] += 1
             computed = compute_ui_fields(pa_dict)
             hover = hover_by_id.get(feat.parcel_id) or {
                 "situs_address": "",
@@ -1861,6 +2006,15 @@ if app:
                 fields.update(pa_dict)
             fields.update(computed)
             fields.update(hover)
+
+            if not exclude_missing and filter_fields:
+                fields["__missing_ok_fields"] = list(filter_fields)
+
+            if explain_enabled and filter_fields:
+                for fname in filter_fields:
+                    v = fields.get(fname) if fname in fields else None
+                    if v is None or v == "":
+                        missing_field_counts[fname] = int(missing_field_counts.get(fname, 0)) + 1
 
             # Soft-missing behavior is disabled when attribute filters are present.
 
@@ -1923,6 +2077,16 @@ if app:
                     fields["total_value"] = tv if tv > 0 else None
                 except Exception:
                     fields["total_value"] = None
+                try:
+                    av = float(pa.assessed_value or 0)
+                    fields["assessed_value"] = av if av > 0 else None
+                except Exception:
+                    fields["assessed_value"] = None
+                try:
+                    tv = float(pa.taxable_value or 0)
+                    fields["taxable_value"] = tv if tv > 0 else None
+                except Exception:
+                    fields["taxable_value"] = None
                 # `property_type` is treated as the PA use_type / land_use_code label.
                 try:
                     pt = (pa.use_type or pa.land_use_code or "").strip()
@@ -2006,13 +2170,27 @@ if app:
                 except Exception:
                     pass
 
-            if not apply_filters(fields, filters):
-                filter_stage_counts["filter_failed"] += 1
-                continue
+            if explain_enabled and filters:
+                passed, reason = apply_filters_explain(fields, filters)
+                if not passed:
+                    filter_stage_counts["filter_failed"] += 1
+                    if reason:
+                        filter_drop_reasons[reason] = int(filter_drop_reasons.get(reason, 0)) + 1
+                    continue
+            else:
+                if not apply_filters(fields, filters):
+                    filter_stage_counts["filter_failed"] += 1
+                    continue
+
+            stage_counts["filter_passed"] += 1
 
             reason_codes = eval_triggers(fields, triggers) if triggers else []
             if triggers and not reason_codes:
                 filter_stage_counts["trigger_failed"] += 1
+                if explain_enabled:
+                    trigger_drop_reasons["no_trigger_match"] = (
+                        int(trigger_drop_reasons.get("no_trigger_match", 0)) + 1
+                    )
                 continue
 
             row = {
@@ -2023,18 +2201,16 @@ if app:
             }
             if include_geometry:
                 row["geometry"] = feat.geometry
-            results.append(row)
+            if len(results) < limit:
+                results.append(row)
 
             # Enriched record payload for the modern UI.
             # New source contract:
             # - cache: we have a PA DB record already
             # - live: record was fetched live this request OR the geometry provider is live
             if pa_dict is None:
-                # Product rule: never emit fake/demo records. If we don't have PA data,
-                # we cannot apply reliable attribute filters nor display real details.
-                continue
-
-            if live and provider_is_live and fdor_enabled:
+                source = "missing"
+            elif live and provider_is_live and fdor_enabled:
                 # If the request is explicitly live and we're using the FDOR provider,
                 # treat the record as live even when attributes came from PA cache.
                 # (The geometry + authoritative parcel IDs are still from the live source.)
@@ -2111,10 +2287,14 @@ if app:
                 land_value = float(pa.land_value or 0) or None
                 building_value = float(pa.improvement_value or 0) or None
                 total_value = float(pa.just_value or 0) or None
+                assessed_value = float(pa.assessed_value or 0) or None
+                taxable_value = float(pa.taxable_value or 0) or None
             else:
                 land_value = None
                 building_value = None
                 total_value = None
+                assessed_value = None
+                taxable_value = None
 
             zoning_out = zoning.strip() or None
             zoning_reason = None
@@ -2220,6 +2400,8 @@ if app:
                 "land_value": land_value,
                 "building_value": building_value,
                 "total_value": total_value,
+                "assessed_value": assessed_value,
+                "taxable_value": taxable_value,
                 # Back-compat fields (older UI code paths)
                 "address": situs_address,
                 "flu": land_use,
@@ -2228,9 +2410,27 @@ if app:
                 "lot_size_sqft": lot_size_sqft,
                 "lot_size_acres": lot_size_acres,
             }
-            lat, lng = _centroid_lat_lng(feat.geometry)
+            lat = None
+            lng = None
+            if pa is not None:
+                try:
+                    lat = float(getattr(pa, "latitude", None)) if getattr(pa, "latitude", None) is not None else None
+                except Exception:
+                    lat = None
+                try:
+                    lng = float(getattr(pa, "longitude", None)) if getattr(pa, "longitude", None) is not None else None
+                except Exception:
+                    lng = None
+            if lat is None or lng is None:
+                lat, lng = _centroid_lat_lng(feat.geometry)
             rec["lat"] = lat
             rec["lng"] = lng
+            try:
+                if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                    if float(lat) != 0.0 or float(lng) != 0.0:
+                        stage_counts["latlng_available"] += 1
+            except Exception:
+                pass
 
             # Stable confidence metadata for the unified record contract.
             try:
@@ -2264,14 +2464,14 @@ if app:
 
             if include_geometry:
                 rec["geometry"] = feat.geometry
-            records.append(rec)
+            if len(records) < limit:
+                records.append(rec)
 
             filter_stage_counts["emitted"] += 1
 
-            if len(results) >= limit:
-                break
-
         _mark("apply_filters")
+
+        stage_counts["returned"] = int(len(records))
 
         if live_error_reason:
             warnings.append(f"live_error_reason: {live_error_reason}")
@@ -2357,11 +2557,13 @@ if app:
         if debug_response_enabled:
             debug_flags = {
                 "county": county_key,
+                "correlation_id": correlation_id,
                 "limit": int(limit),
                 "include_geometry": bool(include_geometry),
                 "sort": str(payload.get("sort") or ""),
                 "enrich_enabled": bool(payload.get("enrich", False)) if payload.get("enrich", None) is not None else False,
                 "records_truncated": bool(records_truncated),
+                "explain": bool(explain_enabled),
             }
 
         if debug_counts is not None:
@@ -2391,9 +2593,27 @@ if app:
             }
         )
 
+        response_headers = {"X-Correlation-Id": correlation_id} if correlation_id else None
+        explain_payload = None
+        if explain_enabled:
+            dropped_reasons = {}
+            dropped_reasons.update(filter_drop_reasons)
+            dropped_reasons.update(trigger_drop_reasons)
+            explain_payload = {
+                "stage_counts": stage_counts,
+                "dropped_reasons": dropped_reasons,
+                "missing_field_counts": missing_field_counts,
+                "filter_echo": {
+                    "filters": raw_filters if isinstance(raw_filters, dict) else raw_filters,
+                    "exclude_missing": bool(exclude_missing),
+                },
+                "filter_stage_counts": filter_stage_counts,
+            }
+
         return JSONResponse(
             {
                 "search_id": search_id,
+                "correlation_id": correlation_id,
                 # Backwards-compatible keys
                 "county": county_key,
                 "count": len(results),
@@ -2424,7 +2644,9 @@ if app:
                     if debug_response_enabled
                     else {}
                 ),
-            }
+                **({"explain": explain_payload} if explain_payload is not None else {}),
+            },
+            headers=response_headers,
         )
 
     @app.post("/api/parcels/enrich")
@@ -2452,6 +2674,15 @@ if app:
         if limit <= 0:
             limit = 50
         parcel_ids = parcel_ids[: min(limit, 250)]
+
+        max_per_minute = payload.get("max_per_minute", None)
+        try:
+            max_per_minute = int(max_per_minute) if max_per_minute is not None else 0
+        except Exception:
+            max_per_minute = 0
+        if max_per_minute is None or max_per_minute < 0:
+            max_per_minute = 0
+        throttle_s = (60.0 / float(max_per_minute)) if max_per_minute and max_per_minute > 0 else 0.0
 
         if county_key not in {"orange", "seminole"}:
             raise HTTPException(
@@ -2483,6 +2714,19 @@ if app:
             return out
 
         rows: dict[str, Any] = {}
+        requested = int(len(parcel_ids))
+        cached = 0
+        fetched_ok = 0
+        fetched_failed = 0
+        skipped = 0
+        failures: list[dict[str, Any]] = []
+        start_ts = None
+        try:
+            import time as _time
+
+            start_ts = _time.time()
+        except Exception:
+            start_ts = None
         if county_key != "orange":
             if os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() not in {"1", "true", "True"}:
                 raise HTTPException(
@@ -2501,10 +2745,13 @@ if app:
         store = PASQLite(db_path)
         errors: dict[str, Any] = {}
         try:
+            last_fetch_at = None
             for pid in parcel_ids:
                 row = rows.get(pid)
                 if row is None and county_key != "orange":
                     errors[pid] = "not_found_in_fdor_centroids"
+                    fetched_failed += 1
+                    failures.append({"parcel_id": pid, "error": "not_found_in_fdor_centroids"})
                     continue
 
                 existing = None
@@ -2513,6 +2760,11 @@ if app:
                 except Exception:
                     existing = None
 
+                if existing is not None:
+                    cached += 1
+                    skipped += 1
+                    continue
+
                 base_sources: list[dict] = []
                 if row is not None:
                     base_sources.append({"name": "fdor_centroids", "url": row.raw_source_url})
@@ -2520,6 +2772,17 @@ if app:
                 if county_key == "orange":
                     # Orange: authoritative enrichment via OCPA.
                     try:
+                        if throttle_s > 0:
+                            try:
+                                import time as _time
+
+                                if last_fetch_at is not None:
+                                    delta = _time.time() - float(last_fetch_at)
+                                    if delta < throttle_s:
+                                        _time.sleep(float(throttle_s) - delta)
+                                last_fetch_at = _time.time()
+                            except Exception:
+                                pass
                         from florida_property_scraper.pa.providers.orange_ocpa import (
                             enrich_parcel,
                         )
@@ -2605,6 +2868,8 @@ if app:
                         )
                     except Exception as e:
                         errors.setdefault(pid, {"error_reason": "exception", "hint": str(e)})
+                        fetched_failed += 1
+                        failures.append({"parcel_id": pid, "error": "exception", "hint": str(e)})
                         # Best-effort fallback to FDOR-derived fields when available.
                         if row is None:
                             continue
@@ -2656,8 +2921,11 @@ if app:
                     )
                 try:
                     store.upsert(pa_rec)
+                    fetched_ok += 1
                 except Exception as e:
                     errors[pid] = {"error_reason": "cache_upsert_failed", "hint": str(e)}
+                    fetched_failed += 1
+                    failures.append({"parcel_id": pid, "error": "cache_upsert_failed", "hint": str(e)})
 
             pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
         finally:
@@ -2693,6 +2961,8 @@ if app:
             land_value = float(pa.land_value or 0) or None
             building_value = float(pa.improvement_value or 0) or None
             total_value = float(pa.just_value or 0) or None
+            assessed_value = float(pa.assessed_value or 0) or None
+            taxable_value = float(pa.taxable_value or 0) or None
 
             sqft: list[dict] = []
             living = float(pa.living_sf or 0) or None
@@ -2781,6 +3051,8 @@ if app:
                     "land_value": land_value,
                     "building_value": building_value,
                     "total_value": total_value,
+                    "assessed_value": assessed_value,
+                    "taxable_value": taxable_value,
                     "photo_url": photo_url,
                     "mortgage_lender": mortgage_lender,
                     "mortgage_amount": mortgage_amount,
@@ -2795,10 +3067,26 @@ if app:
                 }
             )
 
+        elapsed_s = None
+        try:
+            if start_ts is not None:
+                import time as _time
+
+                elapsed_s = float(_time.time() - float(start_ts))
+        except Exception:
+            elapsed_s = None
+
         return JSONResponse(
             {
                 "county": county_key,
                 "count": len(records),
+                "requested": requested,
+                "cached": cached,
+                "fetched_ok": fetched_ok,
+                "fetched_failed": fetched_failed,
+                "skipped": skipped,
+                "failures": failures,
+                "elapsed_s": elapsed_s,
                 "records": records,
                 "errors": errors,
             }
