@@ -40,6 +40,12 @@ json.dump(payload, sys.stdout)
 PY
 fi
 
+if ! curl -sS "$API_URL/health" >/dev/null 2>&1; then
+  if [[ -x "./scripts/dev_reset.sh" ]]; then
+    ./scripts/dev_reset.sh
+  fi
+fi
+
 curl -sS -X POST "$API_URL/api/parcels/search?county=seminole&explain=1" \
   -H "Content-Type: application/json" \
   --data-binary "@$PAYLOAD_FILE" \

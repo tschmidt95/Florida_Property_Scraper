@@ -369,7 +369,7 @@ if app:
 
 
     @app.post("/api/parcels/search")
-    def api_parcels_search(payload: dict = Body(...), request: Request | None = None):
+    def api_parcels_search(request: Request, payload: dict = Body(...)):
         # WRITE_UI_REQ_JSON: debug dump last UI payload to /tmp/ui_req.json
         try:
             import json as _json
@@ -404,15 +404,12 @@ if app:
         correlation_id = ""
         try:
             corr_payload = str(payload.get("correlation_id") or payload.get("request_id") or "").strip()
-            corr_query = ""
-            corr_header = ""
-            if request is not None:
-                corr_query = str(request.query_params.get("correlation_id") or "").strip()
-                corr_header = str(
-                    request.headers.get("x-correlation-id")
-                    or request.headers.get("x-request-id")
-                    or ""
-                ).strip()
+            corr_query = str(request.query_params.get("correlation_id") or "").strip()
+            corr_header = str(
+                request.headers.get("x-correlation-id")
+                or request.headers.get("x-request-id")
+                or ""
+            ).strip()
             correlation_id = corr_payload or corr_query or corr_header or search_id
         except Exception:
             correlation_id = search_id
@@ -422,7 +419,7 @@ if app:
         debug_counts: dict[str, Any] | None = None
         _timing_mark = None
         _timing_last = None
-        if debug_response_enabled:
+        if debug_response_enabled or explain_enabled:
             try:
                 import time as _time
 
@@ -1022,10 +1019,16 @@ if app:
             # - When the user supplies any attribute filters (sqft/acres/beds/baths/year/zoning/FLU/etc),
             #   missing values MUST fail the filter.
             # - Soft-missing is only allowed for polygon-only browsing (no attribute filters).
-            exclude_missing = bool(payload.get("exclude_missing", False))
-            if isinstance(raw_filters, dict) and raw_filters.get("exclude_missing") is True:
-                exclude_missing = True
+            missing_policy = "lenient"
+            try:
+                if isinstance(raw_filters, dict):
+                    mp = str(raw_filters.get("missing_policy") or "").strip().lower()
+                    if mp in {"lenient", "strict"}:
+                        missing_policy = mp
+            except Exception:
+                missing_policy = "lenient"
 
+            exclude_missing = bool(missing_policy == "strict")
             strict_attribute_filters = bool(filters_present and exclude_missing)
 
             try:
@@ -2425,12 +2428,6 @@ if app:
                 lat, lng = _centroid_lat_lng(feat.geometry)
             rec["lat"] = lat
             rec["lng"] = lng
-            try:
-                if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-                    if float(lat) != 0.0 or float(lng) != 0.0:
-                        stage_counts["latlng_available"] += 1
-            except Exception:
-                pass
 
             # Stable confidence metadata for the unified record contract.
             try:
@@ -2466,6 +2463,12 @@ if app:
                 rec["geometry"] = feat.geometry
             if len(records) < limit:
                 records.append(rec)
+                try:
+                    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                        if float(lat) != 0.0 or float(lng) != 0.0:
+                            stage_counts["latlng_available"] += 1
+                except Exception:
+                    pass
 
             filter_stage_counts["emitted"] += 1
 
@@ -2564,6 +2567,7 @@ if app:
                 "enrich_enabled": bool(payload.get("enrich", False)) if payload.get("enrich", None) is not None else False,
                 "records_truncated": bool(records_truncated),
                 "explain": bool(explain_enabled),
+                "missing_policy": str(missing_policy),
             }
 
         if debug_counts is not None:
@@ -2600,14 +2604,17 @@ if app:
             dropped_reasons.update(filter_drop_reasons)
             dropped_reasons.update(trigger_drop_reasons)
             explain_payload = {
+                "records_count": int(len(records)),
+                "markers_possible_count": int(stage_counts.get("latlng_available", 0)),
                 "stage_counts": stage_counts,
                 "dropped_reasons": dropped_reasons,
                 "missing_field_counts": missing_field_counts,
                 "filter_echo": {
                     "filters": raw_filters if isinstance(raw_filters, dict) else raw_filters,
-                    "exclude_missing": bool(exclude_missing),
+                    "missing_policy": str(missing_policy),
                 },
                 "filter_stage_counts": filter_stage_counts,
+                "time_ms": debug_timing_ms or {},
             }
 
         return JSONResponse(

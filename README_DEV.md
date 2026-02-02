@@ -55,7 +55,7 @@ Pipeline (see [src/florida_property_scraper/api/app.py](src/florida_property_scr
 
 ### Missing-value policy (filters)
 - Default: **include** records with missing values (they do **not** auto-exclude).
-- To exclude missing values, set `exclude_missing=true` in the request payload.
+- To exclude missing values, set `filters.missing_policy = "strict"` in the request payload.
 
 ### Explain mode
 Use `explain=1` (query param) or `explain: true` in the JSON payload.

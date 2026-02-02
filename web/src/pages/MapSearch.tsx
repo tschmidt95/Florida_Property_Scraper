@@ -1229,6 +1229,7 @@ export default function MapSearch({
     const filters0: ParcelAttributeFilters = {
       min_sqft: toFloatOrNull(filterForm.minSqft),
       max_sqft: toFloatOrNull(filterForm.maxSqft),
+      missing_policy: 'lenient',
       min_acres: minAcres,
       max_acres: maxAcres,
       min_lot_size_sqft: minLotSizeSqft,
@@ -1812,6 +1813,14 @@ payload.polygon_geojson = polyOut;
       const stageCounts = explain?.stage_counts || null;
       const droppedReasons = explain?.dropped_reasons || null;
       const missingFieldCounts = explain?.missing_field_counts || null;
+      const markersPossibleCount =
+        typeof explain?.markers_possible_count === 'number' ? explain.markers_possible_count : null;
+      const filteredOutCount =
+        stageCounts && typeof stageCounts.candidates === 'number' && typeof stageCounts.returned === 'number'
+          ? Math.max(0, Number(stageCounts.candidates) - Number(stageCounts.returned))
+          : candidateCount !== null && filteredCount !== null
+            ? Math.max(0, Number(candidateCount) - Number(filteredCount))
+            : null;
 
       try {
         const warnings = Array.isArray((resp as any).warnings) ? ((resp as any).warnings as string[]) : [];
@@ -1820,10 +1829,12 @@ payload.polygon_geojson = polyOut;
           search_id: (resp as any).search_id,
           records_count: recs.length,
           markers_rendered: markersRendered,
+          markers_possible_count: markersPossibleCount ?? markersRendered,
           missing_latlng_count: missingLatLngCount,
           stage_counts: stageCounts,
           dropped_reasons: droppedReasons,
           missing_field_counts: missingFieldCounts,
+          filtered_out_count: filteredOutCount,
           returned_count: list.length || recs.length,
           candidate_count: candidateCount,
           filtered_count: filteredCount,
