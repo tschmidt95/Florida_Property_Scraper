@@ -1,6 +1,11 @@
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Response, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import (
+    http_exception_handler as _default_http_exception_handler,
+    request_validation_exception_handler as _default_validation_exception_handler,
+)
 from fastapi.responses import RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -119,6 +124,130 @@ def stream_search(
 app = FastAPI()
 
 
+def _include_error_stack(request: Request | None) -> bool:
+    try:
+        if str(os.getenv("FPS_DEBUG_ERRORS", "")).strip().lower() in {"1", "true", "yes"}:
+            return True
+    except Exception:
+        pass
+    if request is None:
+        return False
+    try:
+        q = str(request.query_params.get("debug") or "").strip().lower()
+        if q in {"1", "true", "yes"}:
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _error_payload(
+    *,
+    message: str,
+    exc_type: str,
+    path: str,
+    trace_id: str,
+    stack: str | None,
+) -> dict[str, object]:
+    error_obj: dict[str, object] = {
+        "message": message,
+        "type": exc_type,
+        "path": path,
+        "trace_id": trace_id,
+    }
+    if stack:
+        error_obj["traceback"] = stack
+    return {"error": error_obj}
+
+
+def _should_wrap_error(request: Request | None) -> bool:
+    if request is None:
+        return False
+    try:
+        path = str(request.url.path or "")
+    except Exception:
+        return False
+    if path.startswith("/api/parcels/search"):
+        return True
+    if path.startswith("/api/parcels/"):
+        return True
+    return False
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if not _should_wrap_error(request):
+        return await _default_http_exception_handler(request, exc)
+    try:
+        msg = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+    except Exception:
+        msg = str(exc.detail)
+    stack = None
+    if _include_error_stack(request):
+        import traceback
+
+        stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    trace_id = uuid.uuid4().hex[:12]
+    return JSONResponse(
+        _error_payload(
+            message=str(msg),
+            exc_type=exc.__class__.__name__,
+            path=str(request.url.path),
+            trace_id=trace_id,
+            stack=stack,
+        ),
+        status_code=int(exc.status_code) if exc.status_code else 400,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    if not _should_wrap_error(request):
+        return await _default_validation_exception_handler(request, exc)
+    stack = None
+    if _include_error_stack(request):
+        import traceback
+
+        stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    trace_id = uuid.uuid4().hex[:12]
+    return JSONResponse(
+        _error_payload(
+            message="Validation error",
+            exc_type=exc.__class__.__name__,
+            path=str(request.url.path),
+            trace_id=trace_id,
+            stack=stack,
+        ),
+        status_code=422,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    if not _should_wrap_error(request):
+        return JSONResponse(
+            {"detail": "Internal Server Error"},
+            status_code=500,
+        )
+    logging.getLogger("fps.api").exception("Unhandled exception")
+    stack = None
+    if _include_error_stack(request):
+        import traceback
+
+        stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    trace_id = uuid.uuid4().hex[:12]
+    return JSONResponse(
+        _error_payload(
+            message=str(exc),
+            exc_type=exc.__class__.__name__,
+            path=str(request.url.path),
+            trace_id=trace_id,
+            stack=stack,
+        ),
+        status_code=500,
+    )
+
+
 if app:
     from florida_property_scraper.api.routes.search import router as search_router
     from florida_property_scraper.api.routes.permits import router as permits_router
@@ -140,6 +269,10 @@ if app:
 
     @app.get("/health")
     def health_route():
+        return health()
+
+    @app.get("/api/health")
+    def api_health_route():
         return health()
 
     @app.get("/counties")
@@ -414,6 +547,21 @@ if app:
         except Exception:
             correlation_id = search_id
 
+        explain_enabled = False
+        try:
+            if payload.get("explain") is True:
+                explain_enabled = True
+            if not explain_enabled:
+                raw_explain = str(payload.get("explain") or "").strip().lower()
+                if raw_explain in {"1", "true", "yes"}:
+                    explain_enabled = True
+            if not explain_enabled and request is not None:
+                q = str(request.query_params.get("explain") or "").strip().lower()
+                if q in {"1", "true", "yes"}:
+                    explain_enabled = True
+        except Exception:
+            explain_enabled = False
+
         debug_response_enabled = payload.get("debug") is True
         debug_timing_ms: dict[str, int] | None = None
         debug_counts: dict[str, Any] | None = None
@@ -447,21 +595,6 @@ if app:
 
             def _mark(stage: str) -> None:
                 return
-
-        explain_enabled = False
-        try:
-            if payload.get("explain") is True:
-                explain_enabled = True
-            if not explain_enabled:
-                raw_explain = str(payload.get("explain") or "").strip().lower()
-                if raw_explain in {"1", "true", "yes"}:
-                    explain_enabled = True
-            if not explain_enabled and request is not None:
-                q = str(request.query_params.get("explain") or "").strip().lower()
-                if q in {"1", "true", "yes"}:
-                    explain_enabled = True
-        except Exception:
-            explain_enabled = False
 
         pre_warnings: list[str] = []
 
@@ -748,7 +881,6 @@ if app:
 
         # --- BEGIN PATCH: Use parcels.sqlite + RTree for polygon search ---
         import sqlite3
-        from shapely.geometry import shape
         import json as _json
         from pathlib import Path
         from types import SimpleNamespace
@@ -756,8 +888,14 @@ if app:
         intersecting = []
         provider_warnings = []
         candidates = []
-        if county_key == "seminole" and geometry and os.getenv("FPS_USE_SEMINOLE_SQLITE","")=="1":
-            db_path = os.getenv("PARCELS_DB_PATH", str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite"))
+        seminole_db = os.getenv(
+            "PARCELS_DB_PATH",
+            str(Path(__file__).resolve().parents[3] / "data" / "parcels" / "parcels.sqlite"),
+        )
+        seminole_db_exists = bool(seminole_db and os.path.exists(seminole_db))
+        seminole_sql_count = None
+        if county_key == "seminole" and geometry and seminole_db_exists:
+            db_path = seminole_db
             try:
                 conn = sqlite3.connect(db_path)
                 conn.row_factory = sqlite3.Row
@@ -769,18 +907,16 @@ if app:
                     WHERE r.minx <= ? AND r.maxx >= ? AND r.miny <= ? AND r.maxy >= ? AND p.county = ?
                 """
                 rows = conn.execute(q, (maxx, minx, maxy, miny, county_key)).fetchall()
-                poly = shape(geometry) if isinstance(geometry, dict) else geometry
+                seminole_sql_count = len(rows)
                 for row in rows:
                     try:
                         parcel_geom = _json.loads(row["geom_geojson"])
-                        parcel_shape = shape(parcel_geom)
-                        if poly.intersects(parcel_shape):
-                            intersecting.append(SimpleNamespace(parcel_id=row["parcel_id"], geometry=parcel_shape))
+                        candidates.append(
+                            SimpleNamespace(parcel_id=row["parcel_id"], geometry=parcel_geom)
+                        )
                     except Exception:
                         continue
                 conn.close()
-
-                candidates = intersecting
             except Exception as e:
                 provider_warnings.append(f"parcels_sqlite_error:{e}")
         else:
@@ -816,8 +952,8 @@ if app:
                     except Exception:
                         pass
             _mark("candidate_query")
-            # Filter to true intersections when possible.
-            intersecting = [f for f in candidates if intersects(geometry, f.geometry)]
+        # Apply geometry clipping after attribute filters.
+        intersecting = list(candidates)
         # --- END PATCH ---
 
         _mark("geometry_filter")
@@ -833,6 +969,27 @@ if app:
             }
         )
 
+        try:
+            log_path = "/tmp/api.log"
+            line = json.dumps(
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "trace_id": correlation_id,
+                    "event": "search_request",
+                    "county": county_key,
+                    "bbox": bbox_t,
+                    "candidates_count": len(candidates),
+                    "seminole_db": seminole_db if county_key == "seminole" else None,
+                    "seminole_db_exists": bool(seminole_db_exists) if county_key == "seminole" else None,
+                    "seminole_sql_count": seminole_sql_count,
+                },
+                default=str,
+            )
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
+
         warnings: list[str] = []
         if provider_warnings:
             warnings.extend(provider_warnings)
@@ -840,8 +997,6 @@ if app:
             warnings.extend(pre_warnings)
         if not candidates:
             warnings.append("No parcel candidates returned for bbox")
-        if candidates and not intersecting:
-            warnings.append("No parcels intersected the drawn geometry")
 
         def _centroid_lat_lng(geom: Any) -> tuple[float, float]:
             # Best-effort centroid without heavy deps.
@@ -952,6 +1107,10 @@ if app:
                 "living_area_sqft": 0,
                 "lot_size_sqft": 0,
                 "lot_size_acres": 0,
+                "beds": 0,
+                "baths": 0,
+                "year_built": 0,
+                "total_value": 0,
                 "zoning": 0,
                 "future_land_use": 0,
             },
@@ -1937,10 +2096,11 @@ if app:
                 return "pa_db", ""
 
         filter_stage_counts: dict[str, int] = {
-            "intersecting": len(intersecting),
+            "intersecting": 0,
             "skipped_no_pa_fdor_live": 0,
             "with_pa": 0,
             "filter_failed": 0,
+            "geometry_failed": 0,
             "trigger_failed": 0,
             "emitted": 0,
         }
@@ -1952,6 +2112,8 @@ if app:
             "candidates": int(len(intersecting)),
             "with_pa": 0,
             "filter_passed": 0,
+            "geometry_passed": 0,
+            "geometry_failed": 0,
             "latlng_available": 0,
             "returned": 0,
         }
@@ -2011,7 +2173,10 @@ if app:
             fields.update(hover)
 
             if not exclude_missing and filter_fields:
-                fields["__missing_ok_fields"] = list(filter_fields)
+                missing_ok_fields = set(filter_fields)
+                if not flags.sale_filtering:
+                    missing_ok_fields = {f for f in missing_ok_fields if f not in sale_fields}
+                fields["__missing_ok_fields"] = list(missing_ok_fields)
 
             if explain_enabled and filter_fields:
                 for fname in filter_fields:
@@ -2121,8 +2286,14 @@ if app:
                     field_stats["present"]["lot_size_sqft"] += 1
                 if fields.get("lot_size_acres") not in (None, "", 0):
                     field_stats["present"]["lot_size_acres"] += 1
+                if fields.get("beds") not in (None, "", 0):
+                    field_stats["present"]["beds"] += 1
+                if fields.get("baths") not in (None, "", 0):
+                    field_stats["present"]["baths"] += 1
                 if fields.get("year_built") not in (None, "", 0):
                     field_stats["present"]["year_built"] += 1
+                if fields.get("total_value") not in (None, "", 0):
+                    field_stats["present"]["total_value"] += 1
                 if str(fields.get("zoning") or "").strip():
                     field_stats["present"]["zoning"] += 1
                 if str(fields.get("future_land_use") or "").strip():
@@ -2186,6 +2357,24 @@ if app:
                     continue
 
             stage_counts["filter_passed"] += 1
+
+            # Geometry clipping AFTER attribute filters.
+            geom_ok = False
+            try:
+                geom_ok = bool(feat.geometry) and intersects(geometry, feat.geometry)
+            except Exception:
+                geom_ok = False
+
+            if not geom_ok:
+                filter_stage_counts["geometry_failed"] += 1
+                stage_counts["geometry_failed"] += 1
+                if explain_enabled:
+                    filter_drop_reasons["geometry:outside_polygon"] = (
+                        int(filter_drop_reasons.get("geometry:outside_polygon", 0)) + 1
+                    )
+                continue
+
+            stage_counts["geometry_passed"] += 1
 
             reason_codes = eval_triggers(fields, triggers) if triggers else []
             if triggers and not reason_codes:
@@ -2472,6 +2661,10 @@ if app:
 
             filter_stage_counts["emitted"] += 1
 
+        filter_stage_counts["intersecting"] = int(stage_counts.get("geometry_passed", 0))
+        if candidates and stage_counts.get("geometry_passed", 0) == 0:
+            warnings.append("No parcels intersected the drawn geometry")
+
         _mark("apply_filters")
 
         stage_counts["returned"] = int(len(records))
@@ -2597,24 +2790,75 @@ if app:
             }
         )
 
+        try:
+            log_path = "/tmp/api.log"
+            line = json.dumps(
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "trace_id": correlation_id,
+                    "event": "search_result",
+                    "county": county_key,
+                    "records_count": len(records),
+                    "markers_possible_count": int(stage_counts.get("latlng_available", 0)),
+                    "after_attr_filters": int(stage_counts.get("filter_passed", 0)),
+                    "after_geom_clip": int(stage_counts.get("geometry_passed", 0)),
+                },
+                default=str,
+            )
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
+
         response_headers = {"X-Correlation-Id": correlation_id} if correlation_id else None
         explain_payload = None
         if explain_enabled:
             dropped_reasons = {}
             dropped_reasons.update(filter_drop_reasons)
             dropped_reasons.update(trigger_drop_reasons)
+            markers_possible = int(stage_counts.get("latlng_available", 0))
+            records_count = int(len(records))
+            scanned = int(field_stats.get("scanned", 0) or 0)
+            present = field_stats.get("present") or {}
+
+            time_ms_total = 0
+            try:
+                if isinstance(debug_timing_ms, dict):
+                    time_ms_total = int(sum(int(v or 0) for v in debug_timing_ms.values()))
+            except Exception:
+                time_ms_total = 0
+
+            def _pct(key: str) -> float:
+                if scanned <= 0:
+                    return 0.0
+                try:
+                    return round((float(present.get(key, 0) or 0) / float(scanned)) * 100.0, 2)
+                except Exception:
+                    return 0.0
+
             explain_payload = {
-                "records_count": int(len(records)),
-                "markers_possible_count": int(stage_counts.get("latlng_available", 0)),
-                "stage_counts": stage_counts,
+                "records_count": records_count,
+                "markers_possible_count": markers_possible,
+                "missing_lat_lng_count": max(0, records_count - markers_possible),
+                "stage_counts": {
+                    "candidates": int(stage_counts.get("candidates", 0)),
+                    "after_attr_filters": int(stage_counts.get("filter_passed", 0)),
+                    "after_geom_clip": int(stage_counts.get("geometry_passed", 0)),
+                    "final": int(records_count),
+                },
+                "stage_counts_raw": stage_counts,
                 "dropped_reasons": dropped_reasons,
                 "missing_field_counts": missing_field_counts,
-                "filter_echo": {
-                    "filters": raw_filters if isinstance(raw_filters, dict) else raw_filters,
-                    "missing_policy": str(missing_policy),
+                "field_coverage": {
+                    "percent_with_beds": _pct("beds"),
+                    "percent_with_sqft": _pct("living_area_sqft"),
+                    "percent_with_year_built": _pct("year_built"),
+                    "percent_with_value": _pct("total_value"),
                 },
+                "filters": raw_filters if isinstance(raw_filters, dict) else raw_filters,
+                "missing_policy": str(missing_policy),
                 "filter_stage_counts": filter_stage_counts,
-                "time_ms": debug_timing_ms or {},
+                "time_ms": int(time_ms_total),
             }
 
         return JSONResponse(
@@ -3162,9 +3406,176 @@ if app:
             con.close()
         return {"county": county.lower(), "db_path_used": db_path_abs, "row_count": row_count, "bbox": bbox, "has_data": has_data}
 
+    @app.get("/api/debug/db_stats")
+    def debug_db_stats(county: str):
+        import sqlite3
+
+        county_key = (county or "").strip().lower() or "seminole"
+        db_path = os.getenv("PARCELS_DB_PATH", "data/parcels/parcels.sqlite")
+        db_path_abs = os.path.abspath(db_path)
+        if not os.path.exists(db_path_abs):
+            return JSONResponse(
+                _error_payload(
+                    message="parcels sqlite not found",
+                    exc_type="MissingParcelsDB",
+                    path="/api/debug/db_stats",
+                    trace_id=uuid.uuid4().hex[:12],
+                    stack=None,
+                ),
+                status_code=500,
+            )
+
+        con = sqlite3.connect(db_path_abs)
+        try:
+            cur = con.cursor()
+            cols = [r[1] for r in cur.execute("pragma table_info(parcels)").fetchall()]
+            colset = {c.lower() for c in cols}
+            county_col = None
+            parcel_id_col = None
+            for cand in ("county", "county_name", "county_cd"):
+                if cand in colset:
+                    county_col = cand
+                    break
+            for cand in ("parcel_id", "parcelid", "apn", "folio", "strap"):
+                if cand in colset:
+                    parcel_id_col = cand
+                    break
+            pairs = [
+                ("lat", "lng"),
+                ("latitude", "longitude"),
+                ("centroid_lat", "centroid_lng"),
+                ("centroid_y", "centroid_x"),
+                ("y", "x"),
+            ]
+            lat_col = None
+            lng_col = None
+            for a, b in pairs:
+                if a in colset and b in colset:
+                    lat_col, lng_col = a, b
+                    break
+
+            has_bbox = all(k in colset for k in ("minx", "miny", "maxx", "maxy"))
+            if not lat_col or not lng_col:
+                if not has_bbox:
+                    return JSONResponse(
+                        _error_payload(
+                            message="no spatial fields available",
+                            exc_type="NoSpatialFields",
+                            path="/api/debug/db_stats",
+                            trace_id=uuid.uuid4().hex[:12],
+                            stack=None,
+                        ),
+                        status_code=500,
+                    )
+
+            total = int(
+                cur.execute(
+                    "select count(*) from parcels where county=?",
+                    (county_key,),
+                ).fetchone()[0]
+            )
+
+            lat_lng_nonnull = 0
+            lat_range = None
+            lng_range = None
+            if lat_col and lng_col:
+                row = cur.execute(
+                    f"select min({lng_col}), min({lat_col}), max({lng_col}), max({lat_col}) "
+                    f"from parcels where {county_col or 'county'}=? and "
+                    f"{lat_col} is not null and {lng_col} is not null",
+                    (county_key,),
+                ).fetchone()
+                latlng_source = f"{lat_col},{lng_col}"
+                try:
+                    lat_lng_nonnull = int(
+                        cur.execute(
+                            f"select count(*) from parcels where {county_col or 'county'}=? and {lat_col} is not null and {lng_col} is not null",
+                            (county_key,),
+                        ).fetchone()[0]
+                    )
+                except Exception:
+                    lat_lng_nonnull = 0
+            else:
+                row = cur.execute(
+                    f"select min(minx), min(miny), max(maxx), max(maxy) from parcels where {county_col or 'county'}=?",
+                    (county_key,),
+                ).fetchone()
+                latlng_source = "minx/miny/maxx/maxy"
+                try:
+                    lat_lng_nonnull = int(
+                        cur.execute(
+                            f"select count(*) from parcels where {county_col or 'county'}=? and minx is not null and miny is not null and maxx is not null and maxy is not null",
+                            (county_key,),
+                        ).fetchone()[0]
+                    )
+                except Exception:
+                    lat_lng_nonnull = 0
+
+            if not row or row[0] is None or row[1] is None or row[2] is None or row[3] is None:
+                return JSONResponse(
+                    _error_payload(
+                        message="no spatial fields available",
+                        exc_type="NoSpatialFields",
+                        path="/api/debug/db_stats",
+                        trace_id=uuid.uuid4().hex[:12],
+                        stack=None,
+                    ),
+                    status_code=500,
+                )
+
+            min_lng, min_lat, max_lng, max_lat = [float(x) for x in row]
+            lng_range = [min_lng, max_lng]
+            lat_range = [min_lat, max_lat]
+            pad = max((max_lng - min_lng) * 0.05, 0.002)
+            suggested = {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [min_lng + pad, min_lat + pad],
+                        [max_lng - pad, min_lat + pad],
+                        [max_lng - pad, max_lat - pad],
+                        [min_lng + pad, max_lat - pad],
+                        [min_lng + pad, min_lat + pad],
+                    ]
+                ],
+            }
+
+            pid_col = parcel_id_col or "parcel_id"
+            sample_rows = cur.execute(
+                f"select {pid_col} from parcels where {county_col or 'county'}=? limit 20",
+                (county_key,),
+            ).fetchall()
+            sample_parcel_ids = [str(r[0]) for r in sample_rows if r and r[0] is not None]
+
+            return {
+                "county": county_key,
+                "parcels_db_path": db_path_abs,
+                "row_count": total,
+                "lat_lng_nonnull": lat_lng_nonnull,
+                "lat_range": lat_range,
+                "lng_range": lng_range,
+                "suggested_polygon": suggested,
+                "sample_parcel_ids": sample_parcel_ids,
+                "notes": {
+                    "parcels_db_path": db_path_abs,
+                    "county_field": county_col,
+                    "parcel_id_field": parcel_id_col,
+                    "lat_field": lat_col,
+                    "lng_field": lng_col,
+                    "spatial_source": latlng_source,
+                },
+            }
+        finally:
+            con.close()
+
 
     @app.get("/api/parcels/{parcel_id}")
-    def api_parcel_detail(parcel_id: str, county: str = "", include_geometry: bool = False):
+    def api_parcel_detail(
+        parcel_id: str,
+        county: str = "",
+        include_geometry: bool = False,
+        include_fields: bool = False,
+    ):
         """Return full PA normalized detail + user meta.
 
         PA-only: this endpoint never enriches outside PA.
@@ -3234,13 +3645,17 @@ if app:
         payload = {
             "county": county_key,
             "parcel_id": parcel_key,
-            "pa": pa,
-            "computed": computed,
+            "pa": pa or {},
+            "computed": computed or {},
             "user_meta": meta.to_dict()
             if meta is not None
             else empty_user_meta(county=county_key, parcel_id=parcel_key),
         }
-        result = payload
+
+        if not include_fields:
+            return JSONResponse(payload)
+
+        result = dict(payload)
 
         # Seminole fallback: populate situs fields from sem_addr_index when PA record is missing
         if county_key == "seminole" and (pa is None):
@@ -3336,6 +3751,14 @@ if app:
             except Exception:
                 result["lot_size_sqft"] = ls
 
+        # acreage
+        la_ac = _first(pa.get("lot_size_acres"), pa.get("land_acres"))
+        if la_ac is not None and result.get("lot_size_acres") in (None, ""):
+            try:
+                result["lot_size_acres"] = float(la_ac)
+            except Exception:
+                result["lot_size_acres"] = la_ac
+
         # mailing address (single string OR parts)
         maddr = _first(pa.get("mailing_address"), pa.get("mail_address"))
         if (not maddr):
@@ -3373,6 +3796,11 @@ if app:
                 "future_land_use",
                 "property_class",
                 "use_type",
+                "land_value",
+                "building_value",
+                "total_value",
+                "assessed_value",
+                "taxable_value",
             ):
                 try:
                     result.setdefault(_k, _pa.get(_k))
@@ -3388,6 +3816,64 @@ if app:
             result["last_sale_date"] = pa.get("last_sale_date") or ""
             result["last_sale_price"] = pa.get("last_sale_price") or 0
             result["just_value"] = pa.get("just_value") or 0
+
+        # Source URLs and missing fields for UI
+        try:
+            source_urls = []
+            if isinstance(pa, dict):
+                su = str(pa.get("source_url") or "").strip()
+                if su:
+                    source_urls.append(su)
+                sources = pa.get("sources") or []
+                if isinstance(sources, list):
+                    for s in sources:
+                        if not isinstance(s, dict):
+                            continue
+                        u = str(s.get("url") or "").strip()
+                        if u:
+                            source_urls.append(u)
+            if source_urls:
+                result["source_urls"] = list(dict.fromkeys(source_urls))
+        except Exception:
+            pass
+
+        try:
+            checklist = [
+                "parcel_id",
+                "situs_address",
+                "situs_city",
+                "situs_state",
+                "situs_zip",
+                "owner_name",
+                "mailing_address",
+                "mailing_city",
+                "mailing_state",
+                "mailing_zip",
+                "beds",
+                "baths",
+                "year_built",
+                "living_area_sqft",
+                "lot_size_sqft",
+                "lot_size_acres",
+                "zoning",
+                "future_land_use",
+                "last_sale_date",
+                "last_sale_price",
+                "just_value",
+                "assessed_value",
+                "taxable_value",
+                "land_value",
+                "building_value",
+                "total_value",
+            ]
+            missing = []
+            for k in checklist:
+                v = result.get(k)
+                if v is None or v == "" or v == []:
+                    missing.append(k)
+            result["missing_fields"] = missing
+        except Exception:
+            pass
 
         return JSONResponse(result)
 
@@ -3480,17 +3966,6 @@ if app:
             # PA-only: unknown unless explicitly present in PA.
             "mortgage_amount": None,
             "mortgage_lender": "",
-            "just_value": hover.get("just_value"),
-            "assessed_value": hover.get("assessed_value"),
-            "taxable_value": hover.get("taxable_value"),
-            "year_built": hover.get("year_built"),
-            "beds": hover.get("beds"),
-            "baths": hover.get("baths"),
-            "living_sf": hover.get("living_sf"),
-            "land_sf": hover.get("land_sf"),
-            "land_acres": hover.get("land_acres"),
-            "zoning": str(hover.get("zoning") or ""),
-            "future_land_use": str(hover.get("future_land_use") or ""),
         }
         cache_set(cache_key, payload, ttl=30)
         return JSONResponse(payload)

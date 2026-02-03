@@ -17,12 +17,23 @@ python scripts/kill_port.py 8000 || true
 python scripts/kill_port.py 5173 || true
 
 rm -f "$API_LOG" "$UI_LOG"
+: > "$API_LOG"
+: > "$UI_LOG"
 
 nohup python -m uvicorn florida_property_scraper.api.app:app \
   --host 0.0.0.0 --port 8000 --workers 1 --log-level info \
   > "$API_LOG" 2>&1 &
 
 (cd web && nohup npm run dev -- --host 0.0.0.0 --port 5173 > "$UI_LOG" 2>&1 &)
+
+if [[ ! -f "$API_LOG" ]]; then
+  echo "FAIL: API log not created at $API_LOG"
+  exit 2
+fi
+if [[ ! -f "$UI_LOG" ]]; then
+  echo "FAIL: UI log not created at $UI_LOG"
+  exit 2
+fi
 
 printf 'Waiting for API...'
 for i in {1..40}; do

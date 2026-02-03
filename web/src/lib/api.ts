@@ -1162,6 +1162,7 @@ export async function fetchParcelDetail(params: {
     county: params.county,
     params: {
       include_geometry: params.include_geometry ? 1 : 0,
+      include_fields: 1,
     },
   });
   const resp = await fetch(url, { signal: params.signal });
