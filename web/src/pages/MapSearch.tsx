@@ -5,6 +5,7 @@ import type { LatLngLiteral } from 'leaflet';
 import { CircleMarker, GeoJSON, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 
 import {
+  apiUrl as apiUrlFn,
   createSavedSearch,
   listAlerts,
   listSavedSearches,
@@ -394,7 +395,7 @@ function MultiSelectFilter({
           />
 
           <div className="mt-2 max-h-64 overflow-auto rounded-lg border border-cre-border/40 bg-cre-surface p-2">
-            {!options.length ? (
+            {options.length === 0 ? (
               <div className="text-xs text-cre-muted">No options (field not available).</div>
             ) : filtered.length ? (
               <div className="space-y-1">
@@ -404,11 +405,7 @@ function MultiSelectFilter({
                     className="flex cursor-pointer select-none items-center gap-2 rounded-md px-1 py-1 text-xs text-cre-text hover:bg-cre-bg"
                     title={render(o)}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedSet.has(o)}
-                      onChange={() => toggle(o)}
-                    />
+                    <input type="checkbox" checked={selectedSet.has(o)} onChange={() => toggle(o)} />
                     <span className="truncate">{render(o)}</span>
                   </label>
                 ))}
@@ -576,6 +573,9 @@ export default function MapSearch({
   const [triggerLookupParcelId, setTriggerLookupParcelId] = useState('');
 
   const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
+
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'ok' | 'down'>('checking');
+  const [backendStatusDetail, setBackendStatusDetail] = useState<string>('');
 
   const [rollupsEnabled, setRollupsEnabled] = useState(false);
   const [rollupsMinScore, setRollupsMinScore] = useState('');
@@ -840,6 +840,7 @@ export default function MapSearch({
   const [parcelLinesFC, setParcelLinesFC] = useState<GeoJSON.FeatureCollection | null>(null);
   const [parcelLinesFeatureCount, setParcelLinesFeatureCount] = useState<number>(0);
   const [fieldStats, setFieldStats] = useState<any | null>(null);
+  const [resultSetCount, setResultSetCount] = useState(0);
 
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
@@ -872,12 +873,96 @@ export default function MapSearch({
     });
   }, [resultsQuery, rows]);
 
+  const computeResultSetFieldStats = useCallback((rows: Array<Partial<ParcelRecord>>): any => {
+    const total = Array.isArray(rows) ? rows.length : 0;
+    const present: Record<string, number> = {};
+    const missing: Record<string, number> = {};
+    const coverage: Record<string, number> = {};
+
+    const keys = [
+      'living_area_sqft',
+      'lot_size_sqft',
+      'lot_size_acres',
+      'beds',
+      'baths',
+      'year_built',
+      'ownership_years',
+      'property_type',
+      'zoning',
+      'future_land_use',
+      'total_value',
+      'land_value',
+      'building_value',
+      'assessed_value',
+      'last_sale_date',
+    ];
+    for (const k of keys) {
+      present[k] = 0;
+      missing[k] = 0;
+      coverage[k] = 0;
+    }
+    if (!total) return { total, present, missing, coverage };
+
+    const hasValue = (val: unknown): boolean => {
+      if (val === null || val === undefined) return false;
+      if (typeof val === 'number') return Number.isFinite(val) && val > 0;
+      if (typeof val === 'string') return val.trim().length > 0;
+      if (Array.isArray(val)) return val.length > 0;
+      return Boolean(val);
+    };
+
+    for (const r of rows) {
+      const livingSqft =
+        (r as any)?.living_area_sqft ??
+        (Array.isArray((r as any)?.sqft)
+          ? (r as any).sqft.find((s: any) => s?.type === 'living')?.value
+          : null);
+      const lotSqft =
+        (r as any)?.lot_size_sqft ??
+        (Array.isArray((r as any)?.sqft)
+          ? (r as any).sqft.find((s: any) => s?.type === 'lot')?.value
+          : null);
+      const lotAcres = (r as any)?.lot_size_acres ?? null;
+      const propertyType =
+        (r as any)?.property_type ?? (r as any)?.property_type_raw ?? (r as any)?.land_use ?? null;
+
+      const values: Record<string, unknown> = {
+        living_area_sqft: livingSqft,
+        lot_size_sqft: lotSqft,
+        lot_size_acres: lotAcres,
+        beds: (r as any)?.beds,
+        baths: (r as any)?.baths,
+        year_built: (r as any)?.year_built,
+        ownership_years: (r as any)?.ownership_years,
+        property_type: propertyType,
+        zoning: (r as any)?.zoning,
+        future_land_use: (r as any)?.future_land_use,
+        total_value: (r as any)?.total_value ?? (r as any)?.just_value,
+        land_value: (r as any)?.land_value,
+        building_value: (r as any)?.building_value,
+        assessed_value: (r as any)?.assessed_value,
+        last_sale_date: (r as any)?.last_sale_date,
+      };
+
+      for (const k of keys) {
+        if (hasValue(values[k])) present[k] += 1;
+        else missing[k] += 1;
+      }
+    }
+
+    for (const k of keys) {
+      coverage[k] = total ? present[k] / total : 0;
+    }
+
+    return { total, present, missing, coverage };
+  }, []);
+
   const fieldAvailability = useMemo(() => {
-    const coverage = (sourceCoverage?.fields || {}) as Record<string, boolean>;
-    const useCoverage = Object.keys(coverage).length > 0;
     const present = (fieldStats?.present || {}) as Record<string, number>;
-    const has = (key: string) =>
-      useCoverage ? Boolean(coverage[key]) : Number(present[key] || 0) > 0;
+    const has = (key: string) => {
+      if (resultSetCount <= 0) return true;
+      return Number(present[key] || 0) > 0;
+    };
     return {
       living_area_sqft: has('living_area_sqft'),
       lot_size_sqft: has('lot_size_sqft'),
@@ -894,17 +979,16 @@ export default function MapSearch({
       zoning: has('zoning'),
       future_land_use: has('future_land_use'),
     };
-  }, [fieldStats, sourceCoverage]);
+  }, [fieldStats, resultSetCount]);
 
   const lotSizeAvailable = fieldAvailability.lot_size_sqft || fieldAvailability.lot_size_acres;
 
   const fieldCoverageNote = useCallback(
     (fieldKey: string, hint: string) => {
-      const sourceFields = (sourceCoverage?.fields || {}) as Record<string, boolean>;
-      if (Object.keys(sourceFields).length && !sourceFields[fieldKey]) {
+      if (resultSetCount <= 0) {
         return (
           <div className="text-[10px] text-cre-muted" title={hint}>
-            No source configured
+            No records yet
           </div>
         );
       }
@@ -924,7 +1008,7 @@ export default function MapSearch({
         </div>
       );
     },
-    [fieldStats, sourceCoverage]
+    [fieldStats, resultSetCount]
   );
 
   const downloadCsv = useCallback(() => {
@@ -2385,7 +2469,11 @@ payload.polygon_geojson = polyOut;
         // ignore
       }
       const warningsAll = (resp as any).warnings as string[] | undefined;
-      setFieldStats((resp as any).field_stats || null);
+      const coverageRows: Array<Partial<ParcelRecord>> = recs.length
+        ? recs
+        : (list as Array<Partial<ParcelRecord>>);
+      setFieldStats(computeResultSetFieldStats(coverageRows));
+      setResultSetCount((list.length || recs.length) ?? 0);
 
       const isSoftWarning = (w: string): boolean => {
         const s = String(w || '').toLowerCase();
@@ -2473,6 +2561,8 @@ payload.polygon_geojson = polyOut;
         setErrorBanner(msg);
         setParcels([]);
         setRecords([]);
+        setFieldStats(null);
+        setResultSetCount(0);
         return;
       }
 
@@ -2495,7 +2585,13 @@ payload.polygon_geojson = polyOut;
       setPagingMeta({ total: totalCount ?? list.length, loaded: list.length, isPaging: false, hasMore: false });
     } catch (e) {
       if (reqId !== activeReq.current) return;
-      const msg = e instanceof Error ? e.message : String(e);
+      const status = (e as any)?.status as number | undefined;
+      const statusText = (e as any)?.statusText as string | undefined;
+      const responseText = (e as any)?.responseText as string | undefined;
+      const baseMsg = e instanceof Error ? e.message : String(e);
+      const statusLine = status ? `HTTP ${status}${statusText ? ` ${statusText}` : ''}` : '';
+      const detail = responseText ? String(responseText).slice(0, 300) : '';
+      const msg = [statusLine, baseMsg, detail ? `(${detail})` : ''].filter(Boolean).join(' ');
       const payload = (e as any)?.payload ?? null;
       if (payload && typeof payload === 'object') {
         setLastExplainError(payload);
@@ -2517,6 +2613,8 @@ payload.polygon_geojson = polyOut;
       }
       setParcels([]);
       setRecords([]);
+      setFieldStats(null);
+      setResultSetCount(0);
       setParcelLinesFC(null);
       setParcelLinesEnabled(false);
       setParcelLinesError(null);
@@ -2557,6 +2655,40 @@ payload.polygon_geojson = polyOut;
     return exists ? prev.filter((x) => x !== v) : [...prev, v];
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function checkBackend() {
+      try {
+        const health = await fetch(apiUrlFn('/api/health'));
+        if (!health.ok) throw new Error(`health ${health.status}`);
+        const ping = await fetch(apiUrlFn('/api/debug/ping'));
+        if (!ping.ok) throw new Error(`ping ${ping.status}`);
+        if (!cancelled) {
+          setBackendStatus('ok');
+          setBackendStatusDetail('Backend OK');
+        }
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setBackendStatus('down');
+          setBackendStatusDetail(`Backend down: ${msg}`);
+        }
+      }
+    }
+    checkBackend();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const lastExplainRequestUrl =
+    typeof (lastExplainError as any)?.url === 'string'
+      ? String((lastExplainError as any).url)
+      : typeof (lastExplainError as any)?.request_url === 'string'
+        ? String((lastExplainError as any).request_url)
+        : '';
+  const lastExplainAbsolute = /^https?:\/\//i.test(lastExplainRequestUrl);
+
   return (
     <div
       className="flex h-screen min-h-[520px] overflow-hidden"
@@ -2591,10 +2723,17 @@ payload.polygon_geojson = polyOut;
           <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-surface p-3 text-sm text-cre-text">
             <div className="font-semibold">Notice</div>
             <div className="mt-1 text-xs text-cre-muted">{errorBanner}</div>
+            {lastError ? <div className="mt-2 text-[11px] text-cre-muted">Last error: {lastError}</div> : null}
             {lastExplainError ? (
               <div className="mt-2 space-y-2 text-[11px] text-cre-muted">
                 <div>Backend error: {String(lastExplainError.error || lastExplainError.message || 'Unknown')}</div>
                 {lastExplainError.where ? <div>Where: {String(lastExplainError.where)}</div> : null}
+                {lastExplainRequestUrl ? <div>request_url: {lastExplainRequestUrl}</div> : null}
+                {lastExplainAbsolute ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">
+                    ABSOLUTE API URL DETECTED – THIS IS WRONG IN DEV
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-text hover:bg-cre-surface"
@@ -2614,6 +2753,12 @@ payload.polygon_geojson = polyOut;
                   Copy debug payload
                 </button>
               </div>
+            ) : null}
+            {lastRequest ? (
+              <details className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg p-2 text-[11px] text-cre-muted">
+                <summary className="cursor-pointer select-none text-cre-text">Last request JSON</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(lastRequest, null, 2)}</pre>
+              </details>
             ) : null}
           </div>
         ) : null}
@@ -3116,8 +3261,10 @@ payload.polygon_geojson = polyOut;
           {parcelLinesError ? <div className="mt-1 text-[11px] text-cre-muted">{parcelLinesError}</div> : null}
         </div>
 
-        <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
-          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">3) Signals</div>
+        <details className="rounded-xl border border-cre-border/60 bg-cre-surface p-3" open>
+          <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-widest text-cre-muted">
+            3) Signals
+          </summary>
           <div className="mt-3 space-y-3 text-xs">
               <label className="space-y-1">
                 <div className="text-cre-muted">Seller intent</div>
@@ -3328,7 +3475,7 @@ payload.polygon_geojson = polyOut;
                     : 'Active filters summary will show after you Run.'}
               </div>
             </div>
-          </div>
+        </details>
 
         <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3509,7 +3656,7 @@ payload.polygon_geojson = polyOut;
             })()}
           </div>
 
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
             {visibleRows.length ? (
               visibleRows.map((p) => {
                 const rec = recordById.get(p.parcel_id);
@@ -3653,7 +3800,7 @@ payload.polygon_geojson = polyOut;
         </details>
           </div>
 
-          <div className="sticky bottom-0 -mx-4 mt-3 border-t border-cre-border/60 bg-cre-bg/95 px-4 py-3 backdrop-blur">
+          <div className="sticky bottom-0 -mx-4 mt-3 shrink-0 border-t border-cre-border/60 bg-cre-bg/95 px-4 py-3 backdrop-blur">
             <div className="flex items-center gap-2">
               <button
                 type="button"

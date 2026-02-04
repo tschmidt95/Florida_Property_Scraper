@@ -1,6 +1,11 @@
 // ...existing code...
 const DEFAULT_COUNTY = 'seminole';
 
+export function apiPath(path: string): string {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return normalized.startsWith('/api') ? normalized : `/api${normalized}`;
+}
+
 type ApiUrlParams = Record<string, string | number | boolean | null | undefined>;
 
 function isDevEnv(): boolean {
@@ -39,7 +44,8 @@ export function apiUrl(path: string, opts?: { county?: string; params?: ApiUrlPa
     params.set('county', resolveCounty(opts.county, path));
   }
   const qs = params.toString();
-  return qs ? `${path}?${qs}` : path;
+  const p = qs ? `${path}?${qs}` : path;
+  return apiPath(p);
 }
 
 export async function getParcelsCoverage(county: string) {
@@ -1184,24 +1190,52 @@ export async function parcelsSearch(
   }
 
   const resolvedCounty = resolveCountyOptional((payload as any)?.county);
-  const resp = await fetch(resolvedCounty ? apiUrl('/api/parcels/search', { county: resolvedCounty }) : apiUrl('/api/parcels/search'), {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ...payload,
-      ...(resolvedCounty ? { county: resolvedCounty } : {}),
-      include_geometry: payload.include_geometry ?? true,
-    }),
+  const url = resolvedCounty ? apiUrl('/api/parcels/search', { county: resolvedCounty }) : apiUrl('/api/parcels/search');
+  const requestBody = JSON.stringify({
+    ...payload,
+    ...(resolvedCounty ? { county: resolvedCounty } : {}),
+    include_geometry: payload.include_geometry ?? true,
   });
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: requestBody,
+    });
+  } catch (e) {
+    const errMessage = e instanceof Error ? e.message : String(e);
+    const payloadInfo = {
+      url,
+      method: 'POST',
+      status: 0,
+      statusText: 'fetch_failed',
+      responseTextSnippet: '',
+      errMessage,
+    };
+    const err = new Error(`fetch_failed url=${url} msg=${errMessage}`);
+    (err as any).payload = payloadInfo;
+    throw err;
+  }
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
-    const head = String(text || '').slice(0, 800);
-    const detail = head ? `: ${head}` : '';
-    throw new Error(`HTTP ${resp.status} ${resp.statusText} url=${resp.url}${detail}`);
+    const head = String(text || '').slice(0, 500);
+    const payloadInfo = {
+      url: resp.url || url,
+      method: 'POST',
+      status: resp.status,
+      statusText: resp.statusText,
+      responseTextSnippet: head,
+      errMessage: `HTTP ${resp.status} ${resp.statusText}`,
+    };
+    const err = new Error(`HTTP ${resp.status} ${resp.statusText} url=${resp.url || url}: ${head}`);
+    (err as any).payload = payloadInfo;
+    throw err;
   }
 
   const data: unknown = await resp.json();
