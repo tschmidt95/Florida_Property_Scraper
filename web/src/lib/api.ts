@@ -21,6 +21,12 @@ export function resolveCounty(raw?: string, context?: string): string {
   return DEFAULT_COUNTY;
 }
 
+export function resolveCountyOptional(raw?: string): string | null {
+  const cleaned = String(raw || '').trim();
+  if (!cleaned) return null;
+  return cleaned.toLowerCase();
+}
+
 export function apiUrl(path: string, opts?: { county?: string; params?: ApiUrlParams }): string {
   const params = new URLSearchParams();
   if (opts?.params) {
@@ -41,6 +47,23 @@ export async function getParcelsCoverage(county: string) {
   if (!res.ok) throw new Error('Failed to fetch coverage');
   return await res.json();
 }
+
+export type SourceCoverage = {
+  county: string;
+  parcels_db_ok: boolean;
+  leads_db_ok: boolean;
+  counts: Record<string, number>;
+  fields: Record<string, boolean>;
+  available_trigger_keys: string[];
+  available_signal_keys: string[];
+  available_signal_groups: string[];
+};
+
+export async function fetchSourceCoverage(county: string): Promise<SourceCoverage> {
+  const res = await fetch(apiUrl('/api/debug/source_coverage', { county }));
+  if (!res.ok) throw new Error('Failed to fetch source coverage');
+  return (await res.json()) as SourceCoverage;
+}
 export type SearchResult = {
   owner: string;
   address: string;
@@ -55,7 +78,7 @@ export type SearchResult = {
 
 export type ParcelSearchRequest =
   | {
-      county: string;
+      county?: string;
       geometry: GeoJSON.Geometry;
       radius?: never;
       center?: never;
@@ -66,9 +89,14 @@ export type ParcelSearchRequest =
       limit?: number;
       include_geometry?: boolean;
       sort?: string;
+      polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
+      trigger_keys?: string[] | null;
+      trigger_groups?: string[] | null;
+      trigger_tiers?: string[] | null;
+      trigger_min_score?: number | null;
     }
   | {
-      county: string;
+      county?: string;
       geometry?: never;
       radius: { center: [number, number]; miles: number };
       center?: never;
@@ -79,10 +107,15 @@ export type ParcelSearchRequest =
       limit?: number;
       include_geometry?: boolean;
       sort?: string;
+      polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
+      trigger_keys?: string[] | null;
+      trigger_groups?: string[] | null;
+      trigger_tiers?: string[] | null;
+      trigger_min_score?: number | null;
     };
 
 export type ParcelSearchRequestV2 = {
-  county: string;
+  county?: string;
   geometry?: never;
   radius?: never;
   center: { lat: number; lng: number };
@@ -98,6 +131,7 @@ export type ParcelSearchRequestV2 = {
 export type ParcelAttributeFilters = {
   min_sqft?: number | null;
   max_sqft?: number | null;
+  missing_policy?: 'lenient' | 'strict' | null;
   // Convenience keys: if present, backend should treat as lot_size_acres filters.
   min_acres?: number | null;
   max_acres?: number | null;
@@ -134,7 +168,7 @@ export type ParcelAttributeFilters = {
 
 export type ParcelMapSearchRequest =
   | {
-      county: string;
+      county?: string;
       polygon_geojson: GeoJSON.Polygon;
       center?: never;
       radius_m?: never;
@@ -147,9 +181,14 @@ export type ParcelMapSearchRequest =
       filters?: ParcelAttributeFilters;
       sort?: string;
       debug?: boolean;
+      polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
+      trigger_keys?: string[] | null;
+      trigger_groups?: string[] | null;
+      trigger_tiers?: string[] | null;
+      trigger_min_score?: number | null;
     }
   | {
-      county: string;
+      county?: string;
       polygon_geojson?: never;
       center: { lat: number; lng: number };
       radius_m: number;
@@ -162,13 +201,22 @@ export type ParcelMapSearchRequest =
       filters?: ParcelAttributeFilters;
       sort?: string;
       debug?: boolean;
+      polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
+      trigger_keys?: string[] | null;
+      trigger_groups?: string[] | null;
+      trigger_tiers?: string[] | null;
+      trigger_min_score?: number | null;
     };
 
 export type ParcelRecord = {
   parcel_id: string;
+  pa_parcel_id?: string | null;
   county: string;
   situs_address: string;
   owner_name: string;
+  owner_mailing_address?: string | null;
+  property_type?: string | null;
+  property_type_raw?: string | null;
   land_use: string;
   future_land_use?: string | null;
   zoning: string | null;
@@ -177,6 +225,7 @@ export type ParcelRecord = {
   beds: number | null;
   baths: number | null;
   year_built: number | null;
+  ownership_years?: number | null;
   last_sale_date: string | null;
   last_sale_price: number | null;
   land_value?: number | null;
@@ -207,6 +256,7 @@ export type ParcelRecord = {
 
   // Extended valuation fields (optional)
   just_value?: number | null;
+      polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
   assessed_value?: number | null;
   taxable_value?: number | null;
 
@@ -225,6 +275,7 @@ export type ParcelDetail = Partial<ParcelRecord> & {
   assessed_value?: number | null;
   taxable_value?: number | null;
   just_value?: number | null;
+  polygon_match_mode?: 'intersects' | 'centroid_inside' | 'contains';
 };
 
 export type PermitRecord = {
@@ -246,10 +297,18 @@ export type ParcelSearchResponse = {
   future_land_use_options?: string[];
   summary: {
     count: number;
+    returned_count?: number;
+    total_count?: number;
+    candidate_count?: number;
+    filtered_count?: number;
     source_counts: Record<string, number>;
     source_counts_legacy?: Record<string, number>;
   };
   records: ParcelRecord[];
+  total_count?: number;
+  returned_count?: number;
+  has_more?: boolean;
+  next_cursor?: string | null;
   warnings?: string[];
   // Back-compat keys from the existing API
   count?: number;
@@ -283,6 +342,33 @@ export type ParcelSearchListItem = {
   mortgage_amount?: number | null;
   mortgage_date?: string | null;
   mortgage_lender?: string | null;
+
+  signals?: {
+    absentee_owner?: boolean;
+    homestead?: boolean;
+    has_permits?: boolean;
+    has_official_records?: boolean;
+    has_tax_events?: boolean;
+    has_code_enforcement?: boolean;
+    has_courts?: boolean;
+    has_gis_planning?: boolean;
+    has_property_appraiser?: boolean;
+  };
+  rollup?: {
+    seller_score?: number;
+    count_critical?: number;
+    count_strong?: number;
+    count_support?: number;
+    has_permits?: number;
+    has_official_records?: number;
+    has_tax?: number;
+    has_code_enforcement?: number;
+    has_courts?: number;
+    has_gis_planning?: number;
+    trigger_keys?: string[];
+  } | null;
+
+  signal_keys?: string[];
 
 };
 
@@ -523,6 +609,13 @@ export type ParcelsEnrichResponse = {
 export type DebugPingResponse = {
   ok: boolean;
   server_time: string;
+  time?: string;
+  version?: string;
+  db_ok?: boolean;
+  parcels_db_ok?: boolean;
+  leads_db_ok?: boolean;
+  parcels_count?: number;
+  rollups_count?: number;
   git: { sha: string; branch: string };
 };
 
@@ -534,6 +627,59 @@ export async function debugPing(): Promise<DebugPingResponse> {
     throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
   }
   return (await resp.json()) as DebugPingResponse;
+}
+
+export type SignalsCatalogItem = {
+  key: string;
+  label: string;
+  group: string;
+  tier: string;
+  implemented?: boolean;
+  coming_soon?: boolean;
+};
+
+export async function fetchSignalsCatalog(): Promise<SignalsCatalogItem[]> {
+  const resp = await fetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  const items = (data as any)?.signals;
+  if (!Array.isArray(items)) return [];
+  return items as SignalsCatalogItem[];
+}
+
+export type ResolveCountyRequest = {
+  lat?: number;
+  lng?: number;
+  center?: { lat: number; lng: number };
+  polygon_geojson?: GeoJSON.Polygon;
+};
+
+export type ResolveCountyResponse = {
+  ok: boolean;
+  county: string | null;
+  counties?: string[];
+  source?: string;
+};
+
+export async function resolveCountyAuto(payload: ResolveCountyRequest): Promise<ResolveCountyResponse> {
+  const resp = await fetch('/api/geo/resolve_county', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  return (await resp.json()) as ResolveCountyResponse;
 }
 
 export async function permitsByParcel(params: {
@@ -629,7 +775,6 @@ export type TriggerRollupsSearchRequest = {
   trigger_keys?: string[] | null;
   tiers?: string[] | null;
   limit?: number;
-  offset?: number;
 };
 
 export type TriggerRollupsSearchResponse = {
@@ -783,6 +928,7 @@ export async function createSavedSearch(payload: {
 export async function runSavedSearch(params: {
   saved_search_id: string;
   limit?: number;
+  offset?: number | null;
 }): Promise<Record<string, unknown>> {
   const sid = params.saved_search_id.trim();
   if (!sid) throw new Error('saved_search_id is required');
@@ -826,7 +972,7 @@ export async function listAlerts(params: {
   county?: string;
   status?: string;
   limit?: number;
-  offset?: number;
+  offset?: number | null;
 }): Promise<AlertsInboxRecord[]> {
   const qs = new URLSearchParams({
     saved_search_id: params.saved_search_id,
@@ -1037,8 +1183,8 @@ export async function parcelsSearch(
     // ignore
   }
 
-  const resolvedCounty = resolveCounty((payload as any)?.county, 'parcelsSearch');
-  const resp = await fetch(apiUrl('/api/parcels/search', { county: resolvedCounty }), {
+  const resolvedCounty = resolveCountyOptional((payload as any)?.county);
+  const resp = await fetch(resolvedCounty ? apiUrl('/api/parcels/search', { county: resolvedCounty }) : apiUrl('/api/parcels/search'), {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -1046,7 +1192,7 @@ export async function parcelsSearch(
     },
     body: JSON.stringify({
       ...payload,
-      county: resolvedCounty,
+      ...(resolvedCounty ? { county: resolvedCounty } : {}),
       include_geometry: payload.include_geometry ?? true,
     }),
   });
@@ -1063,11 +1209,18 @@ export async function parcelsSearch(
     throw new Error('Unexpected response: expected JSON object');
   }
 
+  const obj = data as any;
+  if (obj && obj.ok === false) {
+    const msg = String(obj.error || obj.message || 'Search failed');
+    const err = new Error(msg);
+    (err as any).payload = obj;
+    throw err;
+  }
+
   // Stabilize the contract for callers:
   // - Modern API returns {records: ParcelRecord[]}
   // - Legacy/alt API may return {results: [...]}
   // Always return `records` as an array (possibly empty) and keep any back-compat fields.
-  const obj = data as any;
   const out: ParcelSearchResponse = {
     ...obj,
     records: Array.isArray(obj.records) ? (obj.records as ParcelRecord[]) : [],

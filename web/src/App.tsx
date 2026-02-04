@@ -122,6 +122,7 @@ function RadiusClickHandler({
 export default function App() {
   const [apiOk, setApiOk] = useState(false);
   const [apiGit, setApiGit] = useState<{ sha: string; branch: string } | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
 
   // MapSearch v2 (web/src/pages/MapSearch.tsx) is the primary map UI.
@@ -210,10 +211,13 @@ export default function App() {
         if (cancelled) return;
         setApiOk(!!ping.ok);
         setApiGit(ping.git);
-      } catch {
+        setApiError(null);
+      } catch (e) {
         if (cancelled) return;
         setApiOk(false);
         setApiGit(null);
+        const msg = e instanceof Error ? e.message : 'Backend ping failed';
+        setApiError(msg);
       }
     };
     void tick();
@@ -459,6 +463,7 @@ export default function App() {
             <span className={apiOk ? 'text-emerald-300' : 'text-red-300'}>
               Backend: {apiOk ? 'OK' : 'FAIL'}
             </span>
+            {!apiOk && apiError ? <span className="text-red-300">({apiError})</span> : null}
             <span
               className={
                 mapStatus === 'loaded'
@@ -484,7 +489,7 @@ export default function App() {
         <MapErrorBoundary onSafeMapStatus={setMapStatus}>
           <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
             <div className="min-h-[520px]">
-              <LazyMapSearch onMapStatus={setMapStatus} />
+              <LazyMapSearch onMapStatus={setMapStatus} backendOk={apiOk} backendError={apiError} />
             </div>
           </Suspense>
         </MapErrorBoundary>

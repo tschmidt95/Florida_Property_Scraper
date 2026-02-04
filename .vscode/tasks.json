@@ -129,8 +129,42 @@
       "type": "shell",
       "command": "bash",
       "args": [
+        {
+          "label": "Agent: Proof: Seminole Pagination",
+          "type": "shell",
+          "command": "bash",
+          "args": [
+            "-lc",
+            "python - <<'PY'\nimport json, urllib.request\nBASE='http://127.0.0.1:8000'\ncounty='seminole'\nstats=json.load(urllib.request.urlopen(f\"{BASE}/api/debug/db_stats?county={county}\"))\npoly=stats['suggested_polygon']\nlimit=500\ncursor=None\nall_ids=set()\npage=0\ntotal=None\nwhile True:\n    page += 1\n    payload={'county':county,'polygon_geojson':poly,'limit':limit,'include_geometry':False,'explain':True}\n    if cursor is not None:\n        payload['cursor']=cursor\n    req=urllib.request.Request(f\"{BASE}/api/parcels/search?county={county}&explain=1\",data=json.dumps(payload).encode('utf-8'),headers={'Content-Type':'application/json'},method='POST')\n    resp=json.load(urllib.request.urlopen(req))\n    recs=resp.get('records',[])\n    for r in recs:\n        pid=str(r.get('parcel_id') or '')\n        ckey=str(r.get('county') or '')\n        if pid:\n            all_ids.add(f\"{ckey}:{pid}\")\n    ex=resp.get('explain') or {}\n    total = resp.get('total_count', ex.get('total_count', total))\n    has_more = resp.get('has_more', ex.get('has_more', False))\n    cursor = resp.get('next_cursor')\n    print({'page':page,'returned':len(recs),'total':total,'has_more':has_more,'next_cursor':bool(cursor)})\n    if not has_more:\n        break\nprint({'unique_ids':len(all_ids),'total_count':total})\nPY"
         "-lc",
+          "options": {
+            "cwd": "${workspaceFolder}"
+          },
+          "problemMatcher": [],
+          "presentation": {
+            "reveal": "always",
+            "panel": "dedicated",
+            "clear": true
+          }
+        },
+        {
+          "label": "Agent: Proof: Filters + Signals",
+          "type": "shell",
+          "command": "bash",
+          "args": [
+            "-lc",
+            "python - <<'PY'\nimport json, urllib.request\nBASE='http://127.0.0.1:8000'\ncounty='seminole'\nstats=json.load(urllib.request.urlopen(f\"{BASE}/api/debug/db_stats?county={county}\"))\npoly=stats['suggested_polygon']\n\ndef search(extra=None):\n    payload={'county':county,'polygon_geojson':poly,'limit':500,'include_geometry':False,'explain':True}\n    if extra:\n        payload.update(extra)\n    req=urllib.request.Request(f\"{BASE}/api/parcels/search?county={county}&explain=1\",data=json.dumps(payload).encode('utf-8'),headers={'Content-Type':'application/json'},method='POST')\n    resp=json.load(urllib.request.urlopen(req))\n    return resp\n\nbase=search()\nprint({'base_total':base.get('total_count'),'base_returned':base.get('returned_count')})\n\nflt=search({'filters':{'min_beds':1,'missing_policy':'strict'}})\nprint({'filter_total':flt.get('total_count'),'filter_returned':flt.get('returned_count')})\n\nsig=search({'trigger_keys':['permit_hvac']})\nprint({'signal_total':sig.get('total_count'),'signal_returned':sig.get('returned_count')})\nPY"
         "set -euo pipefail && { \
+          "options": {
+            "cwd": "${workspaceFolder}"
+          },
+          "problemMatcher": [],
+          "presentation": {
+            "reveal": "always",
+            "panel": "dedicated",
+            "clear": true
+          }
+        },
           pwd; \
           git rev-parse --abbrev-ref HEAD; \
           git rev-parse --short HEAD; \
@@ -614,7 +648,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -o pipefail; bash scripts/prove_polygon_search.sh 2>&1 | tee PROOF_POLYGON_SEARCH.txt"
+        "bash scripts/proof_seminole_pagination.sh"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -1154,6 +1188,152 @@ git commit -m \"feat: trigger filters + code enforcement & permits expansions\";
 git push; \
 echo; git --no-pager log -1 --oneline; \
 echo; git status --porcelain=v1 -b && echo && git status"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Dev: UI 5173",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "cd \"${workspaceFolder}/web\" && npm run dev"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Dev: API 8000",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "cd \"${workspaceFolder}\" && /workspaces/Florida_Property_Scraper/.venv/bin/python -m uvicorn florida_property_scraper.api.app:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: UI 5173 Head20",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS http://127.0.0.1:5173/ | head -n 20"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: API Ping",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS http://127.0.0.1:8000/api/debug/ping | python -m json.tool | head -n 60"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Live UI+API",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; echo --- UI head 20 ---; curl -sS http://127.0.0.1:5173/ | head -n 20; echo; echo --- API /debug/ping ---; curl -sS http://127.0.0.1:8000/api/debug/ping | python -m json.tool | head -n 60"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Polygon Paging (Seminole Small)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "python scripts/proof_polygon_paging_seminole_small.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Filters (Seminole Small)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "python scripts/proof_filters_seminole_small.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Trigger permit_hvac (Seminole)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "python scripts/proof_trigger_permit_hvac_seminole.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

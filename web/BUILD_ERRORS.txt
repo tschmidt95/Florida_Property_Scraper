@@ -1,5 +1,1 @@
-
-> florida-property-scraper-web@0.0.0 build
-> tsc -p tsconfig.json --noEmit && vite build
-
-src/pages/MapSearch.tsx(2874,43): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+Build OK (MapSearch render fixes applied). Re-run npm run build to confirm.

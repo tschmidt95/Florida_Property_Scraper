@@ -672,6 +672,28 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_scheduler_locks_heartbeat ON scheduler_locks(heartbeat_ts)"
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS owner_enrichment (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                status TEXT NOT NULL,
+                owner_name TEXT,
+                mailing_address TEXT,
+                phones_json TEXT,
+                emails_json TEXT,
+                raw_json TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(county, parcel_id, provider)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_owner_enrichment_lookup ON owner_enrichment(county, parcel_id, provider)"
+        )
+
         self.conn.commit()
 
     @staticmethod
@@ -821,6 +843,37 @@ class SQLiteStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def get_rollups_for_parcels(
+        self,
+        *,
+        county: str,
+        parcel_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        county_key = (county or "").strip().lower()
+        if not county_key or not parcel_ids:
+            return {}
+
+        ids = [str(x or "").strip() for x in parcel_ids]
+        ids = [x for x in ids if x]
+        if not ids:
+            return {}
+
+        out: Dict[str, Dict[str, Any]] = {}
+        chunk = 900
+        for i in range(0, len(ids), chunk):
+            batch = ids[i : i + chunk]
+            placeholders = ",".join(["?"] * len(batch))
+            rows = self.conn.execute(
+                f"SELECT * FROM parcel_trigger_rollups WHERE county=? AND parcel_id IN ({placeholders})",
+                [county_key, *batch],
+            ).fetchall()
+            for row in rows:
+                rec = dict(row)
+                pid = str(rec.get("parcel_id") or "").strip()
+                if pid:
+                    out[pid] = rec
+        return out
+
     @staticmethod
     def _utc_now_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -832,6 +885,84 @@ class SQLiteStore:
     @staticmethod
     def _clean_json(obj: Any) -> str:
         return json.dumps(obj, ensure_ascii=True, default=str)
+
+    def get_owner_enrichment(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        provider: str,
+    ) -> Dict[str, Any] | None:
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        prov = str(provider or "").strip().lower()
+        if not county_key or not pid or not prov:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM owner_enrichment WHERE county=? AND parcel_id=? AND provider=? LIMIT 1",
+            (county_key, pid, prov),
+        ).fetchone()
+        if not row:
+            return None
+        rec = dict(row)
+        try:
+            rec["phones"] = json.loads(rec.get("phones_json") or "[]")
+        except Exception:
+            rec["phones"] = []
+        try:
+            rec["emails"] = json.loads(rec.get("emails_json") or "[]")
+        except Exception:
+            rec["emails"] = []
+        try:
+            rec["raw"] = json.loads(rec.get("raw_json") or "{}")
+        except Exception:
+            rec["raw"] = {}
+        return rec
+
+    def upsert_owner_enrichment(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        provider: str,
+        status: str,
+        owner_name: str | None,
+        mailing_address: str | None,
+        phones: list[str],
+        emails: list[str],
+        raw: dict[str, Any],
+        updated_at: str | None = None,
+    ) -> None:
+        now = (updated_at or "").strip() or self._utc_now_iso()
+        self.conn.execute(
+            """
+            INSERT INTO owner_enrichment (
+                county, parcel_id, provider, status,
+                owner_name, mailing_address, phones_json, emails_json, raw_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, parcel_id, provider) DO UPDATE SET
+                status=excluded.status,
+                owner_name=excluded.owner_name,
+                mailing_address=excluded.mailing_address,
+                phones_json=excluded.phones_json,
+                emails_json=excluded.emails_json,
+                raw_json=excluded.raw_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                (county or "").strip().lower(),
+                str(parcel_id or "").strip(),
+                str(provider or "").strip().lower(),
+                str(status or ""),
+                owner_name,
+                mailing_address,
+                self._clean_json(phones),
+                self._clean_json(emails),
+                self._clean_json(raw),
+                now,
+            ),
+        )
+        self.conn.commit()
 
     def create_watchlist(
         self,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import L from 'leaflet';
 import type { LatLngLiteral } from 'leaflet';
@@ -13,9 +13,11 @@ import {
   parcelsGeometry,
   parcelsSearchNormalized,
   fetchParcelDetail,
+  fetchSourceCoverage,
   permitsByParcel,
-  resolveCounty,
   runSavedSearch,
+  resolveCountyAuto,
+  type SourceCoverage,
   triggersByParcel,
   triggersRollupByParcel,
   triggersRollupsSearch,
@@ -34,6 +36,20 @@ import {
 type MapStatus = 'loading' | 'loaded' | 'failed';
 
 type DrawnCircle = { center: LatLngLiteral; radius_m: number };
+
+type OwnerEnrichmentResponse = {
+  county: string;
+  parcel_id: string;
+  pa_parcel_id?: string | null;
+  owner_name?: string | null;
+  owner_mailing_address?: string | null;
+  provider?: string | null;
+  configured: boolean;
+  status: string;
+  phones: string[];
+  emails: string[];
+  cache_hit?: boolean;
+};
 
 function DrawControls({
   drawnItemsRef,
@@ -168,7 +184,7 @@ function DrawControls({
       try {
         drawnItems.clearLayers();
         if (e?.layer) drawnItems.addLayer(e.layer);
-      
+
         // IMPORTANT: disable draw mode after creating geometry so marker clicks work
         try {
           const tb = (drawControlRef.current as any)?._toolbars?.draw;
@@ -179,7 +195,7 @@ function DrawControls({
           rect?.disable?.();
           circ?.disable?.();
         } catch {}
-} catch {
+      } catch {
         // ignore
       }
 
@@ -424,6 +440,10 @@ type SignalCatalogItem = {
 // (see src/florida_property_scraper/triggers/taxonomy.py). This catalog is
 // intentionally stable and always renders, even when counts are zero.
 const SIGNALS_CATALOG: SignalCatalogItem[] = [
+  // Ownership (local PA-derived signals)
+  { key: 'absentee_owner', label: 'Absentee owner', group: 'Ownership', tier: 'strong' },
+  { key: 'homestead', label: 'Homestead', group: 'Ownership', tier: 'support' },
+
   // Permits
   { key: 'permit_demolition', label: 'Permit: demolition', group: 'Permits', tier: 'critical' },
   { key: 'permit_structural', label: 'Permit: structural', group: 'Permits', tier: 'critical' },
@@ -490,14 +510,21 @@ const SIGNALS_CATALOG: SignalCatalogItem[] = [
   { key: 'eviction_filing', label: 'Eviction filing', group: 'Courts', tier: 'critical', comingSoon: true },
 ];
 
+const ENABLED_SIGNAL_KEYS_DEFAULT = new Set(SIGNALS_CATALOG.filter((x) => !x.comingSoon).map((x) => x.key));
+
 export default function MapSearch({
   onMapStatus,
+  backendOk,
+  backendError,
 }: {
   onMapStatus?: (status: MapStatus) => void;
+  backendOk?: boolean;
+  backendError?: string | null;
 }) {
   const [county, setCounty] = useState('');
   const [drawnPolygon, setDrawnPolygon] = useState<GeoJSON.Polygon | null>(null);
   const [drawnCircle, setDrawnCircle] = useState<DrawnCircle | null>(null);
+  const [polygonMatchMode, setPolygonMatchMode] = useState<'intersects' | 'centroid_inside' | 'contains'>('intersects');
 
   const drawnPolygonRef = useRef<GeoJSON.Polygon | null>(null);
   const drawnCircleRef = useRef<DrawnCircle | null>(null);
@@ -542,6 +569,10 @@ export default function MapSearch({
   const [selectedParcelDetailLoading, setSelectedParcelDetailLoading] = useState(false);
   const [selectedParcelDetailError, setSelectedParcelDetailError] = useState<string | null>(null);
 
+  const [ownerEnrichment, setOwnerEnrichment] = useState<OwnerEnrichmentResponse | null>(null);
+  const [ownerEnrichmentLoading, setOwnerEnrichmentLoading] = useState(false);
+  const [ownerEnrichmentError, setOwnerEnrichmentError] = useState<string | null>(null);
+
   const [triggerLookupParcelId, setTriggerLookupParcelId] = useState('');
 
   const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
@@ -585,7 +616,11 @@ export default function MapSearch({
     minYearBuilt: string;
     maxYearBuilt: string;
     propertyType: string;
+    propertyTypeMode: 'contains' | 'equals';
     zoning: string;
+    zoningMatch: 'contains' | 'equals';
+    futureLandUse: string;
+    futureLandUseMatch: 'contains' | 'equals';
     minValue: string;
     maxValue: string;
     minLandValue: string;
@@ -594,6 +629,7 @@ export default function MapSearch({
     maxBuildingValue: string;
     lastSaleStart: string;
     lastSaleEnd: string;
+    minOwnershipYears: string;
   };
 
   const emptyFilterForm: FilterForm = {
@@ -607,7 +643,11 @@ export default function MapSearch({
     minYearBuilt: '',
     maxYearBuilt: '',
     propertyType: '',
+    propertyTypeMode: 'contains',
     zoning: '',
+    zoningMatch: 'contains',
+    futureLandUse: '',
+    futureLandUseMatch: 'contains',
     minValue: '',
     maxValue: '',
     minLandValue: '',
@@ -616,6 +656,7 @@ export default function MapSearch({
     maxBuildingValue: '',
     lastSaleStart: '',
     lastSaleEnd: '',
+    minOwnershipYears: '',
   };
 
   const [filterForm, setFilterForm] = useState<FilterForm>(emptyFilterForm);
@@ -676,16 +717,85 @@ export default function MapSearch({
   >(null);
   const [lastResponseCount, setLastResponseCount] = useState<number>(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [lastExplainError, setLastExplainError] = useState<any | null>(null);
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
+  const [activeFiltersSummary, setActiveFiltersSummary] = useState<string>('None');
+  const [activeSignalsSummary, setActiveSignalsSummary] = useState<string>('None');
+
+  const [pagingMeta, setPagingMeta] = useState<{
+    total: number | null;
+    loaded: number;
+    isPaging: boolean;
+    hasMore: boolean;
+  }>({ total: null, loaded: 0, isPaging: false, hasMore: false });
 
   const [resultsQuery, setResultsQuery] = useState('');
 
   const [toast, setToast] = useState<string | null>(null);
 
-  const signalCatalogKeysSet = useMemo(() => new Set(SIGNALS_CATALOG.map((x) => x.key)), []);
+  const backendUnavailable = backendOk === false;
+  const [sourceCoverage, setSourceCoverage] = useState<SourceCoverage | null>(null);
+  const [sourceCoverageLoading, setSourceCoverageLoading] = useState(false);
+  const [sourceCoverageError, setSourceCoverageError] = useState<string | null>(null);
+
+  const resolveCountyFromGeometry = useCallback(async (): Promise<string> => {
+    const existing = county.trim();
+    if (existing) return existing;
+    const poly = drawnPolygonRef.current ?? drawnPolygon;
+    const circle = drawnCircleRef.current ?? drawnCircle;
+    if (!poly && !circle) return '';
+    try {
+      const payload = poly
+        ? { polygon_geojson: poly }
+        : { center: circle?.center, radius_m: circle?.radius_m };
+      const resp = await resolveCountyAuto(payload as any);
+      const counties = Array.isArray(resp?.counties) ? resp.counties : [];
+      if (counties.length > 1) {
+        return '';
+      }
+      const resolved = String(resp?.county || '').trim().toLowerCase();
+      if (resolved) {
+        setCounty(resolved);
+        return resolved;
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  }, [county, drawnPolygon, drawnCircle]);
+
+  const [signalsCatalogOverride, setSignalsCatalogOverride] = useState<SignalCatalogItem[] | null>(null);
+  const liveSignalKeys = useMemo(
+    () => new Set((sourceCoverage?.available_signal_keys || []) as string[]),
+    [sourceCoverage]
+  );
+  const supportedSignalsCatalog = useMemo(() => {
+    const base = signalsCatalogOverride || SIGNALS_CATALOG;
+    const enforceLive = liveSignalKeys.size > 0;
+    return base.map((it) => ({
+      ...it,
+      comingSoon: Boolean(it.comingSoon) || (enforceLive && !liveSignalKeys.has(it.key)),
+    }));
+  }, [signalsCatalogOverride, liveSignalKeys]);
+  const signalCatalogKeysSet = useMemo(
+    () => new Set(supportedSignalsCatalog.map((x) => x.key)),
+    [supportedSignalsCatalog]
+  );
+  const enabledSignalKeys = useMemo(() => {
+    if (liveSignalKeys.size > 0) return liveSignalKeys;
+    if (signalsCatalogOverride) {
+      return new Set(
+        signalsCatalogOverride
+          .filter((x) => !x.comingSoon)
+          .map((x) => x.key)
+      );
+    }
+    return ENABLED_SIGNAL_KEYS_DEFAULT;
+  }, [liveSignalKeys, signalsCatalogOverride]);
+
   const signalCatalogByGroup = useMemo(() => {
     const m = new Map<string, SignalCatalogItem[]>();
-    for (const it of SIGNALS_CATALOG) {
+    for (const it of supportedSignalsCatalog) {
       const arr = m.get(it.group) || [];
       arr.push(it);
       m.set(it.group, arr);
@@ -695,7 +805,7 @@ export default function MapSearch({
       m.set(g, items);
     }
     return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, []);
+  }, [supportedSignalsCatalog]);
 
   const unknownSelectedTriggerKeys = useMemo(() => {
     const unknown: string[] = [];
@@ -729,6 +839,7 @@ export default function MapSearch({
   const [parcelLinesError, setParcelLinesError] = useState<string | null>(null);
   const [parcelLinesFC, setParcelLinesFC] = useState<GeoJSON.FeatureCollection | null>(null);
   const [parcelLinesFeatureCount, setParcelLinesFeatureCount] = useState<number>(0);
+  const [fieldStats, setFieldStats] = useState<any | null>(null);
 
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
@@ -760,6 +871,143 @@ export default function MapSearch({
       return owner.includes(q) || addr.includes(q) || p.parcel_id.toLowerCase().includes(q);
     });
   }, [resultsQuery, rows]);
+
+  const fieldAvailability = useMemo(() => {
+    const coverage = (sourceCoverage?.fields || {}) as Record<string, boolean>;
+    const useCoverage = Object.keys(coverage).length > 0;
+    const present = (fieldStats?.present || {}) as Record<string, number>;
+    const has = (key: string) =>
+      useCoverage ? Boolean(coverage[key]) : Number(present[key] || 0) > 0;
+    return {
+      living_area_sqft: has('living_area_sqft'),
+      lot_size_sqft: has('lot_size_sqft'),
+      lot_size_acres: has('lot_size_acres'),
+      beds: has('beds'),
+      baths: has('baths'),
+      year_built: has('year_built'),
+      total_value: has('total_value'),
+      land_value: has('land_value'),
+      building_value: has('building_value'),
+      assessed_value: has('assessed_value'),
+      last_sale_date: has('last_sale_date'),
+      property_type: has('property_type'),
+      zoning: has('zoning'),
+      future_land_use: has('future_land_use'),
+    };
+  }, [fieldStats, sourceCoverage]);
+
+  const lotSizeAvailable = fieldAvailability.lot_size_sqft || fieldAvailability.lot_size_acres;
+
+  const fieldCoverageNote = useCallback(
+    (fieldKey: string, hint: string) => {
+      const sourceFields = (sourceCoverage?.fields || {}) as Record<string, boolean>;
+      if (Object.keys(sourceFields).length && !sourceFields[fieldKey]) {
+        return (
+          <div className="text-[10px] text-cre-muted" title={hint}>
+            No source configured
+          </div>
+        );
+      }
+      const cov = (fieldStats?.coverage || {}) as Record<string, number>;
+      const present = (fieldStats?.present || {}) as Record<string, number>;
+      const missing = (fieldStats?.missing || {}) as Record<string, number>;
+      const raw = cov[fieldKey];
+      const pct = typeof raw === 'number' ? Math.round(raw * 100) : 0;
+      const count =
+        typeof present[fieldKey] === 'number' && typeof missing[fieldKey] === 'number'
+          ? ` (${present[fieldKey]}/${present[fieldKey] + missing[fieldKey]})`
+          : '';
+      const label = `Coverage: ${pct}%${count}`;
+      return (
+        <div className="text-[10px] text-cre-muted" title={hint}>
+          {label}
+        </div>
+      );
+    },
+    [fieldStats, sourceCoverage]
+  );
+
+  const downloadCsv = useCallback(() => {
+    const data = resultsQuery.trim() ? visibleRows || [] : rows || [];
+    if (!data.length) {
+      setToast('No results to download yet.');
+      return;
+    }
+    const header = [
+      'parcel_id',
+      'county',
+      'address',
+      'owner_name',
+      'owner_mailing_address',
+      'beds',
+      'baths',
+      'year_built',
+      'living_area_sqft',
+      'lot_size_sqft',
+      'lot_size_acres',
+      'zoning',
+      'future_land_use',
+      'land_value',
+      'building_value',
+      'total_value',
+      'assessed_value',
+      'taxable_value',
+      'last_sale_date',
+      'last_sale_price',
+      'source',
+      'signal_keys',
+      'seller_score',
+      'trigger_keys',
+    ];
+    const escapeCsv = (val: unknown) => {
+      const s = String(val ?? '').replace(/\r?\n/g, ' ').trim();
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+    const lines = [header.join(',')];
+    for (const p of data) {
+      const rec = recordById.get(p.parcel_id);
+      const rollup = (rec as any)?.rollup || null;
+      const signalKeys = Array.isArray((rec as any)?.signal_keys) ? (rec as any)?.signal_keys : [];
+      const rollupKeys = Array.isArray(rollup?.trigger_keys) ? rollup.trigger_keys : [];
+      lines.push([
+        escapeCsv(p.parcel_id),
+        escapeCsv(p.county || rec?.county || county),
+        escapeCsv(p.address || rec?.situs_address || rec?.address || ''),
+        escapeCsv(p.owner_name || rec?.owner_name || ''),
+        escapeCsv((rec as any)?.owner_mailing_address || ''),
+        escapeCsv(rec?.beds ?? ''),
+        escapeCsv(rec?.baths ?? ''),
+        escapeCsv(rec?.year_built ?? ''),
+        escapeCsv(rec?.living_area_sqft ?? ''),
+        escapeCsv(rec?.lot_size_sqft ?? ''),
+        escapeCsv(rec?.lot_size_acres ?? ''),
+        escapeCsv(rec?.zoning ?? ''),
+        escapeCsv(rec?.future_land_use ?? ''),
+        escapeCsv(rec?.land_value ?? ''),
+        escapeCsv(rec?.building_value ?? ''),
+        escapeCsv(rec?.total_value ?? ''),
+        escapeCsv(rec?.assessed_value ?? ''),
+        escapeCsv(rec?.taxable_value ?? ''),
+        escapeCsv(rec?.last_sale_date ?? ''),
+        escapeCsv(rec?.last_sale_price ?? ''),
+        escapeCsv(rec?.source ?? p.source ?? ''),
+        escapeCsv(signalKeys.join('|')),
+        escapeCsv(typeof rollup?.seller_score === 'number' ? rollup.seller_score : ''),
+        escapeCsv(rollupKeys.join('|')),
+      ].join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const label = county.trim() || 'all';
+    a.download = `parcels_${label}_${Date.now()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  }, [visibleRows, rows, resultsQuery, county, recordById]);
 
   const geometryStatus = useMemo(() => {
     if (drawnPolygon) return 'Polygon selected';
@@ -875,9 +1123,128 @@ export default function MapSearch({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSignalsCatalog() {
+      try {
+        const resp = await fetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const items = Array.isArray((data as any)?.signals) ? (data as any).signals : null;
+        if (!items || !Array.isArray(items)) return;
+        const mapped: SignalCatalogItem[] = items
+          .map((it: any) => ({
+            key: String(it?.key || ''),
+            label: String(it?.label || it?.key || ''),
+            group: String(it?.group || 'Signals'),
+            tier: (String(it?.tier || 'info') as any) || 'info',
+            comingSoon: Boolean(it?.coming_soon) || Boolean(it?.comingSoon) || Boolean(it?.implemented === false),
+          }))
+          .filter((it: SignalCatalogItem) => it.key && it.label);
+        if (!cancelled && mapped.length) setSignalsCatalogOverride(mapped);
+      } catch {
+        // ignore
+      }
+    }
+    void loadSignalsCatalog();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!drawnPolygon && !drawnCircle) return;
+    void resolveCountyFromGeometry();
+  }, [drawnCircle, drawnPolygon, resolveCountyFromGeometry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOwnerEnrichment() {
+      if (!selectedParcelId) {
+        setOwnerEnrichment(null);
+        setOwnerEnrichmentError(null);
+        return;
+      }
+      const rec = records.find((r) => r.parcel_id === selectedParcelId);
+      const list = parcels.find((p) => p.parcel_id === selectedParcelId);
+      const countyKey = (rec?.county || list?.county || county || '').trim().toLowerCase();
+      if (!countyKey) return;
+      setOwnerEnrichmentLoading(true);
+      setOwnerEnrichmentError(null);
+      try {
+        const resp = await fetch(
+          `/api/owners/enrich?county=${encodeURIComponent(countyKey)}&parcel_id=${encodeURIComponent(
+            selectedParcelId,
+          )}`,
+          { headers: { Accept: 'application/json' } },
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = (await resp.json()) as OwnerEnrichmentResponse;
+        if (!cancelled) setOwnerEnrichment(data);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setOwnerEnrichmentError(msg);
+      } finally {
+        if (!cancelled) setOwnerEnrichmentLoading(false);
+      }
+    }
+
+    void loadOwnerEnrichment();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedParcelId, records, parcels, county]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCoverage() {
+      let c = county.trim();
+      if (!c) {
+        c = await resolveCountyFromGeometry();
+      }
+      if (!c) {
+        if (!cancelled) {
+          setSourceCoverage(null);
+          setSourceCoverageError('County auto-detection required to load coverage.');
+        }
+        return;
+      }
+      setSourceCoverageLoading(true);
+      try {
+        const data = await fetchSourceCoverage(c);
+        if (!cancelled) {
+          setSourceCoverage(data);
+          setSourceCoverageError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setSourceCoverage(null);
+          setSourceCoverageError('Failed to load coverage.');
+        }
+      } finally {
+        if (!cancelled) setSourceCoverageLoading(false);
+      }
+    }
+    void loadCoverage();
+    return () => {
+      cancelled = true;
+    };
+  }, [county, resolveCountyFromGeometry]);
+
   const refreshSavedSearches = useCallback(
     async (nextCounty?: string) => {
-      const c = (nextCounty ?? county).trim();
+      let c = (nextCounty ?? county).trim();
+      if (!c) {
+        c = await resolveCountyFromGeometry();
+      }
+      if (!c) {
+        setSavedSearches([]);
+        setSelectedSavedSearchId('');
+        setSavedSearchesError('Select a county to use saved searches.');
+        setSavedSearchesLoading(false);
+        return;
+      }
       setSavedSearchesError(null);
       setSavedSearchesLoading(true);
       try {
@@ -899,11 +1266,20 @@ export default function MapSearch({
         setSavedSearchesLoading(false);
       }
     },
-    [county]
+    [county, resolveCountyFromGeometry]
   );
 
   const refreshAlerts = useCallback(
     async (nextSavedSearchId?: string, nextStatus?: string) => {
+      let c = county.trim();
+      if (!c) {
+        c = await resolveCountyFromGeometry();
+      }
+      if (!c) {
+        setAlertsInbox([]);
+        setAlertsError('Select a county to view alerts.');
+        return;
+      }
       const sid = (nextSavedSearchId ?? selectedSavedSearchId).trim();
       if (!sid) {
         setAlertsInbox([]);
@@ -917,7 +1293,7 @@ export default function MapSearch({
         const st = (nextStatus ?? alertsStatus).trim();
         const items = await listAlerts({
           saved_search_id: sid,
-          county,
+          county: c,
           status: st ? st : undefined,
           limit: 200,
           offset: 0,
@@ -931,7 +1307,7 @@ export default function MapSearch({
         setAlertsLoading(false);
       }
     },
-    [alertsStatus, county, selectedSavedSearchId]
+    [alertsStatus, county, selectedSavedSearchId, resolveCountyFromGeometry]
   );
 
   useEffect(() => {
@@ -943,6 +1319,14 @@ export default function MapSearch({
   }, [alertsStatus, county, refreshAlerts, selectedSavedSearchId]);
 
   async function runSelectedSavedSearch() {
+    let c = county.trim();
+    if (!c) {
+      c = await resolveCountyFromGeometry();
+    }
+    if (!c) {
+      showToast('Select a county to run saved searches.');
+      return;
+    }
     const sid = selectedSavedSearchId.trim();
     if (!sid) return;
     try {
@@ -956,7 +1340,7 @@ export default function MapSearch({
         showToast('Saved search run returned non-ok');
       }
       await refreshAlerts(sid, alertsStatus);
-      await refreshSavedSearches(county);
+      await refreshSavedSearches(c);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       showToast(`Run failed: ${msg}`);
@@ -964,6 +1348,14 @@ export default function MapSearch({
   }
 
   async function saveCurrentSearch() {
+    let c = county.trim();
+    if (!c) {
+      c = await resolveCountyFromGeometry();
+    }
+    if (!c) {
+      showToast('Select a county to save searches.');
+      return;
+    }
     const poly = drawnPolygonRef.current ?? drawnPolygon;
     if (!poly) {
       showToast('Draw a polygon to save a search.');
@@ -976,7 +1368,7 @@ export default function MapSearch({
       return;
     }
 
-    const defaultName = `${county.toUpperCase()} Saved Search`;
+    const defaultName = `${c.toUpperCase()} Saved Search`;
     const name = (typeof window !== 'undefined' ? window.prompt('Saved Search name', defaultName) : defaultName) || defaultName;
 
     try {
@@ -985,14 +1377,14 @@ export default function MapSearch({
       const sort = typeof payload?.sort === 'string' ? payload.sort : null;
       const ss = await createSavedSearch({
         name,
-        county,
+        county: c,
         geometry: poly as any,
         filters,
         enrich: false,
         sort,
       });
       showToast('Saved search created.');
-      await refreshSavedSearches(county);
+      await refreshSavedSearches(c);
       setSelectedSavedSearchId(String(ss.id || '').trim());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1015,11 +1407,27 @@ export default function MapSearch({
     const controller = new AbortController();
 
     async function loadSelectedDetails(parcelId: string) {
+      let selectedCounty =
+        (parcels.find((p) => p.parcel_id === parcelId)?.county ||
+          records.find((r) => r.parcel_id === parcelId)?.county ||
+          county ||
+          '')
+          .toString()
+          .trim();
+      if (!selectedCounty) {
+        selectedCounty = await resolveCountyFromGeometry();
+      }
+      if (!selectedCounty) {
+        setSelectedPermitsError('Select a county to load parcel signals.');
+        setSelectedTriggersError('Select a county to load parcel signals.');
+        setSelectedRollupError('Select a county to load parcel signals.');
+        return;
+      }
       setTriggerLookupParcelId(parcelId);
       setSelectedPermitsError(null);
       setSelectedPermitsLoading(true);
       try {
-        const permits = await permitsByParcel({ county, parcel_id: parcelId, limit: 200 });
+        const permits = await permitsByParcel({ county: selectedCounty, parcel_id: parcelId, limit: 200 });
         if (cancelled) return;
         setSelectedPermits(permits);
       } catch (e) {
@@ -1035,7 +1443,7 @@ export default function MapSearch({
       setSelectedTriggersLoading(true);
       try {
         const resp = await triggersByParcel({
-          county,
+          county: selectedCounty,
           parcel_id: parcelId,
           limit_events: 100,
           limit_alerts: 50,
@@ -1057,7 +1465,7 @@ export default function MapSearch({
       setSelectedRollupError(null);
       setSelectedRollupLoading(true);
       try {
-        const rollup = await triggersRollupByParcel({ county, parcel_id: parcelId });
+        const rollup = await triggersRollupByParcel({ county: selectedCounty, parcel_id: parcelId });
         if (cancelled) return;
         if (rollup) {
           setSelectedRollup(rollup);
@@ -1079,13 +1487,29 @@ export default function MapSearch({
     }
 
     async function loadSelectedParcelDetail(parcelId: string) {
+      const selectedCounty =
+        (parcels.find((p) => p.parcel_id === parcelId)?.county ||
+          records.find((r) => r.parcel_id === parcelId)?.county ||
+          county ||
+          '')
+          .toString()
+          .trim();
+      let resolvedCounty = selectedCounty;
+      if (!resolvedCounty) {
+        resolvedCounty = await resolveCountyFromGeometry();
+      }
+      if (!resolvedCounty) {
+        setSelectedParcelDetailError('Select a county to load parcel details.');
+        setSelectedParcelDetail(null);
+        return;
+      }
       setSelectedParcelDetail(null);
       setSelectedParcelDetailError(null);
       setSelectedParcelDetailLoading(true);
       try {
         const detail = await fetchParcelDetail({
           parcel_id: parcelId,
-          county,
+          county: resolvedCounty,
           include_geometry: true,
           signal: controller.signal,
         });
@@ -1128,7 +1552,7 @@ export default function MapSearch({
       cancelled = true;
       controller.abort();
     };
-  }, [county, selectedParcelId]);
+  }, [county, resolveCountyFromGeometry, selectedParcelId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1136,6 +1560,21 @@ export default function MapSearch({
     async function loadParcelLines() {
       if (!parcelLinesEnabled) return;
       setParcelLinesError(null);
+
+      const uniqueCounties = Array.from(
+        new Set(parcels.map((p) => (p?.county || '').trim()).filter(Boolean))
+      );
+      let countyForLines = county.trim() || (uniqueCounties.length === 1 ? uniqueCounties[0] : '');
+      if (!countyForLines) {
+        countyForLines = await resolveCountyFromGeometry();
+      }
+      if (!countyForLines) {
+        setParcelLinesFC(null);
+        setParcelLinesFeatureCount(0);
+        setParcelLinesStatus('empty');
+        setParcelLinesError('Select a county to load parcel geometry.');
+        return;
+      }
 
       const ids = parcels.map((p) => p.parcel_id).filter(Boolean).slice(0, 25);
       setParcelLinesLastIdsCount(ids.length);
@@ -1149,7 +1588,7 @@ export default function MapSearch({
       setParcelLinesLoading(true);
       setParcelLinesStatus('loading');
       try {
-        const fc = await parcelsGeometry({ county, parcel_ids: ids });
+        const fc = await parcelsGeometry({ county: countyForLines, parcel_ids: ids });
         if (cancelled) return;
         if (!fc.features?.length) {
           setParcelLinesFC(null);
@@ -1186,7 +1625,7 @@ export default function MapSearch({
     return () => {
       cancelled = true;
     };
-  }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels]);
+  }, [county, drawnCircle, drawnPolygon, parcelLinesEnabled, parcels, resolveCountyFromGeometry]);
 
   function buildSearchPayloadForMap(): { payload: any } | { error: string } {
     let poly = drawnPolygonRef.current ?? drawnPolygon;
@@ -1226,10 +1665,10 @@ export default function MapSearch({
     const minAcres = hasLotSize && lotSizeUnit === 'acres' ? minLotSize : null;
     const maxAcres = hasLotSize && lotSizeUnit === 'acres' ? maxLotSize : null;
 
-    const filters0: ParcelAttributeFilters = {
+    const filters0: ParcelAttributeFilters & { min_ownership_years?: number | null } = {
       min_sqft: toFloatOrNull(filterForm.minSqft),
       max_sqft: toFloatOrNull(filterForm.maxSqft),
-      missing_policy: 'lenient',
+      missing_policy: null,
       min_acres: minAcres,
       max_acres: maxAcres,
       min_lot_size_sqft: minLotSizeSqft,
@@ -1250,7 +1689,32 @@ export default function MapSearch({
       max_building_value: toIntOrNull(filterForm.maxBuildingValue),
       last_sale_date_start: filterForm.lastSaleStart.trim() || null,
       last_sale_date_end: filterForm.lastSaleEnd.trim() || null,
+      min_ownership_years: toIntOrNull(filterForm.minOwnershipYears),
     };
+
+    if (filterForm.propertyTypeMode === 'equals' && filterForm.propertyType.trim()) {
+      (filters0 as any).property_type = [filterForm.propertyType.trim()];
+    }
+
+    if (filterForm.zoningMatch === 'equals') {
+      const z = filterForm.zoning.trim();
+      if (z) {
+        (filters0 as any).zoning = null;
+        (filters0 as any).zoning_in = [z];
+      }
+    }
+
+    if (filterForm.futureLandUseMatch === 'equals') {
+      const flu = filterForm.futureLandUse.trim();
+      if (flu) {
+        (filters0 as any).future_land_use_in = [flu];
+      }
+    } else if (filterForm.futureLandUseMatch === 'contains') {
+      const flu = filterForm.futureLandUse.trim();
+      if (flu) {
+        (filters0 as any).future_land_use = flu;
+      }
+    }
 
     // IMPORTANT: omit blank filter keys entirely so "blank" never restricts results.
     const filters: any = {};
@@ -1261,16 +1725,21 @@ export default function MapSearch({
       filters[k] = v;
     }
     const hasAnyFilters = Object.keys(filters).length > 0;
+    if (hasAnyFilters) {
+      filters.missing_policy = 'strict';
+    }
 
-    const resolvedCounty = resolveCounty(county, 'map-search');
+    const resolvedCounty = county.trim();
+    const countyLocked = false;
     const payload: any = {
-      limit: 250,
+      limit: 500,
       include_geometry: false,
       filters: hasAnyFilters ? filters : undefined,
       sort: sortKey,
-      county: resolvedCounty,
       explain: true,
     };
+    payload.polygon_match_mode = polygonMatchMode;
+    if (resolvedCounty && countyLocked) payload.county = resolvedCounty;
 
     // Proof + forward-compat: include selected trigger keys in the request payload.
     // Filtering by signals is currently applied via the rollups prefilter (when enabled).
@@ -1322,6 +1791,40 @@ payload.polygon_geojson = polyOut;
 
     return { payload };
   }
+
+  const summarizeFilters = useCallback((filters: any): string => {
+    if (!filters || typeof filters !== 'object') return 'None';
+    const parts: string[] = [];
+    const push = (label: string, v: unknown) => {
+      if (v === null || v === undefined) return;
+      if (typeof v === 'string' && !v.trim()) return;
+      if (Array.isArray(v) && !v.length) return;
+      parts.push(`${label}: ${Array.isArray(v) ? v.join(', ') : v}`);
+    };
+    push('min_sqft', filters.min_sqft);
+    push('max_sqft', filters.max_sqft);
+    push('min_acres', filters.min_acres);
+    push('max_acres', filters.max_acres);
+    push('min_lot_size_sqft', filters.min_lot_size_sqft);
+    push('max_lot_size_sqft', filters.max_lot_size_sqft);
+    push('min_beds', filters.min_beds);
+    push('min_baths', filters.min_baths);
+    push('min_year_built', filters.min_year_built);
+    push('max_year_built', filters.max_year_built);
+    push('property_type', filters.property_type);
+    push('zoning', filters.zoning);
+    push('zoning_in', filters.zoning_in);
+    push('future_land_use_in', filters.future_land_use_in);
+    push('min_value', filters.min_value);
+    push('max_value', filters.max_value);
+    push('min_land_value', filters.min_land_value);
+    push('max_land_value', filters.max_land_value);
+    push('min_building_value', filters.min_building_value);
+    push('max_building_value', filters.max_building_value);
+    push('last_sale_date_start', filters.last_sale_date_start);
+    push('last_sale_date_end', filters.last_sale_date_end);
+    return parts.length ? parts.join(' · ') : 'None';
+  }, []);
 
   async function runDebug() {
     setRunDebugOut(null);
@@ -1436,15 +1939,29 @@ payload.polygon_geojson = polyOut;
       return;
     }
 
+    const uniqueCounties = Array.from(new Set(parcels.map((p) => (p?.county || '').trim()).filter(Boolean)));
+    let countyForEnrich = county.trim() || (uniqueCounties.length === 1 ? uniqueCounties[0] : '');
+    if (!countyForEnrich) {
+      countyForEnrich = await resolveCountyFromGeometry();
+    }
+    if (!countyForEnrich) {
+      setErrorBanner('Select a county to enrich results.');
+      return;
+    }
+
     const ids = parcels.map((p) => p.parcel_id)
       .slice(0, 150);
 
     if (!ids.length) return;
 
+    if (backendUnavailable) {
+      setErrorBanner(backendError || 'Backend unavailable.');
+      return;
+    }
     setLoading(true);
     const reqId = ++activeReq.current;
     try {
-      const resp = await parcelsEnrich({ county, parcel_ids: ids, limit: ids.length, max_per_minute: 30 });
+      const resp = await parcelsEnrich({ county: countyForEnrich, parcel_ids: ids, limit: ids.length, max_per_minute: 30 });
       if (reqId !== activeReq.current) return;
 
       const enriched = resp.records || [];
@@ -1479,10 +1996,19 @@ payload.polygon_geojson = polyOut;
 
   async function run() {
     setLastError(null);
+    setLastExplainError(null);
     setSoftWarnings([]);
     setErrorBanner(null);
     setRollupsError(null);
     setRollupsLastSummary(null);
+
+    const hasGeometry = Boolean(
+      drawnPolygonRef.current || drawnCircleRef.current || drawnPolygon || drawnCircle,
+    );
+    if (!hasGeometry && resultsQuery.trim()) {
+      setErrorBanner('Text filter applied to currently loaded results.');
+      return;
+    }
 
     const built = buildSearchPayloadForMap();
     if ('error' in built) {
@@ -1494,6 +2020,17 @@ payload.polygon_geojson = polyOut;
 
     const payload = built.payload;
     const hadFilters = !!(payload as any)?.filters;
+
+    if (!county.trim()) {
+      try {
+        const resolved = await resolveCountyFromGeometry();
+        if (resolved) {
+          (payload as any).county = resolved;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     const parsePositiveIntOrNull = (raw: string): number | null => {
       const s = String(raw || '').trim().replace(/,/g, '');
@@ -1525,57 +2062,51 @@ payload.polygon_geojson = polyOut;
     if (rollupsTierSupport) rollupsTiers.push('support');
     const rollupsActive =
       rollupsEnabled &&
-      (rollupsMinScoreN !== null || rollupsAnyGroups.length > 0 || rollupsTiers.length > 0 || rollupsKeys.length > 0);
+      (rollupsKeys.length > 0 || rollupsAnyGroups.length > 0 || rollupsTiers.length > 0 || rollupsMinScoreN !== null);
+
+    (payload as any).trigger_groups = rollupsAnyGroups;
+    (payload as any).trigger_tiers = rollupsTiers;
+    if (rollupsMinScoreN !== null) {
+      (payload as any).trigger_min_score = rollupsMinScoreN;
+    }
+
+    let countyForRollups = county.trim();
+    if (rollupsEnabled && !countyForRollups) {
+      try {
+        const resolved = await resolveCountyFromGeometry();
+        if (resolved) {
+          countyForRollups = resolved;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    if (rollupsEnabled && !countyForRollups) {
+      setRollupsError('Unable to resolve county for signals/rollups filters.');
+      setErrorBanner('Unable to resolve county for signals/rollups filters.');
+      setParcels([]);
+      setRecords([]);
+      return;
+    }
+    if (rollupsEnabled) {
+      const parts: string[] = [];
+      if (rollupsMinScoreN !== null) parts.push(`min score: ${rollupsMinScoreN}`);
+      if (rollupsAnyGroups.length) parts.push(`groups: ${rollupsAnyGroups.join(', ')}`);
+      if (rollupsKeys.length) parts.push(`keys: ${rollupsKeys.join(', ')}`);
+      if (rollupsTiers.length) parts.push(`tiers: ${rollupsTiers.join(', ')}`);
+      setActiveSignalsSummary(parts.length ? parts.join(' · ') : 'None');
+    } else {
+      setActiveSignalsSummary('None');
+    }
 
     if (rollupsEnabled && !rollupsActive) {
       setRollupsError('Select at least one trigger filter (group/tier/min score).');
     }
 
     if (rollupsActive) {
+      setRollupsMap({});
       try {
-        const rollupsReq: any = {
-          county,
-          min_score: rollupsMinScoreN,
-          any_groups: rollupsAnyGroups.length ? rollupsAnyGroups : null,
-          trigger_groups: rollupsAnyGroups.length ? rollupsAnyGroups : null,
-          trigger_keys: rollupsKeys.length ? rollupsKeys : null,
-          tiers: rollupsTiers.length ? rollupsTiers : null,
-          limit: 2000,
-          offset: 0,
-        };
-        if ((payload as any)?.polygon_geojson) rollupsReq.polygon_geojson = (payload as any).polygon_geojson;
-        if ((payload as any)?.center && (payload as any)?.radius_m) {
-          rollupsReq.center = (payload as any).center;
-          rollupsReq.radius_m = (payload as any).radius_m;
-        }
-
-        const rollupsResp = await triggersRollupsSearch(rollupsReq);
-        const ids = Array.isArray(rollupsResp.parcel_ids) ? rollupsResp.parcel_ids : [];
-        try {
-          const nextMap: Record<string, TriggerRollupRecord> = {};
-          const rr = Array.isArray((rollupsResp as any).rollups) ? ((rollupsResp as any).rollups as TriggerRollupRecord[]) : [];
-          for (const r of rr) {
-            const pid = (r?.parcel_id || '').trim();
-            if (pid) nextMap[pid] = r;
-          }
-          setRollupsMap(nextMap);
-        } catch {
-          setRollupsMap({});
-        }
-        setRollupsLastSummary({
-          candidate_count: Number(rollupsResp.candidate_count || 0),
-          returned_count: Number(rollupsResp.returned_count || 0),
-          parcel_ids_count: ids.length,
-        });
-
-        if (!ids.length) {
-          setErrorBanner('0 parcels matched trigger rollups filters.');
-          setParcels([]);
-          setRecords([]);
-          return;
-        }
-
-        (payload as any).parcel_id_in = ids;
+        setRollupsLastSummary(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setRollupsError(msg);
@@ -1588,6 +2119,9 @@ payload.polygon_geojson = polyOut;
     if (!rollupsActive) {
       setRollupsMap({});
     }
+    const filterSummary = summarizeFilters((payload as any)?.filters);
+    setActiveFiltersSummary(`${filterSummary}${filterSummary !== 'None' ? ' · ' : ''}polygon_match_mode: ${polygonMatchMode}`);
+
     const requestOrigin = (() => {
       try {
         return typeof window !== 'undefined' ? String(window.location.origin || '') : '';
@@ -1684,11 +2218,69 @@ payload.polygon_geojson = polyOut;
       // ignore
     }
     setLoading(true);
+    setPagingMeta({ total: null, loaded: 0, isPaging: true, hasMore: false });
 
     const reqId = ++activeReq.current;
     try {
-      const resp = await parcelsSearchNormalized(payload);
-      if (reqId !== activeReq.current) return;
+      const pageLimit = typeof (payload as any)?.limit === 'number' ? (payload as any).limit : 500;
+      let cursor: string | null = null;
+      let hasMore = true;
+      let totalCount: number | null = null;
+      let lastResp: any = null;
+      const allRecords: ParcelRecord[] = [];
+      const allParcels: ParcelSearchListItem[] = [];
+      const seenRecords = new Set<string>();
+      const seenParcels = new Set<string>();
+
+      while (hasMore) {
+        if (reqId !== activeReq.current) return;
+        const pagePayload = { ...payload, limit: pageLimit, cursor } as any;
+        const resp = await parcelsSearchNormalized(pagePayload);
+        if (reqId !== activeReq.current) return;
+
+        lastResp = resp;
+        const recs = resp.records || [];
+        const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
+
+        for (const r of recs) {
+          const pid = (r?.parcel_id || '').trim();
+          const ckey = String((r as any)?.county || '').trim().toLowerCase();
+          const key = ckey ? `${ckey}:${pid}` : pid;
+          if (!pid || seenRecords.has(key)) continue;
+          seenRecords.add(key);
+          allRecords.push(r);
+        }
+        for (const p of list) {
+          const pid = (p?.parcel_id || '').trim();
+          const ckey = String((p as any)?.county || '').trim().toLowerCase();
+          const key = ckey ? `${ckey}:${pid}` : pid;
+          if (!pid || seenParcels.has(key)) continue;
+          seenParcels.add(key);
+          allParcels.push(p);
+        }
+
+        const respTotal = (resp as any).total_count ?? (resp as any)?.summary?.total_count ?? (resp as any)?.explain?.final_count;
+        totalCount = Number.isFinite(Number(respTotal)) ? Number(respTotal) : totalCount;
+        hasMore = Boolean((resp as any).has_more);
+        cursor = (resp as any).next_cursor ?? null;
+        if (hasMore && !cursor) {
+          hasMore = false;
+        }
+
+        setPagingMeta({
+          total: totalCount ?? allParcels.length,
+          loaded: allParcels.length,
+          isPaging: hasMore,
+          hasMore,
+        });
+
+        if (!hasMore) break;
+      }
+
+      const resp = lastResp;
+      if (!resp) {
+        throw new Error('No response received from backend.');
+      }
 
       if (debugUiEnabled) {
         try {
@@ -1761,8 +2353,15 @@ payload.polygon_geojson = polyOut;
       setZoningOptions(rawZoningOptions);
       setFutureLandUseOptions(uniqSorted((resp as any).future_land_use_options));
 
-      const recs = resp.records || [];
-      const list = Array.isArray((resp as any).parcels) ? ((resp as any).parcels as ParcelSearchListItem[]) : [];
+      const recs = allRecords;
+      const list = allParcels;
+
+      if (!county.trim()) {
+        const unique = Array.from(new Set(list.map((p) => (p?.county || '').trim()).filter(Boolean)));
+        if (unique.length === 1) {
+          setCounty(unique[0]);
+        }
+      }
 
       console.log('[Run] response', { recordsLen: recs.length });
 
@@ -1786,6 +2385,7 @@ payload.polygon_geojson = polyOut;
         // ignore
       }
       const warningsAll = (resp as any).warnings as string[] | undefined;
+      setFieldStats((resp as any).field_stats || null);
 
       const isSoftWarning = (w: string): boolean => {
         const s = String(w || '').toLowerCase();
@@ -1836,6 +2436,7 @@ payload.polygon_geojson = polyOut;
           missing_field_counts: missingFieldCounts,
           filtered_out_count: filteredOutCount,
           returned_count: list.length || recs.length,
+          total_count: typeof (resp as any).total_count === 'number' ? (resp as any).total_count : totalCount,
           candidate_count: candidateCount,
           filtered_count: filteredCount,
           records_truncated: Boolean((resp as any).records_truncated),
@@ -1891,16 +2492,25 @@ payload.polygon_geojson = polyOut;
       setParcelLinesError(null);
       setParcelLinesFC(null);
       setParcelLinesFeatureCount(0);
+      setPagingMeta({ total: totalCount ?? list.length, loaded: list.length, isPaging: false, hasMore: false });
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
+      const payload = (e as any)?.payload ?? null;
+      if (payload && typeof payload === 'object') {
+        setLastExplainError(payload);
+      } else {
+        setLastExplainError(null);
+      }
       setLastError(msg);
       setErrorBanner(`Request failed (${requestVia}): ${msg}`);
+      setPagingMeta({ total: null, loaded: 0, isPaging: false, hasMore: false });
       try {
         setLastResponseSummary({
           request_via: requestVia,
           error: msg,
           request: lastRequest,
+          error_payload: payload,
         });
       } catch {
         // ignore
@@ -1913,45 +2523,29 @@ payload.polygon_geojson = polyOut;
       setParcelLinesFeatureCount(0);
     } finally {
       if (reqId === activeReq.current) setLoading(false);
+      setPagingMeta((prev) => ({ ...prev, isPaging: false, hasMore: false }));
     }
   }
 
-  const signalGroupOptions = useMemo(
-    () => [
+  const signalGroupOptions = useMemo(() => {
+    const liveGroups = new Set((sourceCoverage?.available_signal_groups || []) as string[]);
+    const enforce = liveGroups.size > 0;
+    const base = [
+      { key: 'ownership', label: 'Ownership' },
       { key: 'permits', label: 'Permits' },
       { key: 'official_records', label: 'Official Records' },
       { key: 'courts', label: 'Courts' },
-      { key: 'tax', label: 'Tax' },
+      { key: 'tax', label: 'Tax Collector' },
       { key: 'code_enforcement', label: 'Code Enforcement' },
-      { key: 'gis_planning', label: 'Appraiser / Planning' },
-    ],
-    []
-  );
+      { key: 'gis_planning', label: 'Appraiser-Planning' },
+    ];
+    return base.map((g) => ({ ...g, enabled: !enforce || liveGroups.has(g.key) }));
+  }, [sourceCoverage]);
 
   const distressPresets = useMemo(
     () => [
-      { id: 'lis', label: 'Lis pendens', keys: ['lis_pendens'], groups: ['official_records'] },
-      {
-        id: 'foreclosure',
-        label: 'Foreclosure',
-        keys: ['foreclosure_filing', 'foreclosure_judgment', 'foreclosure'],
-        groups: ['official_records'],
-      },
-      { id: 'tax', label: 'Delinquent tax', keys: ['delinquent_tax', 'tax_certificate_issued'], groups: ['tax'] },
-      {
-        id: 'code',
-        label: 'Code case',
-        keys: ['code_case_opened', 'unsafe_structure', 'condemnation', 'demolition_order', 'abatement_order', 'lien_recorded'],
-        groups: ['code_enforcement'],
-      },
-      {
-        id: 'liens',
-        label: 'Liens',
-        keys: ['mechanics_lien', 'hoa_lien', 'irs_tax_lien', 'state_tax_lien', 'code_enforcement_lien', 'judgment_lien', 'utility_lien'],
-        groups: ['official_records'],
-      },
-      { id: 'probate', label: 'Probate', keys: ['probate_opened', 'probate'], groups: ['courts'] },
-      { id: 'divorce', label: 'Divorce', keys: ['divorce_filed', 'divorce'], groups: ['courts'] },
+      { id: 'absentee', label: 'Absentee owner', keys: ['absentee_owner'], groups: ['ownership'] },
+      { id: 'homestead', label: 'Homestead', keys: ['homestead'], groups: ['ownership'] },
     ],
     []
   );
@@ -1965,7 +2559,7 @@ payload.polygon_geojson = polyOut;
 
   return (
     <div
-      className="flex h-full min-h-[520px]"
+      className="flex h-screen min-h-[520px] overflow-hidden"
       style={{
         ['--cre-bg' as any]: '248 250 252',
         ['--cre-surface' as any]: '255 255 255',
@@ -1981,54 +2575,52 @@ payload.polygon_geojson = polyOut;
         </div>
       ) : null}
 
-      <aside className="h-full w-[420px] shrink-0 overflow-y-auto border-r border-cre-border/60 bg-cre-bg p-4">
+      <aside className="flex h-screen w-[420px] shrink-0 flex-col border-r border-cre-border/60 bg-cre-bg p-4 min-h-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Map Search</div>
             <div className="text-sm text-cre-text">Search → Area → Signals → Results</div>
           </div>
 
-          <select
-            className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-sm text-cre-text"
-            value={county}
-            onChange={(e: ChangeEvent<HTMLSelectElement>) => {
-              const next = e.target.value;
-              setCounty(next);
-              setParcels([]);
-              setRecords([]);
-              setSourceCounts({ live: 0, cache: 0 });
-              setSelectedParcelId(null);
-              setSignalsDrawerOpen(false);
-              setZoningOptions([]);
-              setFutureLandUseOptions([]);
-              setZoningQuery('');
-              setFutureLandUseQuery('');
-              setSelectedZoning([]);
-              setSelectedFutureLandUse([]);
-              setRollupsEnabled(false);
-              setRollupsLastSummary(null);
-              setRollupsError(null);
-              setRollupsMap({});
-              setSelectedSavedSearchId('');
-              setAlertsInbox([]);
-              setAlertsError(null);
-            }}
-          >
-            <option value="orange">Orange</option>
-            <option value="seminole">Seminole</option>
-            <option value="broward">Broward</option>
-            <option value="alachua">Alachua</option>
-          </select>
+          <div className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-xs text-cre-text">
+            County: {county ? county.toUpperCase() : 'AUTO'}
+          </div>
         </div>
 
         {errorBanner ? (
           <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-surface p-3 text-sm text-cre-text">
             <div className="font-semibold">Notice</div>
             <div className="mt-1 text-xs text-cre-muted">{errorBanner}</div>
+            {lastExplainError ? (
+              <div className="mt-2 space-y-2 text-[11px] text-cre-muted">
+                <div>Backend error: {String(lastExplainError.error || lastExplainError.message || 'Unknown')}</div>
+                {lastExplainError.where ? <div>Where: {String(lastExplainError.where)}</div> : null}
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-text hover:bg-cre-surface"
+                  onClick={() => {
+                    try {
+                      const payload = {
+                        request: lastRequest,
+                        error: lastExplainError,
+                      };
+                      void navigator.clipboard?.writeText?.(JSON.stringify(payload, null, 2));
+                      showToast('Debug payload copied.');
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                >
+                  Copy debug payload
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
-        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+        <div className="mt-4 flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">1) Search</div>
 
           <div className="mt-2 grid gap-2">
@@ -2061,7 +2653,7 @@ payload.polygon_geojson = polyOut;
               ) : null}
             </div>
 
-            <details className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+            <details className="rounded-xl border border-cre-border/60 bg-cre-bg p-3" open>
               <summary className="cursor-pointer select-none text-xs font-semibold text-cre-text">
                 Property filters
                 {filtersActive ? <span className="ml-2 text-[11px] text-cre-muted">(active)</span> : null}
@@ -2074,9 +2666,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minSqft}
+                    disabled={!fieldAvailability.living_area_sqft}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minSqft: e.target.value }))}
                     placeholder="e.g. 2000"
                   />
+                  {!fieldAvailability.living_area_sqft
+                    ? fieldCoverageNote('living_area_sqft', 'Source: leads.sqlite.parcel_table1.LIVING_AREA or leads.sqlite.pa_properties.living_sf')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Sqft</div>
@@ -2084,9 +2680,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.maxSqft}
+                    disabled={!fieldAvailability.living_area_sqft}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxSqft: e.target.value }))}
                     placeholder=""
                   />
+                  {!fieldAvailability.living_area_sqft
+                    ? fieldCoverageNote('living_area_sqft', 'Source: leads.sqlite.parcel_table1.LIVING_AREA or leads.sqlite.pa_properties.living_sf')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2125,9 +2725,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="decimal"
                     value={filterForm.minLotSize}
+                    disabled={!lotSizeAvailable}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minLotSize: e.target.value }))}
                     placeholder={filterForm.lotSizeUnit === 'acres' ? 'e.g. 0.25' : 'e.g. 8000'}
                   />
+                  {!lotSizeAvailable
+                    ? fieldCoverageNote('lot_size_sqft', 'Source: leads.sqlite.pa_properties.land_sf/land_acres')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Parcel Size</div>
@@ -2135,8 +2739,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="decimal"
                     value={filterForm.maxLotSize}
+                    disabled={!lotSizeAvailable}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxLotSize: e.target.value }))}
                   />
+                  {!lotSizeAvailable
+                    ? fieldCoverageNote('lot_size_sqft', 'Source: leads.sqlite.pa_properties.land_sf/land_acres')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2145,9 +2753,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minBeds}
+                    disabled={!fieldAvailability.beds}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minBeds: e.target.value }))}
                     placeholder="e.g. 3"
                   />
+                  {!fieldAvailability.beds
+                    ? fieldCoverageNote('beds', 'Source: leads.sqlite.pa_properties.bedrooms')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Min Baths</div>
@@ -2155,9 +2767,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="decimal"
                     value={filterForm.minBaths}
+                    disabled={!fieldAvailability.baths}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minBaths: e.target.value }))}
                     placeholder="e.g. 2"
                   />
+                  {!fieldAvailability.baths
+                    ? fieldCoverageNote('baths', 'Source: leads.sqlite.pa_properties.bathrooms')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2166,9 +2782,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minYearBuilt}
+                    disabled={!fieldAvailability.year_built}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minYearBuilt: e.target.value }))}
                     placeholder="e.g. 1990"
                   />
+                  {!fieldAvailability.year_built
+                    ? fieldCoverageNote('year_built', 'Source: leads.sqlite.parcel_table1.BASE_YR_BLT or leads.sqlite.pa_properties.year_built')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Year Built</div>
@@ -2176,30 +2796,92 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.maxYearBuilt}
+                    disabled={!fieldAvailability.year_built}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxYearBuilt: e.target.value }))}
                   />
+                  {!fieldAvailability.year_built
+                    ? fieldCoverageNote('year_built', 'Source: leads.sqlite.parcel_table1.BASE_YR_BLT or leads.sqlite.pa_properties.year_built')
+                    : null}
                 </label>
 
+                <label className="space-y-1">
+                  <div className="text-cre-muted">Min Ownership Years</div>
+                  <input
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    inputMode="numeric"
+                    value={filterForm.minOwnershipYears}
+                    onChange={(e) => setFilterForm((p) => ({ ...p, minOwnershipYears: e.target.value }))}
+                    placeholder="e.g. 10"
+                  />
+                  {fieldCoverageNote('ownership_years', 'Source: leads.sqlite.pa_properties.last_sale_date')}
+                </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Property Type</div>
                   <select
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     value={filterForm.propertyType}
+                    disabled={!fieldAvailability.property_type}
                     onChange={(e) => setFilterForm((p) => ({ ...p, propertyType: e.target.value }))}
                   >
                     <option value="">Any</option>
-                    <option value="residential">Residential</option>
-                    <option value="commercial">Commercial</option>
+                    <option value="sfr">Single Family</option>
+                    <option value="condo">Condo</option>
+                    <option value="townhome">Townhome</option>
+                    <option value="mfh">Multi-Family</option>
+                    <option value="mobile_home">Mobile / Manufactured</option>
+                    <option value="mixed_use">Mixed Use</option>
+                    <option value="retail">Retail</option>
+                    <option value="office">Office</option>
+                    <option value="industrial">Industrial</option>
+                    <option value="agricultural">Agricultural</option>
+                    <option value="vacant_land">Vacant Land</option>
+                    <option value="residential">Residential (generic)</option>
+                    <option value="commercial">Commercial (generic)</option>
                   </select>
+                  <select
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={filterForm.propertyTypeMode}
+                    disabled={!fieldAvailability.property_type}
+                    onChange={(e) =>
+                      setFilterForm((p) => ({
+                        ...p,
+                        propertyTypeMode: e.target.value === 'equals' ? 'equals' : 'contains',
+                      }))
+                    }
+                  >
+                    <option value="contains">Contains</option>
+                    <option value="equals">Equals</option>
+                  </select>
+                  {!fieldAvailability.property_type
+                    ? fieldCoverageNote('property_type', 'Source: leads.sqlite.pa_properties.use_type / land_use_code')
+                    : null}
                 </label>
                 <label className="space-y-1">
-                  <div className="text-cre-muted">Zoning (contains)</div>
+                  <div className="text-cre-muted">Zoning</div>
                   <input
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     value={filterForm.zoning}
+                    disabled={!fieldAvailability.zoning}
                     onChange={(e) => setFilterForm((p) => ({ ...p, zoning: e.target.value }))}
                     placeholder="e.g. R-1"
                   />
+                  <select
+                    className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                    value={filterForm.zoningMatch}
+                    disabled={!fieldAvailability.zoning}
+                    onChange={(e) =>
+                      setFilterForm((p) => ({
+                        ...p,
+                        zoningMatch: e.target.value === 'equals' ? 'equals' : 'contains',
+                      }))
+                    }
+                  >
+                    <option value="contains">Contains</option>
+                    <option value="equals">Equals</option>
+                  </select>
+                  {!fieldAvailability.zoning
+                    ? fieldCoverageNote('zoning', 'Source: leads.sqlite.pa_properties.zoning')
+                    : null}
                 </label>
 
                 <div className="col-span-2 mt-3 space-y-3">
@@ -2212,6 +2894,33 @@ payload.polygon_geojson = polyOut;
                     onSelected={setSelectedZoning}
                     renderOption={formatCodeLabel}
                   />
+                  {!fieldAvailability.zoning
+                    ? fieldCoverageNote('zoning', 'Source: leads.sqlite.pa_properties.zoning')
+                    : null}
+                  <label className="space-y-1">
+                    <div className="text-cre-muted">Future Land Use</div>
+                    <input
+                      className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                      value={filterForm.futureLandUse}
+                      disabled={!fieldAvailability.future_land_use}
+                      onChange={(e) => setFilterForm((p) => ({ ...p, futureLandUse: e.target.value }))}
+                      placeholder="e.g. RES"
+                    />
+                    <select
+                      className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
+                      value={filterForm.futureLandUseMatch}
+                      disabled={!fieldAvailability.future_land_use}
+                      onChange={(e) =>
+                        setFilterForm((p) => ({
+                          ...p,
+                          futureLandUseMatch: e.target.value === 'equals' ? 'equals' : 'contains',
+                        }))
+                      }
+                    >
+                      <option value="contains">Contains</option>
+                      <option value="equals">Equals</option>
+                    </select>
+                  </label>
                   <MultiSelectFilter
                     title="Future Land Use (multi-select)"
                     options={futureLandUseOptions}
@@ -2221,6 +2930,9 @@ payload.polygon_geojson = polyOut;
                     onSelected={setSelectedFutureLandUse}
                     renderOption={formatCodeLabel}
                   />
+                  {!fieldAvailability.future_land_use
+                    ? fieldCoverageNote('future_land_use', 'Source: leads.sqlite.pa_properties.future_land_use')
+                    : null}
                   <div className="text-[11px] text-cre-muted">Tip: “Zoning contains” and multi-select both apply (AND).</div>
                 </div>
 
@@ -2230,9 +2942,13 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minValue}
+                    disabled={!fieldAvailability.total_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minValue: e.target.value }))}
                     placeholder="e.g. 350000"
                   />
+                  {!fieldAvailability.total_value
+                    ? fieldCoverageNote('total_value', 'Source: leads.sqlite.parcel_table1.TOTAL_JUST_VALUE or leads.sqlite.pa_properties.just_value')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Total Value</div>
@@ -2240,8 +2956,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.maxValue}
+                    disabled={!fieldAvailability.total_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxValue: e.target.value }))}
                   />
+                  {!fieldAvailability.total_value
+                    ? fieldCoverageNote('total_value', 'Source: leads.sqlite.parcel_table1.TOTAL_JUST_VALUE or leads.sqlite.pa_properties.just_value')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2250,8 +2970,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minLandValue}
+                    disabled={!fieldAvailability.land_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minLandValue: e.target.value }))}
                   />
+                  {!fieldAvailability.land_value
+                    ? fieldCoverageNote('land_value', 'Source: leads.sqlite.parcel_table1.APPR_LAND or leads.sqlite.pa_properties.land_value')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Land Value</div>
@@ -2259,8 +2983,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.maxLandValue}
+                    disabled={!fieldAvailability.land_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxLandValue: e.target.value }))}
                   />
+                  {!fieldAvailability.land_value
+                    ? fieldCoverageNote('land_value', 'Source: leads.sqlite.parcel_table1.APPR_LAND or leads.sqlite.pa_properties.land_value')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2269,8 +2997,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.minBuildingValue}
+                    disabled={!fieldAvailability.building_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, minBuildingValue: e.target.value }))}
                   />
+                  {!fieldAvailability.building_value
+                    ? fieldCoverageNote('building_value', 'Source: leads.sqlite.parcel_table1.APPR_BLDG or leads.sqlite.pa_properties.improvement_value')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Max Building Value</div>
@@ -2278,8 +3010,12 @@ payload.polygon_geojson = polyOut;
                     className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-cre-text"
                     inputMode="numeric"
                     value={filterForm.maxBuildingValue}
+                    disabled={!fieldAvailability.building_value}
                     onChange={(e) => setFilterForm((p) => ({ ...p, maxBuildingValue: e.target.value }))}
                   />
+                  {!fieldAvailability.building_value
+                    ? fieldCoverageNote('building_value', 'Source: leads.sqlite.parcel_table1.APPR_BLDG or leads.sqlite.pa_properties.improvement_value')
+                    : null}
                 </label>
 
                 <label className="space-y-1">
@@ -2289,9 +3025,13 @@ payload.polygon_geojson = polyOut;
                     type="text"
                     inputMode="numeric"
                     value={filterForm.lastSaleStart}
+                    disabled={!fieldAvailability.last_sale_date}
                     onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleStart: e.target.value }))}
                     placeholder="YYYY-MM-DD or MM/DD/YYYY"
                   />
+                  {!fieldAvailability.last_sale_date
+                    ? fieldCoverageNote('last_sale_date', 'Source: leads.sqlite.pa_properties.last_sale_date')
+                    : null}
                 </label>
                 <label className="space-y-1">
                   <div className="text-cre-muted">Last Sale End</div>
@@ -2300,9 +3040,13 @@ payload.polygon_geojson = polyOut;
                     type="text"
                     inputMode="numeric"
                     value={filterForm.lastSaleEnd}
+                    disabled={!fieldAvailability.last_sale_date}
                     onChange={(e) => setFilterForm((p) => ({ ...p, lastSaleEnd: e.target.value }))}
                     placeholder="YYYY-MM-DD or MM/DD/YYYY"
                   />
+                  {!fieldAvailability.last_sale_date
+                    ? fieldCoverageNote('last_sale_date', 'Source: leads.sqlite.pa_properties.last_sale_date')
+                    : null}
                 </label>
 
                 {softWarnings.length ? (
@@ -2315,12 +3059,26 @@ payload.polygon_geojson = polyOut;
             </details>
           </div>
         </div>
-
-        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+        <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">2) Draw / Area</div>
           <div className="mt-2 text-xs text-cre-muted">Use polygon or circle tools (top-right of map).</div>
           <div className="mt-2 text-xs text-cre-muted">
             Status: <span className="font-semibold text-cre-text">{geometryStatus}</span>
+          </div>
+
+          <div className="mt-2">
+            <label className="text-xs text-cre-muted">
+              Polygon match mode
+              <select
+                className="mt-1 w-full rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-sm text-cre-text"
+                value={polygonMatchMode}
+                onChange={(e) => setPolygonMatchMode(e.target.value as typeof polygonMatchMode)}
+              >
+                <option value="intersects">Intersects (default)</option>
+                <option value="centroid_inside">Centroid inside</option>
+                <option value="contains">Contains</option>
+              </select>
+            </label>
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -2358,7 +3116,7 @@ payload.polygon_geojson = polyOut;
           {parcelLinesError ? <div className="mt-1 text-[11px] text-cre-muted">{parcelLinesError}</div> : null}
         </div>
 
-        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+        <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">3) Signals</div>
           <div className="mt-3 space-y-3 text-xs">
               <label className="space-y-1">
@@ -2366,7 +3124,10 @@ payload.polygon_geojson = polyOut;
                 <select
                   className="w-full rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-sm text-cre-text"
                   value={(rollupsMinScore || '').trim()}
-                  onChange={(e) => setRollupsMinScore(e.target.value)}
+                  onChange={(e) => {
+                    setRollupsEnabled(true);
+                    setRollupsMinScore(e.target.value);
+                  }}
                 >
                   <option value="">Any</option>
                   <option value="30">Some intent (≥ 30)</option>
@@ -2383,9 +3144,19 @@ payload.polygon_geojson = polyOut;
                       <input
                         type="checkbox"
                         checked={rollupsTriggerGroups.includes(g.key)}
-                        onChange={() => setRollupsTriggerGroups((prev) => toggleValueInList(prev, g.key))}
+                        disabled={!g.enabled}
+                        onChange={() => {
+                          if (!g.enabled) return;
+                          setRollupsEnabled(true);
+                          setRollupsTriggerGroups((prev) => toggleValueInList(prev, g.key));
+                        }}
                       />
                       {g.label}
+                      {!g.enabled ? (
+                        <span className="rounded-full border border-amber-400/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                          Coming soon
+                        </span>
+                      ) : null}
                     </label>
                   ))}
                 </div>
@@ -2396,6 +3167,7 @@ payload.polygon_geojson = polyOut;
                 <div className="flex flex-wrap gap-2">
                   {distressPresets.map((p) => {
                     const active = p.keys.every((k) => rollupsTriggerKeys.includes(k));
+                    const enabled = p.keys.every((k) => enabledSignalKeys.has(k));
                     return (
                       <button
                         key={p.id}
@@ -2403,9 +3175,13 @@ payload.polygon_geojson = polyOut;
                         className={
                           active
                             ? 'rounded-full bg-cre-accent px-3 py-1 text-[12px] font-semibold text-white'
-                            : 'rounded-full border border-cre-border/60 bg-cre-bg px-3 py-1 text-[12px] text-cre-text hover:bg-cre-surface'
+                            : enabled
+                              ? 'rounded-full border border-cre-border/60 bg-cre-bg px-3 py-1 text-[12px] text-cre-text hover:bg-cre-surface'
+                              : 'rounded-full border border-amber-400/60 bg-amber-50 px-3 py-1 text-[12px] text-amber-800 opacity-70'
                         }
+                        disabled={!enabled}
                         onClick={() => {
+                          if (!enabled) return;
                           setRollupsEnabled(true);
                           setRollupsTriggerGroups((prev) => {
                             let next = prev;
@@ -2422,6 +3198,7 @@ payload.polygon_geojson = polyOut;
                         }}
                       >
                         {p.label}
+                        {!enabled ? <span className="ml-2 text-[10px] font-semibold">Coming soon</span> : null}
                       </button>
                     );
                   })}
@@ -2462,6 +3239,7 @@ payload.polygon_geojson = polyOut;
                           <div className="mt-1 space-y-1">
                             {items.map((it) => {
                               const checked = rollupsTriggerKeys.includes(it.key);
+                              const enabled = enabledSignalKeys.has(it.key);
                               return (
                                 <label
                                   key={`sig:${it.key}`}
@@ -2471,12 +3249,15 @@ payload.polygon_geojson = polyOut;
                                   <input
                                     type="checkbox"
                                     checked={checked}
+                                    disabled={!enabled}
                                     onChange={() => {
+                                      if (!enabled) return;
+                                      setRollupsEnabled(true);
                                       setRollupsTriggerKeys((prev) => toggleValueInList(prev, it.key));
                                     }}
                                   />
                                   <span className="truncate">{it.label}</span>
-                                  {it.comingSoon ? (
+                                  {!enabled ? (
                                     <span className="ml-auto rounded-full border border-amber-400/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
                                       Coming soon
                                     </span>
@@ -2504,15 +3285,36 @@ payload.polygon_geojson = polyOut;
                 <div className="text-cre-muted">Tier</div>
                 <div className="flex flex-wrap gap-3 pt-1 text-cre-text">
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={rollupsTierCritical} onChange={(e) => setRollupsTierCritical(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierCritical}
+                      onChange={(e) => {
+                        setRollupsEnabled(true);
+                        setRollupsTierCritical(e.target.checked);
+                      }}
+                    />
                     Critical
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={rollupsTierStrong} onChange={(e) => setRollupsTierStrong(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierStrong}
+                      onChange={(e) => {
+                        setRollupsEnabled(true);
+                        setRollupsTierStrong(e.target.checked);
+                      }}
+                    />
                     Strong
                   </label>
                   <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={rollupsTierSupport} onChange={(e) => setRollupsTierSupport(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={rollupsTierSupport}
+                      onChange={(e) => {
+                        setRollupsEnabled(true);
+                        setRollupsTierSupport(e.target.checked);
+                      }}
+                    />
                     Support
                   </label>
                 </div>
@@ -2526,27 +3328,19 @@ payload.polygon_geojson = polyOut;
                     : 'Active filters summary will show after you Run.'}
               </div>
             </div>
-        </div>
+          </div>
 
-        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+        <div className="rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">4) Results</div>
             <div className="text-xs text-cre-muted">
               {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null
                 ? `Showing ${lastCounts.filteredCount} of ${lastCounts.candidateCount}`
-                : `Showing ${visibleRows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
+                : `Loaded ${parcels.length} · Displaying ${visibleRows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
             </div>
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="rounded-xl bg-cre-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
-              onClick={() => void run()}
-              disabled={loading}
-            >
-              {loading ? 'Running…' : 'Run'}
-            </button>
             <button
               type="button"
               className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
@@ -2628,7 +3422,7 @@ payload.polygon_geojson = polyOut;
                 alertsLoading ? (
                   <div className="text-[11px] text-cre-muted">Loading alerts…</div>
                 ) : alertsInbox.length ? (
-                  <div className="max-h-[220px] space-y-2 overflow-auto">
+                  <div className="space-y-2">
                     {alertsInbox.slice(0, 25).map((a) => (
                       <div key={`alert:${a.id}`} className="rounded-lg border border-cre-border/60 bg-cre-surface p-2">
                         <div className="flex items-start justify-between gap-2">
@@ -2662,13 +3456,75 @@ payload.polygon_geojson = polyOut;
             </div>
           </div>
 
-          <div className="mt-3 max-h-[520px] space-y-2 overflow-auto">
+          <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-cre-text">Results</div>
+              <button
+                type="button"
+                className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-1 text-xs text-cre-text hover:bg-cre-bg"
+                onClick={downloadCsv}
+              >
+                Download CSV
+              </button>
+            </div>
+              <div className="mt-1 text-xs text-cre-muted">
+                Loaded {pagingMeta.loaded || parcels.length} of{' '}
+                {pagingMeta.total ?? (lastResponseSummary as any)?.total_count ?? lastResponseCount} · Displaying{' '}
+                {visibleRows.length}
+                {resultsQuery.trim() ? ' (text filter)' : ''}
+              </div>
+            {pagingMeta.isPaging ? (
+              <div className="mt-1 text-xs text-cre-muted">Loading pages…</div>
+            ) : null}
+              {debugUiEnabled && visibleRows.length < parcels.length && !resultsQuery.trim() ? (
+                <div className="mt-1 text-[11px] text-amber-700">
+                  Displaying {visibleRows.length} of {parcels.length}. Check Live/Cache toggles or filters.
+                </div>
+              ) : null}
+              <div className="mt-1 text-[11px] text-cre-muted">Active filters: {activeFiltersSummary}</div>
+              <div className="mt-1 text-[11px] text-cre-muted">Active signals: {activeSignalsSummary}</div>
+            {debugUiEnabled ? (
+              <div className="mt-1 text-[11px] text-cre-muted">
+                Debug: total_count={
+                  pagingMeta.total ?? (lastResponseSummary as any)?.total_count ?? lastResponseCount
+                }{' '}
+                returned_count={lastResponseCount} first_pid={parcels[0]?.parcel_id || '—'} last_pid={
+                  parcels.length ? parcels[parcels.length - 1]?.parcel_id : '—'
+                }
+              </div>
+            ) : null}
+            {(() => {
+              const dropped = (lastResponseSummary as any)?.dropped_reasons || null;
+              if (!dropped || typeof dropped !== 'object') return null;
+              const entries = Object.entries(dropped as Record<string, number>)
+                .filter(([, v]) => Number(v) > 0)
+                .sort((a, b) => Number(b[1]) - Number(a[1]))
+                .slice(0, 4);
+              if (!entries.length) return null;
+              return (
+                <div className="mt-1 text-[11px] text-cre-muted">
+                  Dropped: {entries.map(([k, v]) => `${k} (${v})`).join(', ')}
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="mt-3 space-y-2">
             {visibleRows.length ? (
-              visibleRows.slice(0, 250).map((p) => {
+              visibleRows.map((p) => {
                 const rec = recordById.get(p.parcel_id);
-                const rollup = rollupsMap[p.parcel_id] || null;
+                const rollup = (rec as any)?.rollup || rollupsMap[p.parcel_id] || null;
                 const addr = (p.address || rec?.situs_address || rec?.address || '').trim() || '—';
                 const owner = (p.owner_name || rec?.owner_name || '').trim() || '—';
+                const countyLabel = (p.county || rec?.county || county || '').toUpperCase() || '—';
+                const beds = rec?.beds ?? (p as any)?.beds ?? null;
+                const baths = rec?.baths ?? (p as any)?.baths ?? null;
+                const sqft = rec?.living_area_sqft ?? (p as any)?.living_sf ?? null;
+                const yearBuilt = rec?.year_built ?? (p as any)?.year_built ?? null;
+                const zoning = (rec?.zoning ?? (p as any)?.zoning ?? '').trim();
+                const propertyType = (rec?.property_type ?? (rec as any)?.property_type_raw ?? (rec as any)?.land_use ?? '').toString().trim();
+                const fmtNum = (val: number | null | undefined) =>
+                  typeof val === 'number' && Number.isFinite(val) ? val.toLocaleString() : '—';
                 const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
 
                 const groupsBadges: Array<{ k: string; label: string }> = [];
@@ -2678,6 +3534,15 @@ payload.polygon_geojson = polyOut;
                 if (rollup && Number(rollup.has_code_enforcement || 0) > 0) groupsBadges.push({ k: 'ce', label: 'Code' });
                 if (rollup && Number(rollup.has_courts || 0) > 0) groupsBadges.push({ k: 'ct', label: 'Courts' });
                 if (rollup && Number(rollup.has_gis_planning || 0) > 0) groupsBadges.push({ k: 'gp', label: 'Appraiser' });
+                const signals = (rec as any)?.signals || {};
+                if (!rollup) {
+                  if (signals.has_official_records) groupsBadges.push({ k: 'or', label: 'Records' });
+                  if (signals.has_permits) groupsBadges.push({ k: 'p', label: 'Permits' });
+                  if (signals.has_tax_events) groupsBadges.push({ k: 't', label: 'Tax' });
+                  if (signals.has_code_enforcement) groupsBadges.push({ k: 'ce', label: 'Code' });
+                  if (signals.has_courts) groupsBadges.push({ k: 'ct', label: 'Courts' });
+                  if (signals.has_gis_planning) groupsBadges.push({ k: 'gp', label: 'Appraiser' });
+                }
 
                 return (
                   <button
@@ -2697,12 +3562,28 @@ payload.polygon_geojson = polyOut;
                       <div>
                         <div className="text-sm font-semibold text-cre-text">{addr}</div>
                         <div className="mt-1 text-xs text-cre-muted">{owner}</div>
+                        <div className="mt-1 text-[11px] text-cre-muted">
+                          {countyLabel} · Beds {beds ?? '—'} · Baths {baths ?? '—'} · Living {fmtNum(sqft)} sqft · Year {yearBuilt ?? '—'}
+                        </div>
+                        <div className="mt-1 text-[11px] text-cre-muted">
+                          Zoning {zoning || '—'} · Type {propertyType || '—'}
+                        </div>
                         <div className="mt-1 font-mono text-[11px] text-cre-muted">{p.parcel_id}</div>
                       </div>
                       <div className="text-[11px] text-cre-muted">{srcLabel}</div>
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {signals.absentee_owner ? (
+                        <span className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
+                          Absentee owner
+                        </span>
+                      ) : null}
+                      {signals.homestead ? (
+                        <span className="rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-900">
+                          Homestead
+                        </span>
+                      ) : null}
                       {rollup ? (
                         <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
                           Score {rollup.seller_score} · c{rollup.count_critical} / s{rollup.count_strong} / p{rollup.count_support}
@@ -2723,9 +3604,6 @@ payload.polygon_geojson = polyOut;
             ) : (
               <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-sm text-cre-muted">No results yet. Draw an area and Run.</div>
             )}
-            {visibleRows.length > 250 ? (
-              <div className="text-[11px] text-cre-muted">Showing first 250 results.</div>
-            ) : null}
           </div>
         </div>
 
@@ -2773,9 +3651,45 @@ payload.polygon_geojson = polyOut;
             </div>
           </div>
         </details>
+          </div>
+
+          <div className="sticky bottom-0 -mx-4 mt-3 border-t border-cre-border/60 bg-cre-bg/95 px-4 py-3 backdrop-blur">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-xl bg-cre-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
+                onClick={() => void run()}
+                disabled={loading || (!drawnPolygon && !drawnCircle && !resultsQuery.trim())}
+              >
+                {loading ? 'Running…' : 'Run'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface"
+                onClick={() => {
+                  clearFilters();
+                  clearDrawings();
+                }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
+                onClick={downloadCsv}
+                disabled={!rows.length}
+              >
+                Export CSV
+              </button>
+            </div>
+            <div className="mt-2 text-[11px] text-cre-muted">
+              {drawnPolygon || drawnCircle ? 'Geometry selected' : resultsQuery.trim() ? 'Text filter active' : 'Draw an area or type a text filter to enable Run.'}
+            </div>
+          </div>
+        </div>
       </aside>
 
-      <main className="flex-1 bg-cre-bg p-4">
+      <main className="flex-1 min-h-0 bg-cre-bg p-4">
         <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/60 bg-cre-surface shadow-panel">
           <MapContainer center={[28.5383, -81.3792]} zoom={12} doubleClickZoom={false} style={{ height: '100%', width: '100%' }}>
             <TileLayer
@@ -2971,6 +3885,29 @@ payload.polygon_geojson = polyOut;
                         </div>
                       );
                     })()}
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Owner contact</div>
+                      {ownerEnrichmentLoading ? (
+                        <div className="mt-2 text-sm text-cre-muted">Loading contact enrichment…</div>
+                      ) : ownerEnrichmentError ? (
+                        <div className="mt-2 text-sm text-cre-muted">{ownerEnrichmentError}</div>
+                      ) : ownerEnrichment ? (
+                        <div className="mt-2 space-y-1 text-[11px] text-cre-muted">
+                          <div>
+                            Provider: {ownerEnrichment.provider || '—'} · Status: {ownerEnrichment.status}
+                          </div>
+                          {!ownerEnrichment.configured ? (
+                            <div className="text-amber-700">Not configured (set OWNER_ENRICH_PROVIDER + API key).</div>
+                          ) : null}
+                          <div>Mailing: {ownerEnrichment.owner_mailing_address || '—'}</div>
+                          <div>Phones: {ownerEnrichment.phones?.length ? ownerEnrichment.phones.join(', ') : '—'}</div>
+                          <div>Emails: {ownerEnrichment.emails?.length ? ownerEnrichment.emails.join(', ') : '—'}</div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm text-cre-muted">No enrichment available.</div>
+                      )}
+                    </div>
 
                     <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
                       <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Rollup</div>

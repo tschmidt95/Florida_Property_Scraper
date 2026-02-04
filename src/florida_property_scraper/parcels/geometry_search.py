@@ -64,6 +64,112 @@ def circle_polygon(
     return {"type": "Polygon", "coordinates": [ring]}
 
 
+def _point_in_polygon(px: float, py: float, search_geometry: Dict[str, Any]) -> bool:
+    st = (search_geometry or {}).get("type")
+    if st not in {"Polygon", "MultiPolygon"}:
+        return False
+
+    rings: list[list[list[float]]] = []
+    if st == "Polygon":
+        poly = (search_geometry or {}).get("coordinates") or []
+        if isinstance(poly, list):
+            for ring in poly:
+                if isinstance(ring, list):
+                    rings.append(ring)
+    else:
+        multi = (search_geometry or {}).get("coordinates") or []
+        if isinstance(multi, list):
+            for poly in multi:
+                if isinstance(poly, list):
+                    for ring in poly:
+                        if isinstance(ring, list):
+                            rings.append(ring)
+
+    def _in_ring(ring: list[list[float]]) -> bool:
+        inside = False
+        n = len(ring)
+        if n < 4:
+            return False
+        j = n - 1
+        for i in range(n):
+            xi, yi = ring[i][0], ring[i][1]
+            xj, yj = ring[j][0], ring[j][1]
+            intersects_edge = ((yi > py) != (yj > py)) and (
+                px < (xj - xi) * (py - yi) / ((yj - yi) or 1e-12) + xi
+            )
+            if intersects_edge:
+                inside = not inside
+            j = i
+        return inside
+
+    if st == "Polygon":
+        if not rings:
+            return False
+        if not _in_ring(rings[0]):
+            return False
+        for hole in rings[1:]:
+            if _in_ring(hole):
+                return False
+        return True
+
+    return any(_in_ring(r) for r in rings)
+
+
+def _centroid_from_geom(geometry: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+    bbox = geometry_bbox(geometry)
+    if bbox is None:
+        return None
+    minx, miny, maxx, maxy = bbox
+    return ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+
+
+def match_geometry(
+    search_geometry: Dict[str, Any], feature_geometry: Dict[str, Any], mode: str = "intersects"
+) -> bool:
+    """Return True if feature_geometry matches search_geometry by mode.
+
+    Modes:
+    - intersects (default)
+    - centroid_inside
+    - contains
+    """
+    mode = (mode or "intersects").strip().lower()
+    if mode not in {"intersects", "centroid_inside", "contains"}:
+        mode = "intersects"
+
+    try:
+        from shapely.geometry import shape as s_shape  # type: ignore[import-not-found]
+    except Exception:
+        s_shape = None
+
+    if s_shape is not None:
+        try:
+            a = s_shape(search_geometry)
+            b = s_shape(feature_geometry)
+            if mode == "contains":
+                return bool(a.contains(b))
+            if mode == "centroid_inside":
+                return bool(a.contains(b.centroid))
+            return bool(a.intersects(b))
+        except Exception:
+            pass
+
+    if mode == "centroid_inside":
+        cent = _centroid_from_geom(feature_geometry)
+        if cent is None:
+            return False
+        return _point_in_polygon(float(cent[0]), float(cent[1]), search_geometry)
+
+    if mode == "contains":
+        a = geometry_bbox(search_geometry)
+        b = geometry_bbox(feature_geometry)
+        if a is None or b is None:
+            return False
+        return a[0] <= b[0] and a[1] <= b[1] and a[2] >= b[2] and a[3] >= b[3]
+
+    return intersects(search_geometry, feature_geometry)
+
+
 def intersects(
     search_geometry: Dict[str, Any], feature_geometry: Dict[str, Any]
 ) -> bool:

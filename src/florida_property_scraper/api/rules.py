@@ -19,6 +19,59 @@ class Trigger:
     all: List[Condition]
 
 
+PROPERTY_TYPE_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("sfr", ("single family", "single-family", "sfr", "sfh", "detached")),
+    ("condo", ("condo", "condominium")),
+    ("townhome", ("townhome", "town home", "townhouse", "town house")),
+    ("mfh", ("multi", "duplex", "triplex", "fourplex", "mf", "mfh", "apartment")),
+    ("mobile_home", ("mobile", "manufactured", "trailer")),
+    ("mixed_use", ("mixed use", "mixed-use")),
+    ("retail", ("retail", "store", "shop", "shopping")),
+    ("office", ("office", "professional")),
+    ("industrial", ("industrial", "warehouse", "manufactur", "distribution")),
+    ("agricultural", ("ag", "agricultural", "farm", "ranch")),
+    ("vacant_land", ("vacant", "land", "lot", "acreage")),
+    ("commercial", ("commercial", "comm")),
+    ("residential", ("residential", "res")),
+]
+
+
+def normalize_property_type(*values: Any) -> str:
+    """Normalize property type from any combination of PA fields.
+
+    Returns a deterministic enum-like string whenever inputs exist.
+    """
+
+    raw_parts: list[str] = []
+    for v in values:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if not s:
+            continue
+        raw_parts.append(s)
+
+    if not raw_parts:
+        return ""
+
+    combined = " ".join(raw_parts).strip().lower()
+    combined = re.sub(r"\s+", " ", combined)
+
+    for label, keywords in PROPERTY_TYPE_RULES:
+        for kw in keywords:
+            if kw in combined:
+                return label
+
+    # Normalize common coded land-use/class values.
+    if re.match(r"^r\d+", combined):
+        return "residential"
+    if re.match(r"^c\d+", combined):
+        return "commercial"
+
+    # Fall back to a sanitized string so it is never empty when inputs exist.
+    return combined
+
+
 def _get_field(fields: Dict[str, Any], name: str) -> Tuple[bool, Any]:
     """Return (present, value) where present means the field exists and is non-None."""
 
@@ -346,6 +399,7 @@ def compile_filters(raw: Any) -> List[Condition]:
 
         _add("beds", ">=", _num(raw.get("min_beds")))
         _add("baths", ">=", _num(raw.get("min_baths")))
+        _add("ownership_years", ">=", _num(raw.get("min_ownership_years")))
 
         # Value filters (API naming: total/land/building)
         _add("total_value", ">=", _num(raw.get("min_value")))
@@ -385,11 +439,15 @@ def compile_filters(raw: Any) -> List[Condition]:
 
         ptype = raw.get("property_type")
         if isinstance(ptype, str) and ptype.strip():
-            _add("property_type", "contains", ptype.strip())
+            _add("property_type_norm", "contains", ptype.strip())
         elif isinstance(ptype, (list, tuple)) and ptype:
             items = [str(x).strip() for x in ptype if str(x).strip()]
             if items:
-                _add("property_type", "in_list", items)
+                _add("property_type_norm", "in_list", items)
+
+        future_land_use = raw.get("future_land_use")
+        if isinstance(future_land_use, str) and future_land_use.strip():
+            _add("future_land_use", "contains", future_land_use.strip())
 
         d0 = _date(raw.get("last_sale_date_start"))
         d1 = _date(raw.get("last_sale_date_end"))

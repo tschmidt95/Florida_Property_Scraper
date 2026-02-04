@@ -36,6 +36,9 @@ WEB_DIST = REPO_ROOT / "web" / "dist"
 _router = get_router("fl")
 assert _router is not None
 
+DEFAULT_PARCELS_DB = str(REPO_ROOT / "data" / "parcels" / "parcels.sqlite")
+DEFAULT_LEADS_DB = str(REPO_ROOT / "leads.sqlite")
+
 
 class ParcelsGeometryRequest(BaseModel):
     county: str
@@ -229,6 +232,42 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             {"detail": "Internal Server Error"},
             status_code=500,
         )
+    explain_enabled = False
+    try:
+        q = str(request.query_params.get("explain") or "").strip().lower()
+        if q in {"1", "true", "yes"}:
+            explain_enabled = True
+    except Exception:
+        explain_enabled = False
+    if not explain_enabled:
+        try:
+            raw_body = await request.body()
+            if raw_body:
+                try:
+                    payload = json.loads(raw_body)
+                    if payload.get("explain") is True:
+                        explain_enabled = True
+                    if not explain_enabled:
+                        raw_explain = str(payload.get("explain") or "").strip().lower()
+                        if raw_explain in {"1", "true", "yes"}:
+                            explain_enabled = True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    if explain_enabled and str(os.getenv("FPS_EXPLAIN_ERRORS", "1")).strip() != "0":
+        logging.getLogger("fps.api").exception("Unhandled exception (explain)")
+        import traceback
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(exc),
+                "where": str(request.url.path),
+                "trace": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            },
+            status_code=200,
+        )
     logging.getLogger("fps.api").exception("Unhandled exception")
     stack = None
     if _include_error_stack(request):
@@ -249,23 +288,64 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 if app:
-    from florida_property_scraper.api.routes.search import router as search_router
-    from florida_property_scraper.api.routes.permits import router as permits_router
-    from florida_property_scraper.api.routes.lookup import router as lookup_router
-    from florida_property_scraper.api.routes.triggers import router as triggers_router
-    from florida_property_scraper.api.routes.watchlists import router as watchlists_router
+    logger = logging.getLogger("fps.api")
 
-    assert search_router is not None
-    assert permits_router is not None
-    assert lookup_router is not None
-    assert triggers_router is not None
-    assert watchlists_router is not None
+    search_router = None
+    permits_router = None
+    lookup_router = None
+    triggers_router = None
+    watchlists_router = None
 
-    app.include_router(search_router, prefix="/api")
-    app.include_router(permits_router, prefix="/api")
-    app.include_router(lookup_router, prefix="/api")
-    app.include_router(triggers_router, prefix="/api")
-    app.include_router(watchlists_router, prefix="/api")
+    try:
+        from florida_property_scraper.api.routes.search import router as search_router
+    except Exception as e:
+        logger.exception("search router import failed: %s", e)
+        search_router = None
+    try:
+        from florida_property_scraper.api.routes.permits import router as permits_router
+    except Exception as e:
+        logger.exception("permits router import failed: %s", e)
+        permits_router = None
+    try:
+        from florida_property_scraper.api.routes.lookup import router as lookup_router
+    except Exception as e:
+        logger.exception("lookup router import failed: %s", e)
+        lookup_router = None
+    try:
+        from florida_property_scraper.api.routes.triggers import router as triggers_router
+    except Exception as e:
+        logger.exception("triggers router import failed: %s", e)
+        triggers_router = None
+    try:
+        from florida_property_scraper.api.routes.watchlists import router as watchlists_router
+    except Exception as e:
+        logger.exception("watchlists router import failed: %s", e)
+        watchlists_router = None
+
+    if search_router is not None:
+        app.include_router(search_router, prefix="/api")
+    else:
+        logger.warning("search router missing; /api/parcels/search will be unavailable")
+
+    if permits_router is not None:
+        app.include_router(permits_router, prefix="/api")
+    else:
+        logger.warning("permits router missing; /api/permits endpoints unavailable")
+
+    if lookup_router is not None:
+        app.include_router(lookup_router, prefix="/api")
+    else:
+        logger.warning("lookup router missing; /api/lookup endpoints unavailable")
+
+    if triggers_router is not None:
+        app.include_router(triggers_router, prefix="/api")
+    else:
+        logger.warning("triggers router missing; /api/triggers endpoints unavailable")
+
+    if watchlists_router is not None:
+        app.include_router(watchlists_router, prefix="/api")
+    else:
+        logger.warning("watchlists router missing; /api/watchlists endpoints unavailable")
 
     @app.get("/health")
     def health_route():
@@ -343,7 +423,7 @@ if app:
         # Batch-load PA hover fields for the returned parcel_ids.
         from florida_property_scraper.pa.storage import PASQLite
 
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         hover_by_parcel: dict[str, dict] = {}
         store = PASQLite(db_path)
         try:
@@ -418,7 +498,7 @@ if app:
             import sqlite3, json as _json
             from florida_property_scraper.pa.storage import PASQLite
 
-            parcels_db = os.getenv("PARCELS_DB_PATH", "")
+            parcels_db = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
             if not parcels_db:
                 raise HTTPException(status_code=500, detail="PARCELS_DB_PATH is not set")
 
@@ -441,7 +521,7 @@ if app:
                 except Exception:
                     pass
 
-            db_path = os.getenv("PA_DB", "./leads.sqlite")
+            db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
             hover_by_id: dict[str, dict] = {}
             store = PASQLite(db_path)
             try:
@@ -474,7 +554,7 @@ if app:
         client = FDORParcelPolygonClient()
         geom_by_id = client.fetch_parcel_geometries(parcel_ids)
 
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         hover_by_id: dict[str, dict] = {}
         store = PASQLite(db_path)
         try:
@@ -506,7 +586,7 @@ if app:
         # WRITE_UI_REQ_JSON: debug dump last UI payload to /tmp/ui_req.json
         try:
             import json as _json
-            open('/tmp/ui_req.json','w',encoding='utf-8').write(_json.dumps(payload))
+            open('/tmp/last_request.json','w',encoding='utf-8').write(_json.dumps(payload))
         except Exception:
             pass
         """Search parcels by polygon geometry or radius.
@@ -527,9 +607,23 @@ if app:
         """
 
 
+        def _explain_error_response(exc: Exception, where: str) -> JSONResponse:
+            import traceback as _traceback
+
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "where": where,
+                    "trace": _traceback.format_exc(),
+                },
+                status_code=200,
+            )
+
         # Ensure these are ALWAYS defined (used later in multiple branches)
         provider_is_live = False
         fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1","true","True"}
+        signal_filter_active = False
 
 
         search_id = uuid.uuid4().hex[:12]
@@ -743,17 +837,56 @@ if app:
             apply_filters_explain,
             compile_filters,
             compile_triggers,
+            eval_condition,
             eval_triggers,
+            normalize_property_type,
         )
         from florida_property_scraper.parcels.geometry_search import (
             circle_polygon,
             geometry_bbox,
             intersects,
+            match_geometry,
         )
         from florida_property_scraper.pa.storage import PASQLite
         from florida_property_scraper.pa.ui_computed import compute_ui_fields
 
-        county_key = (payload.get("county") or "").strip().lower() or "seminole"
+        raw_county = (payload.get("county") or "").strip().lower()
+
+        def _available_geometry_counties() -> list[str]:
+            counties: set[str] = set()
+            try:
+                data_dir = Path(__file__).resolve().parents[3] / "data" / "parcels"
+                db_path = data_dir / "parcels.sqlite"
+                if db_path.exists():
+                    try:
+                        import sqlite3 as _sqlite3
+
+                        conn = _sqlite3.connect(str(db_path))
+                        conn.row_factory = _sqlite3.Row
+                        rows = conn.execute("SELECT DISTINCT county FROM parcels").fetchall()
+                        for row in rows:
+                            c = str(row["county"] or "").strip().lower()
+                            if c:
+                                counties.add(c)
+                        conn.close()
+                    except Exception:
+                        pass
+                for p in data_dir.glob("*.geojson"):
+                    c = p.stem.strip().lower()
+                    if c:
+                        counties.add(c)
+            except Exception:
+                pass
+            if not counties:
+                return ["seminole"]
+            return sorted(counties)
+
+        county_keys = [raw_county] if raw_county else _available_geometry_counties()
+        if not county_keys:
+            county_keys = ["seminole"]
+        multi_county = bool(len(county_keys) > 1 or not raw_county)
+        county_key = raw_county or county_keys[0] or "seminole"
+        county_label = "all" if multi_county else county_key
         requested_live = False
         if "live" in payload:
             requested_live = bool(payload.get("live", False))
@@ -767,45 +900,70 @@ if app:
         if requested_live:
             pre_warnings.append("live_disabled_local_only")
         include_geometry = bool(payload.get("include_geometry", False))
-        limit = int(payload.get("limit", 200))
+        limit = int(payload.get("limit", 500))
         if limit <= 0:
-            limit = 200
+            limit = 500
+
+        max_limit = int(os.getenv("FPS_SEARCH_MAX_LIMIT", "2000") or 2000)
+        if max_limit <= 0:
+            max_limit = 2000
 
         # Guardrail: never allow unbounded result sets.
-        if limit > 250:
-            limit = 250
+        if limit > max_limit:
+            limit = max_limit
 
         # Guardrail: live mode can be expensive if/when implemented.
-        if live and limit > 250:
-            limit = 250
+        if live and limit > max_limit:
+            limit = max_limit
+
+        cursor = None
+        offset = None
+        try:
+            raw_cursor = payload.get("cursor") or payload.get("next_cursor")
+            if raw_cursor is not None:
+                cursor = str(raw_cursor).strip() or None
+        except Exception:
+            cursor = None
+        try:
+            raw_offset = payload.get("offset")
+            if raw_offset is not None and str(raw_offset).strip() != "":
+                offset = int(raw_offset)
+        except Exception:
+            offset = None
 
         _mark("parse_payload")
 
         if debug_counts is not None:
             debug_counts.update(
                 {
-                    "county": county_key,
+                    "county": county_label,
                     "live": bool(live),
                     "limit": int(limit),
                     "include_geometry": bool(include_geometry),
                     "has_filters": isinstance(payload.get("filters"), dict) and bool(payload.get("filters")),
                     "enrich": payload.get("enrich", None),
                     "enrich_limit": payload.get("enrich_limit", None),
+                    "polygon_match_mode": str(payload.get("polygon_match_mode") or "intersects"),
                 }
             )
 
-        # Accept multiple input shapes.
-        # - geometry: GeoJSON geometry
-        # - polygon_geojson: GeoJSON Polygon geometry
-        # - polygon: legacy alias
-        geometry = payload.get("geometry")
-        if geometry is None:
-            geometry = payload.get("polygon_geojson")
-        if geometry is None:
-            geometry = payload.get("polygon")
-        radius = payload.get("radius")
-        radius_m = payload.get("radius_m")
-        center_obj = payload.get("center")
+        try:
+            # Accept multiple input shapes.
+            # - geometry: GeoJSON geometry
+            # - polygon_geojson: GeoJSON Polygon geometry
+            # - polygon: legacy alias
+            geometry = payload.get("geometry")
+            if geometry is None:
+                geometry = payload.get("polygon_geojson")
+            if geometry is None:
+                geometry = payload.get("polygon")
+            radius = payload.get("radius")
+            radius_m = payload.get("radius_m")
+            center_obj = payload.get("center")
+        except Exception as e:
+            if explain_enabled and str(os.getenv("FPS_EXPLAIN_ERRORS", "1")).strip() != "0":
+                return _explain_error_response(e, "parse_geometry")
+            raise
 
         _mark("parse_geometry")
 
@@ -865,6 +1023,21 @@ if app:
             raise HTTPException(
                 status_code=400, detail="geometry must be a GeoJSON geometry object"
             )
+        try:
+            gtype = str(geometry.get("type") or "").strip().lower()
+            if gtype not in {"polygon", "multipolygon", "point"}:
+                raise HTTPException(
+                    status_code=400,
+                    detail="geometry must be Polygon, MultiPolygon, or Point",
+                )
+            if "coordinates" not in geometry:
+                raise HTTPException(status_code=400, detail="geometry has no coordinates")
+        except HTTPException:
+            raise
+        except Exception as e:
+            if explain_enabled and str(os.getenv("FPS_EXPLAIN_ERRORS", "1")).strip() != "0":
+                return _explain_error_response(e, "validate_geometry")
+            raise
         bbox_t = geometry_bbox(geometry)
         if bbox_t is None:
             raise HTTPException(status_code=400, detail="geometry has no coordinates")
@@ -894,33 +1067,83 @@ if app:
         )
         seminole_db_exists = bool(seminole_db and os.path.exists(seminole_db))
         seminole_sql_count = None
-        if county_key == "seminole" and geometry and seminole_db_exists:
+        sqlite_counties: set[str] = set()
+
+        def _wrap_candidate(pid: str, geom: object, ckey: str) -> SimpleNamespace:
+            return SimpleNamespace(parcel_id=pid, geometry=geom, county=ckey)
+
+        if geometry and seminole_db_exists:
             db_path = seminole_db
             try:
                 conn = sqlite3.connect(db_path)
                 conn.row_factory = sqlite3.Row
                 minx, miny, maxx, maxy = bbox_t
                 q = """
-                    SELECT p.parcel_id, p.geom_geojson
+                    SELECT p.parcel_id, p.geom_geojson, p.county
                     FROM parcels_rtree r
                     JOIN parcels p ON p.rowid = r.rowid
-                    WHERE r.minx <= ? AND r.maxx >= ? AND r.miny <= ? AND r.maxy >= ? AND p.county = ?
+                    WHERE r.minx <= ? AND r.maxx >= ? AND r.miny <= ? AND r.maxy >= ?
                 """
-                rows = conn.execute(q, (maxx, minx, maxy, miny, county_key)).fetchall()
+                params = [maxx, minx, maxy, miny]
+                if not multi_county and county_key:
+                    q += " AND p.county = ?"
+                    params.append(county_key)
+                elif county_keys:
+                    placeholders = ",".join(["?"] * len(county_keys))
+                    q += f" AND p.county IN ({placeholders})"
+                    params.extend(county_keys)
+                rows = conn.execute(q, params).fetchall()
                 seminole_sql_count = len(rows)
                 for row in rows:
                     try:
                         parcel_geom = _json.loads(row["geom_geojson"])
-                        candidates.append(
-                            SimpleNamespace(parcel_id=row["parcel_id"], geometry=parcel_geom)
-                        )
+                        ckey = str(row["county"] or "").strip().lower() or county_key
+                        sqlite_counties.add(ckey)
+                        candidates.append(_wrap_candidate(row["parcel_id"], parcel_geom, ckey))
                     except Exception:
                         continue
                 conn.close()
             except Exception as e:
                 provider_warnings.append(f"parcels_sqlite_error:{e}")
-        else:
-            # fallback to original provider logic for other counties
+
+        remaining_counties = [c for c in county_keys if c not in sqlite_counties]
+        if multi_county:
+            for ck in remaining_counties:
+                try:
+                    provider = get_geometry_provider(ck)
+                    provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
+                    fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
+                        "1",
+                        "true",
+                        "True",
+                    }
+                    cand = provider.query(bbox_t)
+                    for f in cand:
+                        candidates.append(_wrap_candidate(f.parcel_id, f.geometry, ck))
+                except Exception as e:
+                    try:
+                        provider_warnings.append(f"geometry_provider_error:{type(e).__name__}")
+                    except Exception:
+                        provider_warnings.append("geometry_provider_error")
+                    if provider_is_live and ck in {"orange", "seminole"}:
+                        try:
+                            from florida_property_scraper.parcels.geometry_registry import _default_geojson_dir
+                            from florida_property_scraper.parcels.providers.orange import OrangeProvider
+                            from florida_property_scraper.parcels.providers.seminole import SeminoleProvider
+                            geo_dir = _default_geojson_dir()
+                            if ck == "orange":
+                                fallback = OrangeProvider(geojson_path=geo_dir / "orange.geojson")
+                            else:
+                                fallback = SeminoleProvider(geojson_path=geo_dir / "seminole.geojson")
+                            fallback.load()
+                            cand = fallback.query(bbox_t)
+                            for f in cand:
+                                candidates.append(_wrap_candidate(f.parcel_id, f.geometry, ck))
+                            provider_warnings.append("geometry_provider_fallback:local_geojson")
+                        except Exception:
+                            pass
+        elif not candidates:
+            # fallback to original provider logic for other single counties
             provider = get_geometry_provider(county_key)
             provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
             fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
@@ -929,7 +1152,8 @@ if app:
                 "True",
             }
             try:
-                candidates = provider.query(bbox_t)
+                cand = provider.query(bbox_t)
+                candidates = [_wrap_candidate(f.parcel_id, f.geometry, county_key) for f in cand]
             except Exception as e:
                 candidates = []
                 try:
@@ -947,7 +1171,8 @@ if app:
                         else:
                             fallback = SeminoleProvider(geojson_path=geo_dir / "seminole.geojson")
                         fallback.load()
-                        candidates = fallback.query(bbox_t)
+                        cand = fallback.query(bbox_t)
+                        candidates = [_wrap_candidate(f.parcel_id, f.geometry, county_key) for f in cand]
                         provider_warnings.append("geometry_provider_fallback:local_geojson")
                     except Exception:
                         pass
@@ -961,7 +1186,7 @@ if app:
         _append_search_debug(
             {
                 "event": "request",
-                "county": county_key,
+                "county": county_label,
                 "payload": payload,
                 "bbox": bbox_t,
                 "candidates_count": len(candidates),
@@ -1095,7 +1320,7 @@ if app:
 
         # Batch-load PA records + hover fields for evaluation.
         # If live=true, best-effort enrich missing parcel_ids into PA before continuing.
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         store = PASQLite(db_path)
         enriched_live_ids: set[str] = set()
         live_error_reason: str | None = None
@@ -1111,10 +1336,24 @@ if app:
                 "baths": 0,
                 "year_built": 0,
                 "total_value": 0,
+                "land_value": 0,
+                "building_value": 0,
+                "assessed_value": 0,
+                "last_sale_date": 0,
+                "property_type": 0,
+                "ownership_years": 0,
                 "zoning": 0,
                 "future_land_use": 0,
             },
         }
+        rollups_by_id: dict[tuple[str, str], dict] = {}
+        rollup_keys_by_id: dict[tuple[str, str], set[str]] = {}
+        rollups_loaded = False
+        parcel_table1_by_id: dict[tuple[str, str], dict] = {}
+        parcels_pa_by_id: dict[tuple[str, str], dict] = {}
+        pa_raw_by_id: dict[tuple[str, str], str] = {}
+        pa_address_map_by_county: dict[str, dict[str, str]] = {}
+        pa_raw_by_address_by_county: dict[str, dict[str, str]] = {}
         try:
             # Optional pre-filter: restrict to a known parcel_id allow-list.
             # This is used by trigger rollup filters (separate endpoint precomputes IDs).
@@ -1127,7 +1366,321 @@ if app:
                     allowed_ids = set(allowed[:2000])
                     intersecting = [f for f in intersecting if f.parcel_id in allowed_ids]
 
-            parcel_ids = [f.parcel_id for f in intersecting]
+            parcel_ids_by_county: dict[str, list[str]] = {}
+            for f in intersecting:
+                ckey = str(getattr(f, "county", "") or county_key).strip().lower() or county_key
+                parcel_ids_by_county.setdefault(ckey, []).append(f.parcel_id)
+            parcel_ids = [pid for ids in parcel_ids_by_county.values() for pid in ids]
+
+            parcel_id_map_by_county: dict[str, dict[str, str]] = {}
+            parcel_id_map_norm_by_county: dict[str, dict[str, str]] = {}
+            pa_parcel_norm_by_county: dict[str, dict[str, str]] = {}
+            parcel_id_map_norm_numeric_by_county: dict[str, dict[str, str]] = {}
+            pa_parcel_norm_numeric_by_county: dict[str, dict[str, str]] = {}
+
+            def _norm_pid(value: str) -> str:
+                try:
+                    s = str(value or "").strip().upper()
+                    s = re.sub(r"[^A-Z0-9]", "", s)
+                    s = s.lstrip("0") or s
+                    return s
+                except Exception:
+                    return ""
+
+            def _norm_pid_numeric(value: str) -> str:
+                try:
+                    s = str(value or "").strip()
+                    s = re.sub(r"[^0-9]", "", s)
+                    s = s.lstrip("0") or s
+                    return s
+                except Exception:
+                    return ""
+
+            def _load_parcel_id_map(ckey: str, geom_ids: list[str]) -> dict[str, str]:
+                out: dict[str, str] = {}
+                norm_out: dict[str, str] = {}
+                norm_out_numeric: dict[str, str] = {}
+                try:
+                    import sqlite3 as _sqlite3
+
+                    leads_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                    if not leads_path or not os.path.exists(leads_path):
+                        return {}
+                    con = _sqlite3.connect(leads_path)
+                    try:
+                        cur = con.cursor()
+                        rows = cur.execute(
+                            "SELECT geom_parcel_id, pa_parcel_id FROM parcel_id_map WHERE lower(county)=?",
+                            (ckey,),
+                        ).fetchall()
+                        for row in rows:
+                            try:
+                                gpid = str(row[0] or "").strip()
+                                ppid = str(row[1] or "").strip()
+                                if gpid and ppid:
+                                    out[gpid] = ppid
+                                    norm = _norm_pid(gpid)
+                                    if norm and norm not in norm_out:
+                                        norm_out[norm] = ppid
+                                        norm_num = _norm_pid_numeric(gpid)
+                                        if norm_num and norm_num not in norm_out_numeric:
+                                            norm_out_numeric[norm_num] = ppid
+                                if ppid:
+                                    out.setdefault(ppid, ppid)
+                                    p_norm = _norm_pid(ppid)
+                                    if p_norm and p_norm not in norm_out:
+                                        norm_out[p_norm] = ppid
+                                    p_norm_num = _norm_pid_numeric(ppid)
+                                    if p_norm_num and p_norm_num not in norm_out_numeric:
+                                        norm_out_numeric[p_norm_num] = ppid
+                            except Exception:
+                                continue
+                    finally:
+                        try:
+                            con.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    return {}
+                parcel_id_map_norm_by_county[ckey] = norm_out
+                parcel_id_map_norm_numeric_by_county[ckey] = norm_out_numeric
+                return out
+
+            def _pa_id_for_geom(ckey: str, geom_id: str) -> str:
+                mapped = parcel_id_map_by_county.get(ckey, {}).get(geom_id)
+                if mapped:
+                    return mapped
+                norm = _norm_pid(geom_id)
+                if norm:
+                    mapped = parcel_id_map_norm_by_county.get(ckey, {}).get(norm)
+                    if mapped:
+                        return mapped
+                    mapped = pa_parcel_norm_by_county.get(ckey, {}).get(norm)
+                    if mapped:
+                        return mapped
+                norm_num = _norm_pid_numeric(geom_id)
+                if norm_num:
+                    mapped = parcel_id_map_norm_numeric_by_county.get(ckey, {}).get(norm_num)
+                    if mapped:
+                        return mapped
+                    mapped = pa_parcel_norm_numeric_by_county.get(ckey, {}).get(norm_num)
+                    if mapped:
+                        return mapped
+                return geom_id
+
+            def _pa_ids_for_geom_ids(ckey: str, geom_ids: list[str]) -> list[str]:
+                ids: list[str] = []
+                for gid in geom_ids:
+                    pid = _pa_id_for_geom(ckey, gid)
+                    if pid:
+                        ids.append(pid)
+                return list({pid for pid in ids if pid})
+
+            for ckey, ids in parcel_ids_by_county.items():
+                parcel_id_map_by_county[ckey] = _load_parcel_id_map(ckey, ids)
+
+            try:
+                import sqlite3 as _sqlite3
+
+                db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if db_path and os.path.exists(db_path):
+                    con = _sqlite3.connect(db_path)
+                    con.row_factory = _sqlite3.Row
+                    try:
+                        for ckey in parcel_ids_by_county.keys():
+                            rows = con.execute(
+                                "SELECT parcel_id FROM pa_properties WHERE lower(county)=? OR lower(county) LIKE ?",
+                                (ckey, f"%{ckey}%"),
+                            ).fetchall()
+                            norm_map: dict[str, str] = {}
+                            for row in rows:
+                                try:
+                                    pid = str(row["parcel_id"] or "").strip()
+                                    if not pid:
+                                        continue
+                                    norm = _norm_pid(pid)
+                                    if norm and norm not in norm_map:
+                                        norm_map[norm] = pid
+                                    norm_num = _norm_pid_numeric(pid)
+                                    if norm_num and norm_num not in pa_parcel_norm_numeric_by_county.get(ckey, {}):
+                                        pa_parcel_norm_numeric_by_county.setdefault(ckey, {})[norm_num] = pid
+                                except Exception:
+                                    continue
+                            pa_parcel_norm_by_county[ckey] = norm_map
+                    finally:
+                        con.close()
+            except Exception:
+                pa_parcel_norm_by_county = {}
+
+            try:
+                import sqlite3 as _sqlite3
+
+                db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if db_path and os.path.exists(db_path):
+                    con = _sqlite3.connect(db_path)
+                    con.row_factory = _sqlite3.Row
+                    try:
+                        for ckey, ids in parcel_ids_by_county.items():
+                            if not ids:
+                                continue
+                            pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                            if not pa_ids:
+                                continue
+                            chunk = 900
+                            for i in range(0, len(pa_ids), chunk):
+                                batch = pa_ids[i : i + chunk]
+                                placeholders = ",".join(["?"] * len(batch))
+                                rows = con.execute(
+                                    f"SELECT parcel_id, record_json FROM pa_properties WHERE (lower(county)=? OR lower(county) LIKE ?) AND parcel_id IN ({placeholders})",
+                                    [ckey, f"%{ckey}%", *batch],
+                                ).fetchall()
+                                for row in rows:
+                                    try:
+                                        pid = str(row["parcel_id"] or "").strip()
+                                        raw = row["record_json"]
+                                        if pid and raw:
+                                            pa_raw_by_id[(ckey, pid)] = str(raw)
+                                    except Exception:
+                                        continue
+                    finally:
+                        con.close()
+            except Exception:
+                pa_raw_by_id = {}
+
+            early_trigger_keys = payload.get("trigger_keys")
+            early_trigger_groups = payload.get("trigger_groups") or payload.get("trigger_any_groups") or payload.get("signal_groups")
+            early_trigger_tiers = payload.get("trigger_tiers") or payload.get("tiers")
+            early_trigger_min_score = payload.get("trigger_min_score", payload.get("min_score"))
+            signal_filter_active = bool(
+                (isinstance(early_trigger_keys, (list, tuple, set)) and len(early_trigger_keys) > 0)
+                or (isinstance(early_trigger_groups, (list, tuple, set)) and len(early_trigger_groups) > 0)
+                or (isinstance(early_trigger_tiers, (list, tuple, set)) and len(early_trigger_tiers) > 0)
+                or early_trigger_min_score is not None
+            )
+
+            try:
+                from florida_property_scraper.storage import SQLiteStore
+
+                db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                rstore = SQLiteStore(str(db_path))
+                try:
+                    rollups_total = 0
+                    try:
+                        rollups_total = int(
+                            rstore.conn.execute("SELECT count(*) FROM parcel_trigger_rollups").fetchone()[0]
+                        )
+                    except Exception:
+                        rollups_total = 0
+
+                    for ckey, ids in parcel_ids_by_county.items():
+                        if not ids:
+                            continue
+                        rollups = rstore.get_rollups_for_parcels(county=ckey, parcel_ids=ids)
+                        for pid, rec in rollups.items():
+                            key = (ckey, pid)
+                            rollups_by_id[key] = rec
+                            try:
+                                details = rec.get("details_json")
+                                if isinstance(details, str) and details:
+                                    data = json.loads(details)
+                                    keys = data.get("trigger_keys") or []
+                                    if isinstance(keys, (list, tuple)):
+                                        rollup_keys_by_id[key] = {str(k).strip().lower() for k in keys if str(k).strip()}
+                            except Exception:
+                                pass
+
+                    rollups_loaded = True
+                finally:
+                    rstore.close()
+            except Exception:
+                rollups_loaded = False
+
+            try:
+                import sqlite3 as _sqlite3
+
+                db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if db_path and os.path.exists(db_path):
+                    conn = _sqlite3.connect(db_path)
+                    conn.row_factory = _sqlite3.Row
+                    try:
+                        has_table = conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name='parcel_table1'"
+                        ).fetchone()
+                        if has_table:
+                            for ckey, ids in parcel_ids_by_county.items():
+                                if ckey != "seminole":
+                                    continue
+                                if not ids:
+                                    continue
+                                chunk = 900
+                                for i in range(0, len(ids), chunk):
+                                    batch = ids[i : i + chunk]
+                                    placeholders = ",".join(["?"] * len(batch))
+                                    rows = conn.execute(
+                                        f"SELECT PARCEL, OWNER, ADD1, ADD2, CITY, STATE, ZIP, ZIP4, "
+                                        f"PAD_NUM, PAD_DIR, PAD_NAME, PAD_STREET, APPR_BLDG, APPR_LAND, "
+                                        f"TOTAL_JUST_VALUE, TOTAL_ASSESSED_VALUE, LIVING_AREA, TOTAL_SQFT, "
+                                        f"BASE_YR_BLT, HMST_YEAR_GRANTED "
+                                        f"FROM parcel_table1 WHERE PARCEL IN ({placeholders})",
+                                        batch,
+                                    ).fetchall()
+                                    for row in rows:
+                                        try:
+                                            pid = str(row["PARCEL"] or "").strip()
+                                            if not pid:
+                                                continue
+                                            parcel_table1_by_id[(ckey, pid)] = dict(row)
+                                        except Exception:
+                                            continue
+                    finally:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+            except Exception:
+                parcel_table1_by_id = {}
+
+            try:
+                import sqlite3 as _sqlite3
+
+                parcels_db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+                if parcels_db_path and os.path.exists(parcels_db_path):
+                    con = _sqlite3.connect(parcels_db_path)
+                    con.row_factory = _sqlite3.Row
+                    try:
+                        has_table = con.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table' AND name='parcels_pa'"
+                        ).fetchone()
+                        if has_table:
+                            for ckey, ids in parcel_ids_by_county.items():
+                                if not ids:
+                                    continue
+                                chunk = 900
+                                for i in range(0, len(ids), chunk):
+                                    batch = ids[i : i + chunk]
+                                    placeholders = ",".join(["?"] * len(batch))
+                                    rows = con.execute(
+                                        f"SELECT county, parcel_id, owner_name, situs_address, mailing_address, "
+                                        f"living_area_sqft, beds, baths, year_built, last_sale_date, last_sale_price "
+                                        f"FROM parcels_pa WHERE county=? AND parcel_id IN ({placeholders})",
+                                        [ckey, *batch],
+                                    ).fetchall()
+                                    for row in rows:
+                                        try:
+                                            pid = str(row["parcel_id"] or "").strip()
+                                            cval = str(row["county"] or ckey).strip().lower() or ckey
+                                            if not pid:
+                                                continue
+                                            parcels_pa_by_id[(cval, pid)] = dict(row)
+                                        except Exception:
+                                            continue
+                    finally:
+                        try:
+                            con.close()
+                        except Exception:
+                            pass
+            except Exception:
+                parcels_pa_by_id = {}
 
             if debug_counts is not None:
                 debug_counts["parcel_id_in_count"] = int(len(allowed_ids) if allowed_ids is not None else 0)
@@ -1137,6 +1690,63 @@ if app:
                 if not s:
                     return "UNKNOWN"
                 return " ".join(s.upper().split())
+
+            def _pt1_num(row: dict, key: str) -> float | None:
+                try:
+                    raw = row.get(key)
+                    if raw is None:
+                        return None
+                    s = str(raw).strip()
+                    if not s or s.upper() == "NULL":
+                        return None
+                    return float(s)
+                except Exception:
+                    return None
+
+            def _pt1_int(row: dict, key: str) -> int | None:
+                try:
+                    raw = row.get(key)
+                    if raw is None:
+                        return None
+                    s = str(raw).strip()
+                    if not s or s.upper() == "NULL":
+                        return None
+                    return int(float(s))
+                except Exception:
+                    return None
+
+            def _pt1_text(row: dict, key: str) -> str:
+                try:
+                    s = str(row.get(key) or "").strip()
+                    if not s or s.upper() == "NULL":
+                        return ""
+                    return s
+                except Exception:
+                    return ""
+
+            def _pt1_situs(row: dict) -> str:
+                parts = [
+                    _pt1_text(row, "PAD_NUM"),
+                    _pt1_text(row, "PAD_DIR"),
+                    _pt1_text(row, "PAD_NAME"),
+                    _pt1_text(row, "PAD_STREET"),
+                ]
+                return " ".join([p for p in parts if p]).strip()
+
+            def _pt1_mailing(row: dict) -> str:
+                parts = [
+                    _pt1_text(row, "ADD1"),
+                    _pt1_text(row, "ADD2"),
+                    " ".join(
+                        [
+                            _pt1_text(row, "CITY"),
+                            _pt1_text(row, "STATE"),
+                            _pt1_text(row, "ZIP"),
+                            _pt1_text(row, "ZIP4"),
+                        ]
+                    ).strip(),
+                ]
+                return ", ".join([p for p in parts if p]).strip()
 
             # Optional: SQL-side filtering against cached columns.
             # Only applies when the request is not asking us to enrich missing data.
@@ -1162,7 +1772,26 @@ if app:
             baseline_parcel_ids = list(parcel_ids)
 
             # Load cached rows up front so we can determine which live IDs are missing.
-            pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
+            if multi_county:
+                pa_by_id = {}
+                for ckey, ids in parcel_ids_by_county.items():
+                    if not ids:
+                        continue
+                    pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                    pa_by_pa = store.get_many(county=ckey, parcel_ids=pa_ids)
+                    for gid in ids:
+                        pid = _pa_id_for_geom(ckey, gid)
+                        pa_rec = pa_by_pa.get(pid)
+                        if pa_rec is not None:
+                            pa_by_id[(ckey, gid)] = pa_rec
+            else:
+                pa_ids = _pa_ids_for_geom_ids(county_key, parcel_ids)
+                pa_by_pa = store.get_many(county=county_key, parcel_ids=pa_ids)
+                pa_by_id = {
+                    gid: pa_by_pa.get(_pa_id_for_geom(county_key, gid))
+                    for gid in parcel_ids
+                    if pa_by_pa.get(_pa_id_for_geom(county_key, gid)) is not None
+                }
 
             # If any attribute filters are present and the UI did not explicitly
             # disable enrichment, enable best-effort enrichment.
@@ -1795,13 +2424,38 @@ if app:
                                 except Exception as e:
                                     warnings.append(f"inline_ocpa_enrich_failed:{pid}:{e}")
 
-                            pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
+                            pa_ids = _pa_ids_for_geom_ids(county_key, parcel_ids)
+                            pa_by_pa = store.get_many(county=county_key, parcel_ids=pa_ids)
+                            pa_by_id = {
+                                gid: pa_by_pa.get(_pa_id_for_geom(county_key, gid))
+                                for gid in parcel_ids
+                                if pa_by_pa.get(_pa_id_for_geom(county_key, gid)) is not None
+                            }
                         except Exception as e:
                             warnings.append(f"inline_ocpa_batch_failed:{e}")
 
             # Compute baseline (unfiltered) option lists AFTER best-effort enrichment.
             # Otherwise the first run in a new area can return empty option arrays.
-            baseline_pa_by_id = store.get_many(county=county_key, parcel_ids=baseline_parcel_ids)
+            baseline_pa_by_id = {}
+            if multi_county:
+                for ckey, ids in parcel_ids_by_county.items():
+                    if not ids:
+                        continue
+                    pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                    pa_by_pa = store.get_many(county=ckey, parcel_ids=pa_ids)
+                    for gid in ids:
+                        pid = _pa_id_for_geom(ckey, gid)
+                        pa = pa_by_pa.get(pid)
+                        if pa is not None:
+                            baseline_pa_by_id[(ckey, gid)] = pa
+            else:
+                pa_ids = _pa_ids_for_geom_ids(county_key, baseline_parcel_ids)
+                pa_by_pa = store.get_many(county=county_key, parcel_ids=pa_ids)
+                for gid in baseline_parcel_ids:
+                    pid = _pa_id_for_geom(county_key, gid)
+                    pa = pa_by_pa.get(pid)
+                    if pa is not None:
+                        baseline_pa_by_id[gid] = pa
 
             def _looks_like_code(s: str) -> bool:
                 import re
@@ -1863,6 +2517,20 @@ if app:
                 return out
 
             field_stats["coverage_candidates"] = _candidate_coverage()
+            try:
+                cov = field_stats.get("coverage_candidates") or {}
+                fields_out: dict[str, dict[str, float | int]] = {}
+                if isinstance(cov, dict):
+                    for k, v in cov.items():
+                        if not isinstance(v, dict):
+                            continue
+                        present = int(v.get("present", 0) or 0)
+                        total = int(v.get("total", 0) or 0)
+                        pct = float(v.get("coverage", 0.0) or 0.0)
+                        fields_out[str(k)] = {"present": present, "total": total, "pct": pct}
+                field_stats["fields"] = fields_out
+            except Exception:
+                pass
 
             def _baseline_options(field_name: str) -> list[str]:
                 values: set[str] = set()
@@ -1984,26 +2652,250 @@ if app:
 
                 if where_parts:
                     where_sql = " AND ".join(where_parts)
-                    matching_ids = set(
-                        store.filter_cached_ids(
-                            county=county_key,
-                            parcel_ids=parcel_ids,
-                            where_sql=where_sql,
-                            params=where_params,
-                            limit=len(parcel_ids),
-                        )
-                    )
-                    if matching_ids:
-                        intersecting = [f for f in intersecting if f.parcel_id in matching_ids]
-                        parcel_ids = [f.parcel_id for f in intersecting]
+                    if multi_county:
+                        next_intersecting: list[Any] = []
+                        for ckey, ids in parcel_ids_by_county.items():
+                            if not ids:
+                                continue
+                            pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                            matching_pa_ids = set(
+                                store.filter_cached_ids(
+                                    county=ckey,
+                                    parcel_ids=pa_ids,
+                                    where_sql=where_sql,
+                                    params=where_params,
+                                    limit=len(pa_ids),
+                                )
+                            )
+                            matching_geom = {
+                                gid for gid in ids if _pa_id_for_geom(ckey, gid) in matching_pa_ids
+                            }
+                            if matching_geom:
+                                next_intersecting.extend(
+                                    [
+                                        f
+                                        for f in intersecting
+                                        if getattr(f, "county", ckey) == ckey and f.parcel_id in matching_geom
+                                    ]
+                                )
+                        intersecting = next_intersecting
+                        parcel_ids_by_county = {}
+                        for f in intersecting:
+                            ckey = str(getattr(f, "county", "") or county_key).strip().lower() or county_key
+                            parcel_ids_by_county.setdefault(ckey, []).append(f.parcel_id)
+                        parcel_ids = [pid for ids in parcel_ids_by_county.values() for pid in ids]
                     else:
-                        intersecting = []
-                        parcel_ids = []
+                        pa_ids = _pa_ids_for_geom_ids(county_key, parcel_ids)
+                        matching_pa_ids = set(
+                            store.filter_cached_ids(
+                                county=county_key,
+                                parcel_ids=pa_ids,
+                                where_sql=where_sql,
+                                params=where_params,
+                                limit=len(pa_ids),
+                            )
+                        )
+                        matching_geom = {
+                            gid
+                            for gid in parcel_ids
+                            if _pa_id_for_geom(county_key, gid) in matching_pa_ids
+                        }
+                        if matching_geom:
+                            intersecting = [f for f in intersecting if f.parcel_id in matching_geom]
+                            parcel_ids = [f.parcel_id for f in intersecting]
+                        else:
+                            intersecting = []
+                            parcel_ids = []
 
                 # Refresh after SQL filtering.
-                pa_by_id = store.get_many(county=county_key, parcel_ids=parcel_ids)
+                if multi_county:
+                    pa_by_id = {}
+                    for ckey, ids in parcel_ids_by_county.items():
+                        if not ids:
+                            continue
+                        pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                        pa_by_pa = store.get_many(county=ckey, parcel_ids=pa_ids)
+                        for gid in ids:
+                            pid = _pa_id_for_geom(ckey, gid)
+                            pa = pa_by_pa.get(pid)
+                            if pa is not None:
+                                pa_by_id[(ckey, gid)] = pa
+                else:
+                    pa_ids = _pa_ids_for_geom_ids(county_key, parcel_ids)
+                    pa_by_pa = store.get_many(county=county_key, parcel_ids=pa_ids)
+                    pa_by_id = {
+                        gid: pa_by_pa.get(_pa_id_for_geom(county_key, gid))
+                        for gid in parcel_ids
+                        if pa_by_pa.get(_pa_id_for_geom(county_key, gid)) is not None
+                    }
 
-            hover_by_id = store.get_hover_fields_many(county=county_key, parcel_ids=parcel_ids)
+            if multi_county:
+                hover_by_id = {}
+                for ckey, ids in parcel_ids_by_county.items():
+                    if not ids:
+                        continue
+                    pa_ids = _pa_ids_for_geom_ids(ckey, ids)
+                    hover_by_pa = store.get_hover_fields_many(county=ckey, parcel_ids=pa_ids)
+                    for gid in ids:
+                        pid = _pa_id_for_geom(ckey, gid)
+                        hv = hover_by_pa.get(pid)
+                        if hv is not None:
+                            hover_by_id[(ckey, gid)] = hv
+            else:
+                pa_ids = _pa_ids_for_geom_ids(county_key, parcel_ids)
+                hover_by_pa = store.get_hover_fields_many(county=county_key, parcel_ids=pa_ids)
+                hover_by_id = {
+                    gid: hover_by_pa.get(_pa_id_for_geom(county_key, gid))
+                    for gid in parcel_ids
+                    if hover_by_pa.get(_pa_id_for_geom(county_key, gid)) is not None
+                }
+
+            # Fallback: if PA rows exist under a different county label, attempt
+            # a conservative match by parcel_id + county alias. This avoids
+            # dropping beds/baths/zoning when data is present but the county
+            # string differs (e.g., "Seminole County").
+            try:
+                import re as _re
+                import sqlite3 as _sqlite3
+                from florida_property_scraper.pa.normalize import apply_defaults
+
+                def _norm_county(value: str) -> str:
+                    return _re.sub(r"[^a-z]", "", str(value or "").lower())
+
+                def _county_matches(raw_county: str, target: str, raw_json: dict | None) -> bool:
+                    norm_target = _norm_county(target)
+                    if not norm_target:
+                        return False
+                    norm_raw = _norm_county(raw_county)
+                    if norm_raw and (norm_raw == norm_target or norm_raw.startswith(norm_target) or norm_target in norm_raw):
+                        return True
+                    if isinstance(raw_json, dict):
+                        for key in ("county", "county_name", "countycode", "county_code"):
+                            try:
+                                v = raw_json.get(key)
+                            except Exception:
+                                v = None
+                            if v and _county_matches(v, target, None):
+                                return True
+                    return False
+
+                def _hover_from_pa(rec) -> dict:
+                    owner_name = "; ".join([n for n in (rec.owner_names or []) if n])
+                    return {
+                        "situs_address": rec.situs_address or "",
+                        "owner_name": owner_name,
+                        "last_sale_date": rec.last_sale_date,
+                        "last_sale_price": float(rec.last_sale_price or 0),
+                        "year_built": int(rec.year_built or 0) if rec.year_built is not None else 0,
+                        "beds": int(rec.bedrooms or 0) if rec.bedrooms is not None else 0,
+                        "baths": float(rec.bathrooms or 0) if rec.bathrooms is not None else 0.0,
+                        "living_sf": float(rec.living_sf or 0),
+                        "land_sf": float(rec.land_sf or 0),
+                        "land_acres": float(rec.land_acres or 0),
+                        "zoning": rec.zoning or "",
+                        "future_land_use": rec.future_land_use or "",
+                        "land_value": float(rec.land_value or 0),
+                        "improvement_value": float(rec.improvement_value or 0),
+                        "assessed_value": float(rec.assessed_value or 0),
+                        "taxable_value": float(rec.taxable_value or 0),
+                        "just_value": float(rec.just_value or 0),
+                        "mortgage_amount": float(rec.mortgage_amount or 0) if rec.mortgage_amount is not None else None,
+                        "mortgage_date": rec.mortgage_date or "",
+                        "mortgage_lender": rec.mortgage_lender or "",
+                        "longitude": float(rec.longitude) if rec.longitude is not None else None,
+                        "latitude": float(rec.latitude) if rec.latitude is not None else None,
+                        "use_type": rec.use_type or "",
+                        "land_use_code": rec.land_use_code or "",
+                    }
+
+                missing_by_county: dict[str, list[tuple[str, str]]] = {}
+
+                def _has_pa(ckey: str, gid: str) -> bool:
+                    if multi_county:
+                        return (ckey, gid) in pa_by_id
+                    return gid in pa_by_id
+
+                for ckey, ids in parcel_ids_by_county.items():
+                    for gid in ids:
+                        if _has_pa(ckey, gid):
+                            continue
+                        pid = _pa_id_for_geom(ckey, gid)
+                        if pid:
+                            missing_by_county.setdefault(ckey, []).append((gid, pid))
+
+                missing_pa_ids = {
+                    pid
+                    for pairs in missing_by_county.values()
+                    for (_, pid) in pairs
+                    if pid
+                }
+
+                if missing_pa_ids:
+                    db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                    if db_path and os.path.exists(db_path):
+                        con = _sqlite3.connect(db_path)
+                        con.row_factory = _sqlite3.Row
+                        try:
+                            all_rows: dict[str, list[tuple[str, str, dict | None]]] = {}
+                            chunk = 900
+                            all_ids = list(missing_pa_ids)
+                            for i in range(0, len(all_ids), chunk):
+                                batch = all_ids[i : i + chunk]
+                                placeholders = ",".join(["?"] * len(batch))
+                                rows = con.execute(
+                                    f"SELECT parcel_id, county, record_json FROM pa_properties WHERE parcel_id IN ({placeholders})",
+                                    batch,
+                                ).fetchall()
+                                for row in rows:
+                                    try:
+                                        pid = str(row["parcel_id"] or "").strip()
+                                        if not pid:
+                                            continue
+                                        raw = row["record_json"]
+                                        raw_json = None
+                                        try:
+                                            raw_json = json.loads(raw) if raw else None
+                                        except Exception:
+                                            raw_json = None
+                                        all_rows.setdefault(pid, []).append(
+                                            (str(row["county"] or "").strip(), str(raw or ""), raw_json)
+                                        )
+                                    except Exception:
+                                        continue
+
+                            for ckey, pairs in missing_by_county.items():
+                                for gid, pid in pairs:
+                                    if _has_pa(ckey, gid):
+                                        continue
+                                    rows = all_rows.get(pid, [])
+                                    if not rows:
+                                        continue
+                                    chosen = None
+                                    for row_county, raw_str, raw_json in rows:
+                                        if _county_matches(row_county, ckey, raw_json):
+                                            chosen = (row_county, raw_str, raw_json)
+                                            break
+                                    if chosen is None:
+                                        continue
+                                    _, raw_str, raw_json = chosen
+                                    if not raw_json:
+                                        continue
+                                    try:
+                                        pa_any = apply_defaults(raw_json)
+                                    except Exception:
+                                        continue
+                                    if multi_county:
+                                        pa_by_id[(ckey, gid)] = pa_any
+                                        hover_by_id[(ckey, gid)] = _hover_from_pa(pa_any)
+                                    else:
+                                        pa_by_id[gid] = pa_any
+                                        hover_by_id[gid] = _hover_from_pa(pa_any)
+                                    if raw_str:
+                                        pa_raw_by_id[(ckey, pid)] = raw_str
+                        finally:
+                            con.close()
+            except Exception:
+                pass
 
             # Strict mode: missing values must fail attribute filters. Soft-missing is
             # reserved for polygon-only browsing (no attribute filters).
@@ -2060,6 +2952,54 @@ if app:
         raw_triggers = payload.get("triggers") if flags.triggers else None
         triggers = compile_triggers(raw_triggers)
 
+        raw_trigger_keys = payload.get("trigger_keys")
+        trigger_keys: list[str] = []
+        try:
+            if isinstance(raw_trigger_keys, (list, tuple, set)):
+                for item in raw_trigger_keys:
+                    key = str(item or "").strip().lower()
+                    if key and key not in trigger_keys:
+                        trigger_keys.append(key)
+        except Exception:
+            trigger_keys = []
+
+        raw_trigger_groups = (
+            payload.get("trigger_groups")
+            or payload.get("trigger_any_groups")
+            or payload.get("signal_groups")
+        )
+        trigger_groups: list[str] = []
+        try:
+            if isinstance(raw_trigger_groups, (list, tuple, set)):
+                for item in raw_trigger_groups:
+                    key = str(item or "").strip().lower()
+                    if key and key not in trigger_groups:
+                        trigger_groups.append(key)
+        except Exception:
+            trigger_groups = []
+
+        raw_trigger_tiers = payload.get("trigger_tiers") or payload.get("tiers")
+        trigger_tiers: list[str] = []
+        try:
+            if isinstance(raw_trigger_tiers, (list, tuple, set)):
+                for item in raw_trigger_tiers:
+                    key = str(item or "").strip().lower()
+                    if key and key not in trigger_tiers:
+                        trigger_tiers.append(key)
+        except Exception:
+            trigger_tiers = []
+
+        trigger_min_score = None
+        try:
+            raw_min_score = payload.get("trigger_min_score", payload.get("min_score"))
+            if raw_min_score is not None and str(raw_min_score).strip() != "":
+                trigger_min_score = int(float(raw_min_score))
+        except Exception:
+            trigger_min_score = None
+
+        supported_signal_keys = {"absentee_owner", "homestead"}
+        signal_keys = [k for k in trigger_keys if k in supported_signal_keys]
+
         sale_fields = {
             # PA hover fields
             "last_sale_date",
@@ -2070,8 +3010,10 @@ if app:
             "deed_type",
         }
 
-        results = []
-        records = []
+        # signal_filter_active computed earlier for rollup loading; keep value consistent.
+
+        results_all: list[dict] = []
+        records_all: list[dict] = []
         source_counts: dict[str, int] = {"live": 0, "cache": 0, "missing": 0}
         legacy_source_counts: dict[str, int] = {
             "local": 0,
@@ -2094,6 +3036,68 @@ if app:
                 return "pa_db", su
             except Exception:
                 return "pa_db", ""
+
+        def _norm_addr(value: object) -> str:
+            try:
+                s = str(value or "").strip().upper()
+            except Exception:
+                return ""
+            if not s:
+                return ""
+            s = re.sub(r"[^A-Z0-9 ]+", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+
+        def _ensure_pa_address_map(ckey: str) -> None:
+            if ckey in pa_address_map_by_county:
+                return
+            pa_address_map_by_county[ckey] = {}
+            pa_raw_by_address_by_county[ckey] = {}
+            try:
+                import sqlite3 as _sqlite3
+
+                db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if not db_path or not os.path.exists(db_path):
+                    return
+                con = _sqlite3.connect(db_path)
+                con.row_factory = _sqlite3.Row
+                try:
+                    rows = con.execute(
+                        "SELECT parcel_id, record_json FROM pa_properties WHERE lower(county)=? OR lower(county) LIKE ?",
+                        (ckey, f"%{ckey}%"),
+                    ).fetchall()
+                    for row in rows:
+                        try:
+                            pid = str(row["parcel_id"] or "").strip()
+                            raw = row["record_json"]
+                            if not pid or not raw:
+                                continue
+                            try:
+                                data = json.loads(raw)
+                            except Exception:
+                                continue
+                            addr = str(
+                                data.get("situs_address")
+                                or data.get("property_address")
+                                or data.get("site_address")
+                                or ""
+                            ).strip()
+                            if not addr:
+                                continue
+                            street = addr.split(",")[0].strip()
+                            for candidate in {addr, street}:
+                                norm = _norm_addr(candidate)
+                                if not norm:
+                                    continue
+                                if norm not in pa_address_map_by_county[ckey]:
+                                    pa_address_map_by_county[ckey][norm] = pid
+                                    pa_raw_by_address_by_county[ckey][norm] = raw
+                        except Exception:
+                            continue
+                finally:
+                    con.close()
+            except Exception:
+                return
 
         filter_stage_counts: dict[str, int] = {
             "intersecting": 0,
@@ -2120,6 +3124,24 @@ if app:
 
         missing_field_counts: dict[str, int] = {}
 
+        filter_explain_counts: list[dict[str, Any]] = []
+        if explain_enabled and filters:
+            try:
+                for f in filters:
+                    filter_explain_counts.append(
+                        {
+                            "field": getattr(f, "field", None),
+                            "op": getattr(f, "op", None),
+                            "value": getattr(f, "value", None),
+                            "candidates": 0,
+                            "dropped_missing": 0,
+                            "dropped_value": 0,
+                            "passed": 0,
+                        }
+                    )
+            except Exception:
+                filter_explain_counts = []
+
         def _conf_meta(
             value: object,
             *,
@@ -2143,7 +3165,9 @@ if app:
             return {"source": source, "confidence": float(c), "reason": None}
 
         for feat in intersecting:
-            pa = pa_by_id.get(feat.parcel_id)
+            feat_county = str(getattr(feat, "county", "") or county_key).strip().lower() or county_key
+            feat_pa_parcel_id = _pa_id_for_geom(feat_county, feat.parcel_id)
+            pa = pa_by_id.get((feat_county, feat.parcel_id)) if multi_county else pa_by_id.get(feat.parcel_id)
             pa_dict = pa.to_dict() if pa is not None else None
 
             # Guardrail: if FDOR live mode is requested and enabled, do not emit
@@ -2158,7 +3182,8 @@ if app:
                 filter_stage_counts["with_pa"] += 1
                 stage_counts["with_pa"] += 1
             computed = compute_ui_fields(pa_dict)
-            hover = hover_by_id.get(feat.parcel_id) or {
+            hover_key = (feat_county, feat.parcel_id) if multi_county else feat.parcel_id
+            hover = hover_by_id.get(hover_key) or {
                 "situs_address": "",
                 "owner_name": "",
                 "last_sale_date": None,
@@ -2172,6 +3197,120 @@ if app:
             fields.update(computed)
             fields.update(hover)
 
+            try:
+                pt_norm = normalize_property_type(
+                    fields.get("property_type"),
+                    fields.get("use_type"),
+                    fields.get("land_use"),
+                    fields.get("land_use_code"),
+                    fields.get("property_class"),
+                )
+                if pt_norm:
+                    fields["property_type_norm"] = pt_norm
+                    fields["property_type"] = pt_norm
+            except Exception:
+                pass
+
+            parcel_row = parcel_table1_by_id.get((feat_county, feat.parcel_id)) if parcel_table1_by_id else None
+            if parcel_row:
+                try:
+                    if not fields.get("owner_name"):
+                        owner_name_pt1 = _pt1_text(parcel_row, "OWNER")
+                        if owner_name_pt1:
+                            fields["owner_name"] = owner_name_pt1
+                    if not fields.get("situs_address"):
+                        situs_pt1 = _pt1_situs(parcel_row)
+                        if situs_pt1:
+                            fields["situs_address"] = situs_pt1
+                    if fields.get("living_area_sqft") in (None, "", 0):
+                        la = _pt1_num(parcel_row, "LIVING_AREA")
+                        if la is None:
+                            la = _pt1_num(parcel_row, "TOTAL_SQFT")
+                        if la:
+                            fields["living_area_sqft"] = la
+                    if fields.get("year_built") in (None, "", 0):
+                        yb = _pt1_int(parcel_row, "BASE_YR_BLT")
+                        if yb and yb > 0:
+                            fields["year_built"] = yb
+                    if fields.get("total_value") in (None, "", 0):
+                        tv = _pt1_num(parcel_row, "TOTAL_JUST_VALUE")
+                        if tv:
+                            fields["total_value"] = tv
+                    if fields.get("assessed_value") in (None, "", 0):
+                        av = _pt1_num(parcel_row, "TOTAL_ASSESSED_VALUE")
+                        if av:
+                            fields["assessed_value"] = av
+                    if fields.get("land_value") in (None, "", 0):
+                        lv = _pt1_num(parcel_row, "APPR_LAND")
+                        if lv:
+                            fields["land_value"] = lv
+                    if fields.get("building_value") in (None, "", 0):
+                        bv = _pt1_num(parcel_row, "APPR_BLDG")
+                        if bv:
+                            fields["building_value"] = bv
+                except Exception:
+                    pass
+
+            if pa is None and parcel_row:
+                try:
+                    _ensure_pa_address_map(feat_county)
+                    addr = _pt1_situs(parcel_row)
+                    if addr:
+                        norm = _norm_addr(addr)
+                        pa_pid = pa_address_map_by_county.get(feat_county, {}).get(norm)
+                        if pa_pid:
+                            feat_pa_parcel_id = pa_pid
+                            try:
+                                pa = store.get(county=feat_county, parcel_id=pa_pid)
+                            except Exception:
+                                pa = None
+                            pa_dict = pa.to_dict() if pa is not None else None
+                            raw = pa_raw_by_address_by_county.get(feat_county, {}).get(norm)
+                            if raw:
+                                pa_raw_by_id[(feat_county, feat_pa_parcel_id)] = raw
+                except Exception:
+                    pass
+
+            parcels_pa_row = (
+                parcels_pa_by_id.get((feat_county, feat.parcel_id)) if parcels_pa_by_id else None
+            )
+            if parcels_pa_row:
+                try:
+                    if not fields.get("owner_name"):
+                        owner_name_pp = _pt1_text(parcels_pa_row, "owner_name")
+                        if owner_name_pp:
+                            fields["owner_name"] = owner_name_pp
+                    if not fields.get("situs_address"):
+                        situs_pp = _pt1_text(parcels_pa_row, "situs_address")
+                        if situs_pp:
+                            fields["situs_address"] = situs_pp
+                    if fields.get("living_area_sqft") in (None, "", 0):
+                        la_pp = _pt1_num(parcels_pa_row, "living_area_sqft")
+                        if la_pp:
+                            fields["living_area_sqft"] = la_pp
+                    if fields.get("beds") in (None, "", 0):
+                        b_pp = _pt1_int(parcels_pa_row, "beds")
+                        if b_pp and b_pp > 0:
+                            fields["beds"] = b_pp
+                    if fields.get("baths") in (None, "", 0):
+                        ba_pp = _pt1_num(parcels_pa_row, "baths")
+                        if ba_pp and ba_pp > 0:
+                            fields["baths"] = ba_pp
+                    if fields.get("year_built") in (None, "", 0):
+                        yb_pp = _pt1_int(parcels_pa_row, "year_built")
+                        if yb_pp and yb_pp > 0:
+                            fields["year_built"] = yb_pp
+                    if fields.get("last_sale_date") in (None, "", 0):
+                        ls_pp = _pt1_text(parcels_pa_row, "last_sale_date")
+                        if ls_pp:
+                            fields["last_sale_date"] = ls_pp
+                    if fields.get("last_sale_price") in (None, "", 0):
+                        lp_pp = _pt1_num(parcels_pa_row, "last_sale_price")
+                        if lp_pp:
+                            fields["last_sale_price"] = lp_pp
+                except Exception:
+                    pass
+
             if not exclude_missing and filter_fields:
                 missing_ok_fields = set(filter_fields)
                 if not flags.sale_filtering:
@@ -2183,6 +3322,13 @@ if app:
                     v = fields.get(fname) if fname in fields else None
                     if v is None or v == "":
                         missing_field_counts[fname] = int(missing_field_counts.get(fname, 0)) + 1
+
+            try:
+                oy = fields.get("ownership_years")
+                if isinstance(oy, (int, float)) and oy > 0:
+                    field_stats["present"]["ownership_years"] += 1
+            except Exception:
+                pass
 
             # Soft-missing behavior is disabled when attribute filters are present.
 
@@ -2257,8 +3403,13 @@ if app:
                     fields["taxable_value"] = None
                 # `property_type` is treated as the PA use_type / land_use_code label.
                 try:
-                    pt = (pa.use_type or pa.land_use_code or "").strip()
-                    fields["property_type"] = pt or None
+                    pt_raw = (pa.use_type or pa.land_use_code or "").strip()
+                    pt_norm = normalize_property_type(pt_raw, pa.property_class)
+                    if pt_norm:
+                        fields["property_type_norm"] = pt_norm
+                        fields["property_type"] = pt_norm
+                    else:
+                        fields["property_type"] = pt_raw or None
                 except Exception:
                     fields["property_type"] = None
 
@@ -2294,6 +3445,16 @@ if app:
                     field_stats["present"]["year_built"] += 1
                 if fields.get("total_value") not in (None, "", 0):
                     field_stats["present"]["total_value"] += 1
+                if fields.get("land_value") not in (None, "", 0):
+                    field_stats["present"]["land_value"] += 1
+                if fields.get("building_value") not in (None, "", 0):
+                    field_stats["present"]["building_value"] += 1
+                if fields.get("assessed_value") not in (None, "", 0):
+                    field_stats["present"]["assessed_value"] += 1
+                if str(fields.get("last_sale_date") or "").strip():
+                    field_stats["present"]["last_sale_date"] += 1
+                if str(fields.get("property_type") or "").strip():
+                    field_stats["present"]["property_type"] += 1
                 if str(fields.get("zoning") or "").strip():
                     field_stats["present"]["zoning"] += 1
                 if str(fields.get("future_land_use") or "").strip():
@@ -2344,6 +3505,32 @@ if app:
                 except Exception:
                     pass
 
+            if explain_enabled and filters and filter_explain_counts:
+                missing_ok_raw = fields.get("__missing_ok_fields")
+                missing_ok: set[str] = set()
+                if isinstance(missing_ok_raw, (list, tuple, set)):
+                    missing_ok = {str(x) for x in missing_ok_raw if str(x)}
+
+                for idx, f in enumerate(filters):
+                    if idx >= len(filter_explain_counts):
+                        break
+                    counters = filter_explain_counts[idx]
+                    counters["candidates"] = int(counters.get("candidates", 0)) + 1
+                    present = f.field in fields and fields.get(f.field) is not None
+                    if not present:
+                        if f.field in missing_ok:
+                            counters["passed"] = int(counters.get("passed", 0)) + 1
+                        else:
+                            counters["dropped_missing"] = int(counters.get("dropped_missing", 0)) + 1
+                        continue
+                    try:
+                        if eval_condition(fields, f):
+                            counters["passed"] = int(counters.get("passed", 0)) + 1
+                        else:
+                            counters["dropped_value"] = int(counters.get("dropped_value", 0)) + 1
+                    except Exception:
+                        counters["dropped_value"] = int(counters.get("dropped_value", 0)) + 1
+
             if explain_enabled and filters:
                 passed, reason = apply_filters_explain(fields, filters)
                 if not passed:
@@ -2360,8 +3547,11 @@ if app:
 
             # Geometry clipping AFTER attribute filters.
             geom_ok = False
+            polygon_match_mode = str(payload.get("polygon_match_mode") or "intersects").strip().lower()
+            if polygon_match_mode not in {"intersects", "centroid_inside", "contains"}:
+                polygon_match_mode = "intersects"
             try:
-                geom_ok = bool(feat.geometry) and intersects(geometry, feat.geometry)
+                geom_ok = bool(feat.geometry) and match_geometry(geometry, feat.geometry, polygon_match_mode)
             except Exception:
                 geom_ok = False
 
@@ -2369,9 +3559,12 @@ if app:
                 filter_stage_counts["geometry_failed"] += 1
                 stage_counts["geometry_failed"] += 1
                 if explain_enabled:
-                    filter_drop_reasons["geometry:outside_polygon"] = (
-                        int(filter_drop_reasons.get("geometry:outside_polygon", 0)) + 1
-                    )
+                    reason = "geometry:outside_polygon"
+                    if polygon_match_mode == "centroid_inside":
+                        reason = "geometry:centroid_outside"
+                    elif polygon_match_mode == "contains":
+                        reason = "geometry:not_contained"
+                    filter_drop_reasons[reason] = int(filter_drop_reasons.get(reason, 0)) + 1
                 continue
 
             stage_counts["geometry_passed"] += 1
@@ -2384,17 +3577,6 @@ if app:
                         int(trigger_drop_reasons.get("no_trigger_match", 0)) + 1
                     )
                 continue
-
-            row = {
-                "county": county_key,
-                "parcel_id": feat.parcel_id,
-                "hover_fields": hover,
-                "reason_codes": reason_codes,
-            }
-            if include_geometry:
-                row["geometry"] = feat.geometry
-            if len(results) < limit:
-                results.append(row)
 
             # Enriched record payload for the modern UI.
             # New source contract:
@@ -2417,22 +3599,243 @@ if app:
                 legacy_source_counts.get(legacy_source, 0)
             ) + 1
 
-            owner_name = hover.get("owner_name") or ""
-            situs_address = hover.get("situs_address") or ""
+            def _norm_num(value: object) -> float | None:
+                try:
+                    if value is None:
+                        return None
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    s = str(value).strip()
+                    if not s or s.upper() == "NULL":
+                        return None
+                    return float(s)
+                except Exception:
+                    return None
+
+            owner_name = str(fields.get("owner_name") or hover.get("owner_name") or "").strip()
+            situs_address = str(fields.get("situs_address") or hover.get("situs_address") or "").strip()
             owner_mailing_address = ""
             homestead_flag = None
-            zoning = ""
-            land_use = ""
-            future_land_use = ""
-            property_class = ""
+            zoning = str(fields.get("zoning") or "").strip()
+            land_use = str(
+                fields.get("use_type") or fields.get("land_use_code") or fields.get("land_use") or ""
+            ).strip()
+            future_land_use = str(fields.get("future_land_use") or "").strip()
+            property_class = str(fields.get("property_class") or "").strip()
             living_area_sqft = None
             lot_size_sqft = None
             lot_size_acres = None
             beds = None
             baths = None
             year_built = None
-            last_sale_date = hover.get("last_sale_date")
-            last_sale_price = hover.get("last_sale_price")
+            last_sale_date = fields.get("last_sale_date") or hover.get("last_sale_date")
+            last_sale_price = fields.get("last_sale_price") or hover.get("last_sale_price")
+            land_value = None
+            building_value = None
+            total_value = None
+            assessed_value = None
+            taxable_value = None
+
+            field_sources: dict[str, str] = {}
+
+            def _set_source(field_name: str, source_name: str, value: object) -> None:
+                if value is None:
+                    return
+                if isinstance(value, str) and not value.strip():
+                    return
+                if field_name not in field_sources:
+                    field_sources[field_name] = source_name
+
+            def _apply_record_json(raw: object) -> None:
+                if raw is None:
+                    return
+                try:
+                    if isinstance(raw, str) and raw.strip():
+                        data = json.loads(raw)
+                    elif isinstance(raw, dict):
+                        data = raw
+                    else:
+                        return
+                except Exception:
+                    return
+
+                data_lower = {str(k).strip().lower(): v for k, v in data.items()} if isinstance(data, dict) else {}
+
+                def _get(*keys: str) -> object | None:
+                    for k in keys:
+                        key = str(k).strip()
+                        if key in data and data[key] not in (None, ""):
+                            return data[key]
+                        lkey = key.lower()
+                        if lkey in data_lower and data_lower[lkey] not in (None, ""):
+                            return data_lower[lkey]
+                    return None
+
+                nonlocal owner_name
+                nonlocal situs_address
+                nonlocal owner_mailing_address
+                nonlocal homestead_flag
+                nonlocal zoning
+                nonlocal future_land_use
+                nonlocal land_use
+                nonlocal property_class
+                nonlocal living_area_sqft
+                nonlocal lot_size_sqft
+                nonlocal lot_size_acres
+                nonlocal beds
+                nonlocal baths
+                nonlocal year_built
+                nonlocal last_sale_date
+                nonlocal last_sale_price
+                nonlocal land_value
+                nonlocal building_value
+                nonlocal total_value
+                nonlocal assessed_value
+                nonlocal taxable_value
+
+                owner_raw = _get("owner_name", "owner", "owner_names")
+                if owner_raw and not owner_name:
+                    if isinstance(owner_raw, (list, tuple)):
+                        owner_name = "; ".join([str(x).strip() for x in owner_raw if str(x).strip()])
+                    else:
+                        owner_name = str(owner_raw).strip()
+                    if owner_name:
+                        _set_source("owner_name", "pa_properties.record_json", owner_name)
+
+                situs_raw = _get("situs_address", "property_address", "site_address")
+                if situs_raw and not situs_address:
+                    situs_address = str(situs_raw).strip()
+                    if situs_address:
+                        _set_source("situs_address", "pa_properties.record_json", situs_address)
+
+                mailing_raw = _get("mailing_address", "owner_mailing_address", "mail_address")
+                if mailing_raw and not owner_mailing_address:
+                    owner_mailing_address = str(mailing_raw).strip()
+                    if owner_mailing_address:
+                        _set_source("owner_mailing_address", "pa_properties.record_json", owner_mailing_address)
+
+                zoning_raw = _get("zoning")
+                if zoning_raw and not zoning:
+                    zoning = str(zoning_raw).strip()
+                    if zoning:
+                        _set_source("zoning", "pa_properties.record_json", zoning)
+
+                flu_raw = _get("future_land_use", "future_landuse", "future_land_use_code")
+                if flu_raw and not future_land_use:
+                    future_land_use = str(flu_raw).strip()
+                    if future_land_use:
+                        _set_source("future_land_use", "pa_properties.record_json", future_land_use)
+
+                land_use_raw = _get("land_use", "land_use_code", "use_type", "property_type")
+                if land_use_raw and not land_use:
+                    land_use = str(land_use_raw).strip()
+                    if land_use:
+                        _set_source("property_type", "pa_properties.record_json", land_use)
+
+                property_class_raw = _get("property_class")
+                if property_class_raw and not property_class:
+                    property_class = str(property_class_raw).strip()
+
+                la_raw = _get("living_area_sqft", "living_sf", "living_area", "heated_area", "building_sf")
+                if living_area_sqft is None:
+                    la = _norm_num(la_raw)
+                    if la and la > 0:
+                        living_area_sqft = la
+                        _set_source("living_area_sqft", "pa_properties.record_json", living_area_sqft)
+
+                lot_raw = _get("lot_size_sqft", "land_sqft", "land_sf")
+                if lot_size_sqft is None:
+                    ls = _norm_num(lot_raw)
+                    if ls and ls > 0:
+                        lot_size_sqft = ls
+                        _set_source("lot_size_sqft", "pa_properties.record_json", lot_size_sqft)
+
+                acres_raw = _get("lot_size_acres", "land_acres")
+                if lot_size_acres is None:
+                    la = _norm_num(acres_raw)
+                    if la and la > 0:
+                        lot_size_acres = la
+                        _set_source("lot_size_acres", "pa_properties.record_json", lot_size_acres)
+
+                beds_raw = _get("beds", "bedrooms", "bedroom")
+                if beds is None:
+                    b = _norm_num(beds_raw)
+                    if b and b > 0:
+                        beds = int(b)
+                        _set_source("beds", "pa_properties.record_json", beds)
+
+                baths_raw = _get("baths", "bathrooms", "bathroom")
+                if baths is None:
+                    ba = _norm_num(baths_raw)
+                    if ba and ba > 0:
+                        baths = float(ba)
+                        _set_source("baths", "pa_properties.record_json", baths)
+
+                yb_raw = _get("year_built", "yr_built", "built_year")
+                if year_built is None:
+                    yb = _norm_num(yb_raw)
+                    if yb and yb > 0:
+                        year_built = int(yb)
+                        _set_source("year_built", "pa_properties.record_json", year_built)
+
+                last_sale_raw = _get("last_sale_date", "sale_date")
+                if not last_sale_date and last_sale_raw:
+                    last_sale_date = str(last_sale_raw).strip()
+                    if last_sale_date:
+                        _set_source("last_sale_date", "pa_properties.record_json", last_sale_date)
+
+                last_sale_price_raw = _get("last_sale_price", "sale_price")
+                if not last_sale_price:
+                    lp = _norm_num(last_sale_price_raw)
+                    if lp and lp > 0:
+                        last_sale_price = lp
+                        _set_source("last_sale_price", "pa_properties.record_json", last_sale_price)
+
+                just_raw = _get("just_value", "total_value", "total_just_value")
+                if total_value is None:
+                    tv = _norm_num(just_raw)
+                    if tv and tv > 0:
+                        total_value = tv
+                        _set_source("total_value", "pa_properties.record_json", total_value)
+
+                assessed_raw = _get("assessed_value", "total_assessed_value")
+                if assessed_value is None:
+                    av = _norm_num(assessed_raw)
+                    if av and av > 0:
+                        assessed_value = av
+                        _set_source("assessed_value", "pa_properties.record_json", assessed_value)
+
+                taxable_raw = _get("taxable_value")
+                if taxable_value is None:
+                    tv = _norm_num(taxable_raw)
+                    if tv and tv > 0:
+                        taxable_value = tv
+                        _set_source("taxable_value", "pa_properties.record_json", taxable_value)
+
+                land_value_raw = _get("land_value")
+                if land_value is None:
+                    lv = _norm_num(land_value_raw)
+                    if lv and lv > 0:
+                        land_value = lv
+                        _set_source("land_value", "pa_properties.record_json", land_value)
+
+                bldg_value_raw = _get("improvement_value", "building_value")
+                if building_value is None:
+                    bv = _norm_num(bldg_value_raw)
+                    if bv and bv > 0:
+                        building_value = bv
+                        _set_source("building_value", "pa_properties.record_json", building_value)
+
+                homestead_raw = _get("homestead", "homestead_flag", "homestead_exemption")
+                if homestead_flag is None and homestead_raw is not None:
+                    try:
+                        if isinstance(homestead_raw, bool):
+                            homestead_flag = homestead_raw
+                        else:
+                            s = str(homestead_raw).strip().lower()
+                            homestead_flag = s in {"1", "true", "yes", "y"}
+                    except Exception:
+                        homestead_flag = None
 
             if pa is not None:
                 owner_name = "; ".join([n for n in (pa.owner_names or []) if n]) or owner_name
@@ -2449,25 +3852,46 @@ if app:
                         ).strip(),
                     ]
                 ).replace(" ,", ",").strip(" ,")
-                zoning = (pa.zoning or "").strip()
-                future_land_use = (pa.future_land_use or "").strip()
-                land_use = (pa.use_type or pa.land_use_code or "").strip()
-                property_class = (pa.property_class or "").strip()
-                living_area_sqft = float(pa.living_sf or 0) or None
-                if living_area_sqft is None:
-                    living_area_sqft = float(pa.building_sf or 0) or None
-                lot_size_sqft = float(pa.land_sf or 0) or None
-                lot_size_acres = float(pa.land_acres or 0) or None
+                _set_source("owner_mailing_address", "pa_properties", owner_mailing_address)
+
+                zoning = (pa.zoning or zoning).strip()
+                future_land_use = (pa.future_land_use or future_land_use).strip()
+                land_use = (pa.use_type or pa.land_use_code or land_use).strip()
+                property_class = (pa.property_class or property_class).strip()
+
+                living_area_sqft = _norm_num(pa.living_sf) or _norm_num(pa.building_sf)
+                if living_area_sqft is not None and living_area_sqft > 0:
+                    _set_source("living_area_sqft", "pa_properties", living_area_sqft)
+
+                lot_size_sqft = _norm_num(pa.land_sf)
+                lot_size_acres = _norm_num(pa.land_acres)
+                if lot_size_sqft is not None and lot_size_sqft > 0:
+                    _set_source("lot_size_sqft", "pa_properties", lot_size_sqft)
+                if lot_size_acres is not None and lot_size_acres > 0:
+                    _set_source("lot_size_acres", "pa_properties", lot_size_acres)
                 if lot_size_acres is None and lot_size_sqft is not None:
                     try:
                         lot_size_acres = float(lot_size_sqft) / 43560.0
                     except Exception:
                         lot_size_acres = None
+
                 beds = int(pa.bedrooms) if int(pa.bedrooms or 0) > 0 else None
                 baths = float(pa.bathrooms) if float(pa.bathrooms or 0) > 0 else None
+                if beds is not None:
+                    _set_source("beds", "pa_properties", beds)
+                if baths is not None:
+                    _set_source("baths", "pa_properties", baths)
+
                 year_built = int(pa.year_built) if int(pa.year_built or 0) > 0 else None
+                if year_built is not None:
+                    _set_source("year_built", "pa_properties", year_built)
+
                 last_sale_date = pa.last_sale_date or last_sale_date
                 last_sale_price = float(pa.last_sale_price or 0) or last_sale_price
+                if last_sale_date:
+                    _set_source("last_sale_date", "pa_properties", last_sale_date)
+                if last_sale_price:
+                    _set_source("last_sale_price", "pa_properties", last_sale_price)
 
                 try:
                     ex = getattr(pa, "exemptions", None)
@@ -2476,22 +3900,252 @@ if app:
                 except Exception:
                     homestead_flag = None
 
-                land_value = float(pa.land_value or 0) or None
-                building_value = float(pa.improvement_value or 0) or None
-                total_value = float(pa.just_value or 0) or None
-                assessed_value = float(pa.assessed_value or 0) or None
-                taxable_value = float(pa.taxable_value or 0) or None
-            else:
-                land_value = None
-                building_value = None
-                total_value = None
-                assessed_value = None
-                taxable_value = None
+                land_value = _norm_num(pa.land_value)
+                building_value = _norm_num(pa.improvement_value)
+                total_value = _norm_num(pa.just_value)
+                assessed_value = _norm_num(pa.assessed_value)
+                taxable_value = _norm_num(pa.taxable_value)
+                if land_value is not None and land_value > 0:
+                    _set_source("land_value", "pa_properties", land_value)
+                if building_value is not None and building_value > 0:
+                    _set_source("building_value", "pa_properties", building_value)
+                if total_value is not None and total_value > 0:
+                    _set_source("total_value", "pa_properties", total_value)
+                if assessed_value is not None and assessed_value > 0:
+                    _set_source("assessed_value", "pa_properties", assessed_value)
+                if taxable_value is not None and taxable_value > 0:
+                    _set_source("taxable_value", "pa_properties", taxable_value)
+
+                _apply_record_json(pa_raw_by_id.get((feat_county, feat_pa_parcel_id)))
+
+            if parcels_pa_row:
+                try:
+                    if not owner_mailing_address:
+                        mailing_pp = _pt1_text(parcels_pa_row, "mailing_address")
+                        if mailing_pp:
+                            owner_mailing_address = mailing_pp
+                            _set_source("owner_mailing_address", "parcels_pa", owner_mailing_address)
+                    if living_area_sqft is None:
+                        la_pp = _pt1_num(parcels_pa_row, "living_area_sqft")
+                        if la_pp and la_pp > 0:
+                            living_area_sqft = la_pp
+                            _set_source("living_area_sqft", "parcels_pa", living_area_sqft)
+                    if beds is None:
+                        b_pp = _pt1_int(parcels_pa_row, "beds")
+                        if b_pp and b_pp > 0:
+                            beds = b_pp
+                            _set_source("beds", "parcels_pa", beds)
+                    if baths is None:
+                        ba_pp = _pt1_num(parcels_pa_row, "baths")
+                        if ba_pp and ba_pp > 0:
+                            baths = float(ba_pp)
+                            _set_source("baths", "parcels_pa", baths)
+                    if year_built is None:
+                        yb_pp = _pt1_int(parcels_pa_row, "year_built")
+                        if yb_pp and yb_pp > 0:
+                            year_built = yb_pp
+                            _set_source("year_built", "parcels_pa", year_built)
+                    if not last_sale_date:
+                        ls_pp = _pt1_text(parcels_pa_row, "last_sale_date")
+                        if ls_pp:
+                            last_sale_date = ls_pp
+                            _set_source("last_sale_date", "parcels_pa", last_sale_date)
+                    if not last_sale_price:
+                        lp_pp = _pt1_num(parcels_pa_row, "last_sale_price")
+                        if lp_pp and lp_pp > 0:
+                            last_sale_price = lp_pp
+                            _set_source("last_sale_price", "parcels_pa", last_sale_price)
+                except Exception:
+                    pass
+
+            if parcel_row:
+                try:
+                    if not owner_mailing_address:
+                        owner_mailing_address = _pt1_mailing(parcel_row) or owner_mailing_address
+                        _set_source("owner_mailing_address", "parcel_table1", owner_mailing_address)
+                    if living_area_sqft is None:
+                        living_area_sqft = _pt1_num(parcel_row, "LIVING_AREA") or _pt1_num(parcel_row, "TOTAL_SQFT")
+                        if living_area_sqft:
+                            _set_source("living_area_sqft", "parcel_table1", living_area_sqft)
+                    if year_built is None:
+                        yb = _pt1_int(parcel_row, "BASE_YR_BLT")
+                        year_built = yb if yb and yb > 0 else None
+                        if year_built is not None:
+                            _set_source("year_built", "parcel_table1", year_built)
+                    if land_value is None:
+                        land_value = _pt1_num(parcel_row, "APPR_LAND")
+                        if land_value:
+                            _set_source("land_value", "parcel_table1", land_value)
+                    if building_value is None:
+                        building_value = _pt1_num(parcel_row, "APPR_BLDG")
+                        if building_value:
+                            _set_source("building_value", "parcel_table1", building_value)
+                    if total_value is None:
+                        total_value = _pt1_num(parcel_row, "TOTAL_JUST_VALUE")
+                        if total_value:
+                            _set_source("total_value", "parcel_table1", total_value)
+                    if assessed_value is None:
+                        assessed_value = _pt1_num(parcel_row, "TOTAL_ASSESSED_VALUE")
+                        if assessed_value:
+                            _set_source("assessed_value", "parcel_table1", assessed_value)
+                    hmst = _pt1_text(parcel_row, "HMST_YEAR_GRANTED")
+                    if hmst:
+                        homestead_flag = True
+                except Exception:
+                    pass
+
+            if zoning:
+                _set_source("zoning", "pa_properties", zoning)
+            if future_land_use:
+                _set_source("future_land_use", "pa_properties", future_land_use)
+            if land_use:
+                _set_source("property_type", "pa_properties", land_use)
+
+            rollup = rollups_by_id.get((feat_county, feat.parcel_id)) if rollups_loaded else None
+            rollup_keys = rollup_keys_by_id.get((feat_county, feat.parcel_id), set())
+
+            signals = {
+                "absentee_owner": False,
+                "homestead": bool(homestead_flag) if homestead_flag is not None else False,
+                "has_permits": bool(rollup.get("has_permits")) if isinstance(rollup, dict) else False,
+                "has_official_records": bool(rollup.get("has_official_records")) if isinstance(rollup, dict) else False,
+                "has_tax_events": bool(rollup.get("has_tax")) if isinstance(rollup, dict) else False,
+                "has_code_enforcement": bool(rollup.get("has_code_enforcement")) if isinstance(rollup, dict) else False,
+                "has_courts": bool(rollup.get("has_courts")) if isinstance(rollup, dict) else False,
+                "has_gis_planning": bool(rollup.get("has_gis_planning")) if isinstance(rollup, dict) else False,
+                "has_property_appraiser": bool(rollup.get("has_gis_planning")) if isinstance(rollup, dict) else False,
+            }
+            try:
+                mail_norm = _norm_addr(owner_mailing_address)
+                situs_norm = _norm_addr(situs_address)
+                if mail_norm and situs_norm and mail_norm != situs_norm:
+                    signals["absentee_owner"] = True
+            except Exception:
+                pass
+
+            if signal_filter_active:
+                key_match = True
+                group_match = True
+                tier_match = True
+                score_match = True
+
+                if trigger_keys:
+                    key_match = False
+                    for k in trigger_keys:
+                        if k in signals and bool(signals.get(k)):
+                            key_match = True
+                            break
+                        if k in rollup_keys:
+                            key_match = True
+                            break
+
+                if trigger_groups:
+                    group_match = False
+                    ownership_active = bool(signals.get("absentee_owner")) or bool(signals.get("homestead"))
+                    for g in trigger_groups:
+                        if g == "permits" and signals.get("has_permits"):
+                            group_match = True
+                            break
+                        if g in {"official_records", "records"} and signals.get("has_official_records"):
+                            group_match = True
+                            break
+                        if g == "tax" and signals.get("has_tax_events"):
+                            group_match = True
+                            break
+                        if g in {"code", "code_enforcement"} and signals.get("has_code_enforcement"):
+                            group_match = True
+                            break
+                        if g == "courts" and signals.get("has_courts"):
+                            group_match = True
+                            break
+                        if g in {"gis", "gis_planning", "appraiser", "property_appraiser"} and signals.get("has_gis_planning"):
+                            group_match = True
+                            break
+                        if g == "ownership" and ownership_active:
+                            group_match = True
+                            break
+
+                if trigger_tiers:
+                    tier_match = False
+                    if isinstance(rollup, dict):
+                        count_critical = int(rollup.get("count_critical") or 0)
+                        count_strong = int(rollup.get("count_strong") or 0)
+                        count_support = int(rollup.get("count_support") or 0)
+                        for t in trigger_tiers:
+                            if t == "critical" and count_critical > 0:
+                                tier_match = True
+                                break
+                            if t == "strong" and count_strong > 0:
+                                tier_match = True
+                                break
+                            if t == "support" and count_support > 0:
+                                tier_match = True
+                                break
+
+                if trigger_min_score is not None:
+                    score_match = False
+                    if isinstance(rollup, dict):
+                        try:
+                            score_match = int(rollup.get("seller_score") or 0) >= int(trigger_min_score)
+                        except Exception:
+                            score_match = False
+
+                if not (key_match and group_match and tier_match and score_match):
+                    filter_stage_counts["trigger_failed"] += 1
+                    if explain_enabled:
+                        trigger_drop_reasons["signals:no_match"] = (
+                            int(trigger_drop_reasons.get("signals:no_match", 0)) + 1
+                        )
+                    continue
+
+            rollup_payload = None
+            if isinstance(rollup, dict):
+                try:
+                    rollup_payload = {
+                        "seller_score": int(rollup.get("seller_score") or 0),
+                        "count_critical": int(rollup.get("count_critical") or 0),
+                        "count_strong": int(rollup.get("count_strong") or 0),
+                        "count_support": int(rollup.get("count_support") or 0),
+                        "has_permits": int(rollup.get("has_permits") or 0),
+                        "has_official_records": int(rollup.get("has_official_records") or 0),
+                        "has_tax": int(rollup.get("has_tax") or 0),
+                        "has_code_enforcement": int(rollup.get("has_code_enforcement") or 0),
+                        "has_courts": int(rollup.get("has_courts") or 0),
+                        "has_gis_planning": int(rollup.get("has_gis_planning") or 0),
+                        "trigger_keys": sorted(rollup_keys) if rollup_keys else [],
+                    }
+                except Exception:
+                    rollup_payload = None
+
+            signal_keys_out: list[str] = []
+            try:
+                for k, v in (signals or {}).items():
+                    if bool(v):
+                        signal_keys_out.append(str(k))
+            except Exception:
+                signal_keys_out = []
+            try:
+                for k in rollup_keys:
+                    if k not in signal_keys_out:
+                        signal_keys_out.append(k)
+            except Exception:
+                pass
 
             zoning_out = zoning.strip() or None
             zoning_reason = None
             if zoning_out is None:
                 zoning_reason = "not_provided_by_source"
+
+            property_type_norm_out = None
+            try:
+                property_type_norm_out = str(fields.get("property_type_norm") or "").strip() or None
+            except Exception:
+                property_type_norm_out = None
+            property_type_raw_out = None
+            try:
+                property_type_raw_out = str(land_use or property_class or "").strip() or None
+            except Exception:
+                property_type_raw_out = None
 
             sqft: list[dict] = []
             if living_area_sqft is not None:
@@ -2561,20 +4215,38 @@ if app:
                 except Exception:
                     mortgage_date = None
 
+            pa_parcel_id = feat_pa_parcel_id
+            mapped_id = None
+            try:
+                mapped_id = parcel_id_map_by_county.get(feat_county, {}).get(feat.parcel_id)
+            except Exception:
+                mapped_id = None
+            mapping_status = "mapped" if mapped_id and mapped_id != feat.parcel_id else "missing"
+            if mapped_id is None:
+                mapping_status = "missing"
+            if mapped_id and mapped_id == feat.parcel_id:
+                mapping_status = "identity"
+            if mapped_id and mapped_id != feat.parcel_id:
+                _set_source("pa_parcel_id", "parcel_id_map", pa_parcel_id)
+            elif mapped_id is None:
+                _set_source("pa_parcel_id", "identity", pa_parcel_id)
             rec = {
                 "record_version": 1,
                 "parcel_id": feat.parcel_id,
-                "county": county_key,
+                "pa_parcel_id": pa_parcel_id if pa_parcel_id != feat.parcel_id else None,
+                "county": feat_county,
                 "situs_address": situs_address.strip() or None,
                 "owner_name": owner_name.strip() or None,
                 "owner_mailing_address": owner_mailing_address.strip() or None,
                 "homestead_flag": homestead_flag,
-                "property_type": land_use.strip() or None,
+                "property_type": property_type_norm_out or property_type_raw_out,
+                "property_type_raw": property_type_raw_out,
                 "land_use": land_use,
                 "future_land_use": future_land_use.strip() or None,
                 "beds": beds,
                 "baths": baths,
                 "year_built": year_built,
+                "ownership_years": fields.get("ownership_years"),
                 "last_sale_date": last_sale_date,
                 "last_sale_price": last_sale_price,
                 "source": source,
@@ -2589,11 +4261,21 @@ if app:
                 "mortgage_lender": mortgage_lender,
                 "mortgage_amount": mortgage_amount,
                 "mortgage_date": mortgage_date,
+                "signals": signals,
+                "signal_keys": signal_keys_out,
+                "rollup": rollup_payload,
                 "land_value": land_value,
                 "building_value": building_value,
                 "total_value": total_value,
                 "assessed_value": assessed_value,
                 "taxable_value": taxable_value,
+                "source_coverage": {
+                    "fields": field_sources,
+                    "sources": sorted({v for v in field_sources.values() if v}),
+                    "mapping_status": mapping_status,
+                    "mapping_source": "parcel_id_map" if mapped_id else None,
+                },
+                "field_provenance": field_sources,
                 # Back-compat fields (older UI code paths)
                 "address": situs_address,
                 "flu": land_use,
@@ -2650,14 +4332,24 @@ if app:
 
             if include_geometry:
                 rec["geometry"] = feat.geometry
-            if len(records) < limit:
-                records.append(rec)
-                try:
-                    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-                        if float(lat) != 0.0 or float(lng) != 0.0:
-                            stage_counts["latlng_available"] += 1
-                except Exception:
-                    pass
+
+            row = {
+                "county": feat_county,
+                "parcel_id": feat.parcel_id,
+                "hover_fields": hover,
+                "reason_codes": reason_codes,
+            }
+            if include_geometry:
+                row["geometry"] = feat.geometry
+            results_all.append(row)
+
+            records_all.append(rec)
+            try:
+                if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+                    if float(lat) != 0.0 or float(lng) != 0.0:
+                        stage_counts["latlng_available"] += 1
+            except Exception:
+                pass
 
             filter_stage_counts["emitted"] += 1
 
@@ -2667,7 +4359,22 @@ if app:
 
         _mark("apply_filters")
 
-        stage_counts["returned"] = int(len(records))
+        try:
+            scanned = int(field_stats.get("scanned", 0) or 0)
+            present = field_stats.get("present") or {}
+            fields_out: dict[str, dict[str, float | int]] = {}
+            if isinstance(present, dict):
+                for key, val in present.items():
+                    p = int(val or 0)
+                    t = int(scanned)
+                    pct = (float(p) / float(t)) if t > 0 else 0.0
+                    fields_out[str(key)] = {"present": p, "total": t, "pct": pct}
+            field_stats["fields"] = fields_out
+            field_stats["coverage_candidates"] = fields_out
+        except Exception:
+            pass
+
+        stage_counts["returned"] = int(len(records_all))
 
         if live_error_reason:
             warnings.append(f"live_error_reason: {live_error_reason}")
@@ -2726,16 +4433,16 @@ if app:
                         except Exception:
                             return True, 0
 
-                    records.sort(key=_k)
+                    records_all.sort(key=_k)
                 elif sort_key == "year_built_desc":
-                    records.sort(
+                    records_all.sort(
                         key=lambda r: (
                             r.get("year_built") is None,
                             -int(r.get("year_built") or 0),
                         )
                     )
                 elif sort_key == "sqft_desc":
-                    records.sort(
+                    records_all.sort(
                         key=lambda r: (
                             r.get("living_area_sqft") is None,
                             -float(r.get("living_area_sqft") or 0.0),
@@ -2746,13 +4453,144 @@ if app:
 
         _mark("sort")
 
+        def _pid(item: dict) -> str:
+            try:
+                pid = str(item.get("parcel_id") or "").strip()
+                ckey = str(item.get("county") or county_key).strip().lower()
+                return f"{ckey}:{pid}" if ckey else pid
+            except Exception:
+                return ""
+
+        if not sort_key:
+            records_all.sort(key=_pid)
+
+        try:
+            results_map = {str(r.get("parcel_id") or "").strip(): r for r in results_all}
+            ordered_results = []
+            for rec in records_all:
+                pid = _pid(rec)
+                row = results_map.get(pid)
+                if row is not None:
+                    ordered_results.append(row)
+            if ordered_results:
+                results_all = ordered_results
+        except Exception:
+            pass
+
+        cursor_mode = "index" if bool(sort_key) else "pid"
+
+        start_index = 0
+        if cursor:
+            try:
+                if cursor_mode == "index":
+                    start_index = max(0, int(cursor) + 1)
+                else:
+                    for i, item in enumerate(records_all):
+                        if _pid(item) > cursor:
+                            start_index = i
+                            break
+                    else:
+                        start_index = len(records_all)
+            except Exception:
+                start_index = 0
+        elif offset is not None:
+            start_index = max(0, int(offset))
+
+        end_index = start_index + int(limit)
+        records = records_all[start_index:end_index]
+        results = results_all[start_index:end_index]
+
+        total_count = int(len(records_all))
+        returned_count = int(len(records))
+        has_more = bool(start_index + returned_count < total_count)
+        if has_more and records:
+            if cursor_mode == "index":
+                next_cursor = str(start_index + returned_count - 1)
+            else:
+                next_cursor = _pid(records[-1])
+        else:
+            next_cursor = None
+
         # Flag whether we stopped early due to the limit.
-        records_truncated = bool(len(results) >= limit and len(intersecting) > len(results))
+        records_truncated = bool(has_more)
+
+        # Recompute field_stats from the same records returned in this response.
+        def _compute_field_stats_from_records(rows: list[dict]) -> dict[str, Any]:
+            fields = [
+                "living_area_sqft",
+                "lot_size_sqft",
+                "lot_size_acres",
+                "beds",
+                "baths",
+                "year_built",
+                "total_value",
+                "land_value",
+                "building_value",
+                "assessed_value",
+                "last_sale_date",
+                "property_type",
+                "ownership_years",
+                "zoning",
+                "future_land_use",
+            ]
+            scanned = int(len(rows))
+            present: dict[str, int] = {k: 0 for k in fields}
+
+            def _present(field: str, value: object) -> bool:
+                if value is None:
+                    return False
+                if isinstance(value, str):
+                    return bool(value.strip())
+                if field in {"beds", "baths", "year_built", "ownership_years"}:
+                    try:
+                        return float(value) > 0
+                    except Exception:
+                        return False
+                if field in {"living_area_sqft", "lot_size_sqft", "lot_size_acres", "total_value", "land_value", "building_value", "assessed_value"}:
+                    try:
+                        return float(value) > 0
+                    except Exception:
+                        return False
+                return True
+
+            for rec in rows:
+                for key in fields:
+                    if _present(key, rec.get(key)):
+                        present[key] += 1
+
+            missing: dict[str, int] = {k: max(0, scanned - int(present[k])) for k in fields}
+            coverage: dict[str, float] = {
+                k: (float(present[k]) / float(scanned)) if scanned > 0 else 0.0 for k in fields
+            }
+
+            detail: dict[str, dict[str, float | int]] = {}
+            for key in fields:
+                detail[key] = {
+                    "present": int(present[key]),
+                    "total": int(scanned),
+                    "pct": float(coverage[key]),
+                }
+
+            return {
+                "scanned": scanned,
+                "present": present,
+                "missing": missing,
+                "coverage": coverage,
+                "fields": detail,
+            }
+
+        field_stats_candidates = field_stats if isinstance(field_stats, dict) else {}
+        field_stats_returned = _compute_field_stats_from_records(records_all)
+        field_stats_returned["coverage_candidates"] = field_stats_candidates.get("coverage_candidates")
+        if "sample_candidate" in field_stats_candidates:
+            field_stats_returned["sample_candidate"] = field_stats_candidates.get("sample_candidate")
+        # Return merged-record coverage for UI filter availability.
+        field_stats = field_stats_returned
 
         debug_flags: dict[str, Any] | None = None
         if debug_response_enabled:
             debug_flags = {
-                "county": county_key,
+                "county": county_label,
                 "correlation_id": correlation_id,
                 "limit": int(limit),
                 "include_geometry": bool(include_geometry),
@@ -2768,8 +4606,8 @@ if app:
                 debug_counts.update(
                     {
                         "candidate_count": int(len(intersecting)),
-                        "filtered_count": int(len(records)),
-                        "returned_count": int(len(records)),
+                        "filtered_count": int(total_count),
+                        "returned_count": int(returned_count),
                         "records_truncated": bool(records_truncated),
                     }
                 )
@@ -2781,9 +4619,9 @@ if app:
         _append_search_debug(
             {
                 "event": "result",
-                "county": county_key,
+                "county": county_label,
                 "candidate_count": len(intersecting),
-                "filtered_count": len(records),
+                "filtered_count": int(total_count),
                 "warnings": warnings,
                 "field_stats": field_stats,
                 "filter_stage_counts": filter_stage_counts,
@@ -2797,8 +4635,8 @@ if app:
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "trace_id": correlation_id,
                     "event": "search_result",
-                    "county": county_key,
-                    "records_count": len(records),
+                    "county": county_label,
+                    "records_count": int(total_count),
                     "markers_possible_count": int(stage_counts.get("latlng_available", 0)),
                     "after_attr_filters": int(stage_counts.get("filter_passed", 0)),
                     "after_geom_clip": int(stage_counts.get("geometry_passed", 0)),
@@ -2817,7 +4655,7 @@ if app:
             dropped_reasons.update(filter_drop_reasons)
             dropped_reasons.update(trigger_drop_reasons)
             markers_possible = int(stage_counts.get("latlng_available", 0))
-            records_count = int(len(records))
+            records_count = int(total_count)
             scanned = int(field_stats.get("scanned", 0) or 0)
             present = field_stats.get("present") or {}
 
@@ -2838,6 +4676,11 @@ if app:
 
             explain_payload = {
                 "records_count": records_count,
+                "total_count": int(total_count),
+                "returned_count": int(returned_count),
+                "has_more": bool(has_more),
+                "next_cursor": next_cursor,
+                "polygon_match_mode": str(payload.get("polygon_match_mode") or "intersects"),
                 "markers_possible_count": markers_possible,
                 "missing_lat_lng_count": max(0, records_count - markers_possible),
                 "stage_counts": {
@@ -2846,6 +4689,10 @@ if app:
                     "after_geom_clip": int(stage_counts.get("geometry_passed", 0)),
                     "final": int(records_count),
                 },
+                "candidates_count": int(stage_counts.get("candidates", 0)),
+                "after_attr_filters_count": int(stage_counts.get("filter_passed", 0)),
+                "after_geom_clip_count": int(stage_counts.get("geometry_passed", 0)),
+                "final_count": int(records_count),
                 "stage_counts_raw": stage_counts,
                 "dropped_reasons": dropped_reasons,
                 "missing_field_counts": missing_field_counts,
@@ -2855,6 +4702,7 @@ if app:
                     "percent_with_year_built": _pct("year_built"),
                     "percent_with_value": _pct("total_value"),
                 },
+                "filter_metrics": filter_explain_counts,
                 "filters": raw_filters if isinstance(raw_filters, dict) else raw_filters,
                 "missing_policy": str(missing_policy),
                 "filter_stage_counts": filter_stage_counts,
@@ -2866,23 +4714,30 @@ if app:
                 "search_id": search_id,
                 "correlation_id": correlation_id,
                 # Backwards-compatible keys
-                "county": county_key,
+                "county": county_label,
                 "count": len(results),
                 "results": results,
                 # New UI payload
                 "zoning_options": zoning_options,
                 "future_land_use_options": future_land_use_options,
                 "summary": {
-                    "count": len(records),
+                    "count": int(total_count),
+                    "returned_count": int(returned_count),
+                    "total_count": int(total_count),
                     "candidate_count": len(intersecting),
-                    "filtered_count": len(records),
+                    "filtered_count": int(total_count),
                     "source_counts": source_counts,
                     "source_counts_legacy": legacy_source_counts,
                 },
                 "records": records,
+                "total_count": int(total_count),
+                "returned_count": int(returned_count),
+                "has_more": bool(has_more),
+                "next_cursor": next_cursor,
                 "records_truncated": bool(records_truncated),
                 "warnings": warnings,
                 "field_stats": field_stats,
+                "field_stats_returned": field_stats_returned,
                 "filter_stage_counts": filter_stage_counts,
                 "error_reason": live_error_reason,
                 **({"normalized_filters": normalized_filters} if debug_response_enabled else {}),
@@ -2992,7 +4847,7 @@ if app:
             client = FDORCentroidClient()
             rows = client.fetch_parcels(parcel_ids, include_geometry=True)
 
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         store = PASQLite(db_path)
         errors: dict[str, Any] = {}
         try:
@@ -3345,10 +5200,11 @@ if app:
 
     @app.get("/api/debug/ping")
     def debug_ping():
+        logger = logging.getLogger("fps.debug")
         sha = os.getenv("APP_GIT_SHA") or ""
         branch = os.getenv("APP_GIT_BRANCH") or ""
-        if not sha or not branch:
-            try:
+        try:
+            if not sha or not branch:
                 import subprocess
 
                 if not sha:
@@ -3369,11 +5225,56 @@ if app:
                     )
                     if p.returncode == 0:
                         branch = (p.stdout or "").strip()
-            except Exception:
-                pass
+        except Exception as e:
+            logger.warning("debug ping git lookup failed: %s", e)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        parcels_db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+        leads_db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+        parcels_db_ok = False
+        leads_db_ok = False
+        try:
+            parcels_db_ok = bool(Path(parcels_db_path).exists())
+        except Exception:
+            parcels_db_ok = False
+        try:
+            leads_db_ok = bool(Path(leads_db_path).exists())
+        except Exception:
+            leads_db_ok = False
+        parcels_count = 0
+        rollups_count = 0
+        try:
+            if parcels_db_ok:
+                import sqlite3 as _sqlite3
+
+                con = _sqlite3.connect(parcels_db_path)
+                cur = con.cursor()
+                parcels_count = int(cur.execute("SELECT count(*) FROM parcels").fetchone()[0])
+                con.close()
+        except Exception:
+            parcels_count = 0
+        try:
+            if leads_db_ok:
+                import sqlite3 as _sqlite3
+
+                lcon = _sqlite3.connect(leads_db_path)
+                lcur = lcon.cursor()
+                rollups_count = int(lcur.execute("SELECT count(*) FROM parcel_trigger_rollups").fetchone()[0])
+                lcon.close()
+        except Exception:
+            rollups_count = 0
         return {
             "ok": True,
-            "server_time": datetime.now(timezone.utc).isoformat(),
+            "version": os.getenv("APP_VERSION", "dev"),
+            "time": now_iso,
+            "server_time": now_iso,
+            "db_ok": bool(parcels_db_ok),
+            "parcels_db_ok": bool(parcels_db_ok),
+            "leads_db_ok": bool(leads_db_ok),
+            "parcels_db_path": os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB),
+            "leads_db_path": os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB),
+            "parcels_count": parcels_count,
+            "rollups_count": rollups_count,
             "git": {"sha": sha or "dev", "branch": branch or "unknown"},
             "env": {
                 "FPS_USE_FDOR_CENTROIDS": os.getenv("FPS_USE_FDOR_CENTROIDS", ""),
@@ -3384,10 +5285,213 @@ if app:
             },
         }
 
+    @app.post("/api/geo/resolve_county")
+    def resolve_county(payload: dict = Body(...)):
+        logger = logging.getLogger("fps.geo")
+        lat = None
+        lng = None
+
+        try:
+            if isinstance(payload, dict):
+                lat_val = payload.get("lat")
+                lng_val = payload.get("lng")
+                if isinstance(lat_val, (int, float, str)):
+                    lat = float(lat_val)
+                if isinstance(lng_val, (int, float, str)):
+                    lng = float(lng_val)
+                center = payload.get("center") or {}
+                if lat is None and isinstance(center, dict):
+                    c_lat = center.get("lat")
+                    if isinstance(c_lat, (int, float, str)):
+                        lat = float(c_lat)
+                if lng is None and isinstance(center, dict):
+                    c_lng = center.get("lng")
+                    if isinstance(c_lng, (int, float, str)):
+                        lng = float(c_lng)
+        except Exception:
+            lat = None
+            lng = None
+
+        polygon = payload.get("polygon_geojson") if isinstance(payload, dict) else None
+
+        def _centroid_from_polygon(poly: object) -> tuple[float, float] | None:
+            try:
+                if not isinstance(poly, dict):
+                    return None
+                if str(poly.get("type") or "").lower() != "polygon":
+                    return None
+                coords = poly.get("coordinates")
+                if not isinstance(coords, list) or not coords:
+                    return None
+                ring = coords[0]
+                if not isinstance(ring, list) or len(ring) < 3:
+                    return None
+                minx = min(float(p[0]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2)
+                maxx = max(float(p[0]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2)
+                miny = min(float(p[1]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2)
+                maxy = max(float(p[1]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2)
+                return (float(miny + maxy) / 2.0, float(minx + maxx) / 2.0)
+            except Exception:
+                return None
+
+        def _bbox_from_polygon(poly: object) -> tuple[float, float, float, float] | None:
+            try:
+                if not isinstance(poly, dict):
+                    return None
+                if str(poly.get("type") or "").lower() != "polygon":
+                    return None
+                coords = poly.get("coordinates")
+                if not isinstance(coords, list) or not coords:
+                    return None
+                ring = coords[0]
+                if not isinstance(ring, list) or len(ring) < 3:
+                    return None
+                xs = [float(p[0]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2]
+                ys = [float(p[1]) for p in ring if isinstance(p, (list, tuple)) and len(p) >= 2]
+                if not xs or not ys:
+                    return None
+                return (min(xs), min(ys), max(xs), max(ys))
+            except Exception:
+                return None
+
+        polygon_bbox = _bbox_from_polygon(polygon) if polygon is not None else None
+        if (lat is None or lng is None) and polygon is not None:
+            cent = _centroid_from_polygon(polygon)
+            if cent is not None:
+                lat, lng = cent
+
+        if lat is None or lng is None:
+            return {"ok": True, "county": None, "counties": [], "source": "none"}
+
+        data_dir = Path(__file__).resolve().parents[3] / "data" / "parcels"
+        db_path = data_dir / "parcels.sqlite"
+        if not db_path.exists():
+            return {"ok": True, "county": None, "counties": [], "source": "missing_parcels_db"}
+
+        try:
+            import sqlite3 as _sqlite3
+
+            conn = _sqlite3.connect(str(db_path))
+            conn.row_factory = _sqlite3.Row
+            if polygon_bbox is not None:
+                minx, miny, maxx, maxy = polygon_bbox
+                rows = conn.execute(
+                    """
+                                        SELECT DISTINCT county FROM parcels
+                                        WHERE rowid IN (
+                                            SELECT rowid FROM parcels_rtree
+                                            WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
+                                        )
+                    """,
+                    (float(maxx), float(minx), float(maxy), float(miny)),
+                ).fetchall()
+                counties = [str(r["county"] or "").strip().lower() for r in rows if r and r["county"]]
+                county = counties[0] if len(counties) == 1 else ""
+            else:
+                cur = conn.execute(
+                    """
+                                        SELECT county FROM parcels
+                                        WHERE rowid IN (
+                                            SELECT rowid FROM parcels_rtree
+                                            WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
+                                        )
+                    LIMIT 1
+                    """,
+                    (float(lng), float(lng), float(lat), float(lat)),
+                )
+                row = cur.fetchone()
+                county = str(row["county"] or "").strip().lower() if row else ""
+
+                counties = []
+                try:
+                    rows = conn.execute(
+                        """
+                                                SELECT DISTINCT county FROM parcels
+                                                WHERE rowid IN (
+                                                    SELECT rowid FROM parcels_rtree
+                                                    WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?
+                                                )
+                        """,
+                        (float(lng), float(lng), float(lat), float(lat)),
+                    ).fetchall()
+                    counties = [str(r["county"] or "").strip().lower() for r in rows if r and r["county"]]
+                except Exception:
+                    counties = []
+            conn.close()
+            return {"ok": True, "county": county or None, "counties": counties, "source": "parcels_rtree"}
+        except Exception as e:
+            logger.warning("resolve_county failed: %s", e)
+            return {"ok": True, "county": None, "counties": [], "source": "error"}
+
+    @app.post("/api/resolve_county")
+    def resolve_county_alias(payload: dict = Body(...)):
+        return resolve_county(payload)
+
+    @app.get("/api/signals/catalog")
+    def signals_catalog():
+        signals = [
+            {"key": "absentee_owner", "label": "Absentee owner", "group": "Ownership", "tier": "strong", "implemented": True},
+            {"key": "homestead", "label": "Homestead", "group": "Ownership", "tier": "support", "implemented": True},
+            {"key": "permit_demolition", "label": "Permit: demolition", "group": "Permits", "tier": "critical", "implemented": True},
+            {"key": "permit_structural", "label": "Permit: structural", "group": "Permits", "tier": "critical", "implemented": True},
+            {"key": "permit_roof", "label": "Permit: roof", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_hvac", "label": "Permit: HVAC", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_electrical", "label": "Permit: electrical", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_plumbing", "label": "Permit: plumbing", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_pool", "label": "Permit: pool", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_fire", "label": "Permit: fire", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_sitework", "label": "Permit: sitework", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_tenant_improvement", "label": "Permit: tenant improvement", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_remodel", "label": "Permit: remodel", "group": "Permits", "tier": "strong", "implemented": True},
+            {"key": "permit_generator", "label": "Permit: generator", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "permit_windows", "label": "Permit: windows", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "permit_doors", "label": "Permit: doors", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "permit_solar", "label": "Permit: solar", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "permit_fence", "label": "Permit: fence", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "permit_sign", "label": "Permit: sign", "group": "Permits", "tier": "support", "implemented": True},
+            {"key": "lis_pendens", "label": "Lis pendens", "group": "Official Records", "tier": "critical", "implemented": True},
+            {"key": "foreclosure_filing", "label": "Foreclosure: filing", "group": "Official Records", "tier": "critical", "implemented": True},
+            {"key": "foreclosure_judgment", "label": "Foreclosure: judgment", "group": "Official Records", "tier": "critical", "implemented": True},
+            {"key": "foreclosure", "label": "Foreclosure (generic)", "group": "Official Records", "tier": "critical", "implemented": True},
+            {"key": "deed_recorded", "label": "Deed recorded", "group": "Official Records", "tier": "strong", "implemented": True},
+            {"key": "deed_warranty", "label": "Deed: warranty", "group": "Official Records", "tier": "strong", "implemented": True},
+            {"key": "deed_quitclaim", "label": "Deed: quitclaim", "group": "Official Records", "tier": "strong", "implemented": True},
+            {"key": "mortgage_recorded", "label": "Mortgage recorded", "group": "Official Records", "tier": "support", "implemented": True},
+            {"key": "mortgage_satisfaction", "label": "Mortgage satisfaction", "group": "Official Records", "tier": "strong", "implemented": True},
+            {"key": "mortgage_assignment", "label": "Mortgage assignment", "group": "Official Records", "tier": "support", "implemented": True},
+            {"key": "mechanics_lien", "label": "Mechanic's lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "hoa_lien", "label": "HOA lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "irs_tax_lien", "label": "IRS tax lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "state_tax_lien", "label": "State tax lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "code_enforcement_lien", "label": "Code enforcement lien", "group": "Liens", "tier": "critical", "implemented": True},
+            {"key": "judgment_lien", "label": "Judgment lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "utility_lien", "label": "Utility lien", "group": "Liens", "tier": "strong", "implemented": True},
+            {"key": "lien_recorded", "label": "Lien recorded (generic)", "group": "Liens", "tier": "critical", "implemented": True},
+            {"key": "delinquent_tax", "label": "Delinquent tax", "group": "Tax Collector", "tier": "critical", "implemented": True},
+            {"key": "tax_certificate_issued", "label": "Tax certificate issued", "group": "Tax Collector", "tier": "strong", "implemented": True},
+            {"key": "tax_certificate_redeemed", "label": "Tax certificate redeemed", "group": "Tax Collector", "tier": "strong", "implemented": True},
+            {"key": "payment_plan_started", "label": "Payment plan started", "group": "Tax Collector", "tier": "strong", "implemented": True},
+            {"key": "payment_plan_defaulted", "label": "Payment plan defaulted", "group": "Tax Collector", "tier": "strong", "implemented": True},
+            {"key": "tax_deed_application", "label": "Tax deed application", "group": "Tax Collector", "tier": "critical", "implemented": False, "coming_soon": True},
+            {"key": "code_case_opened", "label": "Code case opened", "group": "Code Enforcement", "tier": "strong", "implemented": True},
+            {"key": "unsafe_structure", "label": "Unsafe structure", "group": "Code Enforcement", "tier": "critical", "implemented": True},
+            {"key": "condemnation", "label": "Condemnation", "group": "Code Enforcement", "tier": "critical", "implemented": True},
+            {"key": "demolition_order", "label": "Demolition order", "group": "Code Enforcement", "tier": "critical", "implemented": True},
+            {"key": "abatement_order", "label": "Abatement order", "group": "Code Enforcement", "tier": "critical", "implemented": True},
+            {"key": "board_hearing_set", "label": "Board hearing set", "group": "Code Enforcement", "tier": "strong", "implemented": True},
+            {"key": "fines_imposed", "label": "Fines imposed", "group": "Code Enforcement", "tier": "strong", "implemented": True},
+            {"key": "reinspection_failed", "label": "Reinspection failed", "group": "Code Enforcement", "tier": "strong", "implemented": True},
+            {"key": "repeat_violation", "label": "Repeat violation", "group": "Code Enforcement", "tier": "strong", "implemented": True},
+            {"key": "probate_opened", "label": "Probate opened", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
+            {"key": "divorce_filed", "label": "Divorce filed", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
+            {"key": "eviction_filing", "label": "Eviction filing", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
+        ]
+        return {"ok": True, "signals": signals}
+
     @app.get("/api/debug/parcels_coverage")
     def debug_parcels_coverage(county: str):
         import sqlite3, os
-        db_path = os.getenv("PARCELS_DB_PATH", "data/parcels/parcels.sqlite")
+        db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
         db_path_abs = os.path.abspath(db_path)
         has_data = False
         row_count = 0
@@ -3411,7 +5515,7 @@ if app:
         import sqlite3
 
         county_key = (county or "").strip().lower() or "seminole"
-        db_path = os.getenv("PARCELS_DB_PATH", "data/parcels/parcels.sqlite")
+        db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
         db_path_abs = os.path.abspath(db_path)
         if not os.path.exists(db_path_abs):
             return JSONResponse(
@@ -3428,6 +5532,11 @@ if app:
         con = sqlite3.connect(db_path_abs)
         try:
             cur = con.cursor()
+            parcel_tables = [
+                str(r[0])
+                for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+                if r and r[0]
+            ]
             cols = [r[1] for r in cur.execute("pragma table_info(parcels)").fetchall()]
             colset = {c.lower() for c in cols}
             county_col = None
@@ -3547,10 +5656,46 @@ if app:
             ).fetchall()
             sample_parcel_ids = [str(r[0]) for r in sample_rows if r and r[0] is not None]
 
+            leads_db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            leads_db_abs = os.path.abspath(leads_db_path)
+            leads_tables: list[str] = []
+            leads_counts: dict[str, int] = {}
+            try:
+                if os.path.exists(leads_db_abs):
+                    lcon = sqlite3.connect(leads_db_abs)
+                    try:
+                        lcur = lcon.cursor()
+                        rows = lcur.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                        ).fetchall()
+                        leads_tables = [str(r[0]) for r in rows if r and r[0]]
+                        for t in (
+                            "parcel_trigger_rollups",
+                            "permits",
+                            "official_records",
+                            "tax_collector_events",
+                            "code_enforcement_events",
+                            "trigger_events",
+                        ):
+                            try:
+                                cnt = lcur.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+                                leads_counts[t] = int(cnt)
+                            except Exception:
+                                leads_counts[t] = 0
+                    finally:
+                        lcon.close()
+            except Exception:
+                leads_tables = []
+                leads_counts = {}
+
             return {
                 "county": county_key,
                 "parcels_db_path": db_path_abs,
+                "parcels_tables": parcel_tables,
                 "row_count": total,
+                "leads_db_path": leads_db_abs,
+                "leads_tables": leads_tables,
+                "leads_counts": leads_counts,
                 "lat_lng_nonnull": lat_lng_nonnull,
                 "lat_range": lat_range,
                 "lng_range": lng_range,
@@ -3567,6 +5712,452 @@ if app:
             }
         finally:
             con.close()
+
+
+    @app.get("/api/debug/source_coverage")
+    def debug_source_coverage(county: str):
+        import sqlite3
+
+        county_key = (county or "").strip().lower() or "seminole"
+        parcels_db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+        leads_db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+        out: dict[str, Any] = {
+            "county": county_key,
+            "parcels_db_ok": False,
+            "leads_db_ok": False,
+            "counts": {},
+            "fields": {},
+            "available_trigger_keys": [],
+            "available_signal_keys": [],
+            "available_signal_groups": [],
+        }
+
+        parcels_db_abs = os.path.abspath(parcels_db_path)
+        out["parcels_db_ok"] = bool(parcels_db_path and os.path.exists(parcels_db_abs))
+        if out["parcels_db_ok"]:
+            try:
+                con = sqlite3.connect(parcels_db_abs)
+                try:
+                    cur = con.cursor()
+                    out["counts"]["parcels"] = int(
+                        cur.execute("SELECT count(*) FROM parcels WHERE county=?", (county_key,)).fetchone()[0]
+                    )
+                finally:
+                    con.close()
+            except Exception:
+                out["counts"]["parcels"] = 0
+
+        leads_db_abs = os.path.abspath(leads_db_path)
+        out["leads_db_ok"] = bool(leads_db_path and os.path.exists(leads_db_abs))
+        if out["leads_db_ok"]:
+            try:
+                con = sqlite3.connect(leads_db_abs)
+                con.row_factory = sqlite3.Row
+                try:
+                    cur = con.cursor()
+
+                    def _count(table: str, where: str = "", params: tuple[Any, ...] = ()):  # type: ignore
+                        try:
+                            sql = f"SELECT count(*) FROM {table}"
+                            if where:
+                                sql += f" WHERE {where}"
+                            return int(cur.execute(sql, params).fetchone()[0])
+                        except Exception:
+                            return 0
+
+                    out["counts"]["parcel_id_map"] = _count("parcel_id_map", "county=?", (county_key,))
+                    out["counts"]["pa_properties"] = _count("pa_properties", "county=?", (county_key,))
+                    out["counts"]["parcel_trigger_rollups"] = _count("parcel_trigger_rollups", "county=?", (county_key,))
+                    out["counts"]["permits"] = _count("permits", "county=?", (county_key,))
+                    out["counts"]["official_records"] = _count("official_records", "county=?", (county_key,))
+                    out["counts"]["tax_collector_events"] = _count("tax_collector_events", "county=?", (county_key,))
+                    out["counts"]["code_enforcement_events"] = _count("code_enforcement_events", "county=?", (county_key,))
+                    out["counts"]["trigger_events"] = _count("trigger_events", "county=?", (county_key,))
+
+                    def _field_available(field_sql: str) -> bool:
+                        return bool(
+                            _count("pa_properties", f"county=? AND {field_sql}", (county_key,)) > 0
+                        )
+
+                    pt1_living = _count("parcel_table1", "LIVING_AREA is not null AND LIVING_AREA != ''") > 0
+                    pt1_total_sqft = _count("parcel_table1", "TOTAL_SQFT is not null AND TOTAL_SQFT != ''") > 0
+                    pt1_year = _count("parcel_table1", "BASE_YR_BLT is not null AND BASE_YR_BLT != ''") > 0
+                    pt1_total_value = _count("parcel_table1", "TOTAL_JUST_VALUE is not null AND TOTAL_JUST_VALUE != ''") > 0
+                    pt1_assessed = _count("parcel_table1", "TOTAL_ASSESSED_VALUE is not null AND TOTAL_ASSESSED_VALUE != ''") > 0
+                    pt1_land = _count("parcel_table1", "APPR_LAND is not null AND APPR_LAND != ''") > 0
+                    pt1_building = _count("parcel_table1", "APPR_BLDG is not null AND APPR_BLDG != ''") > 0
+
+                    out["fields"] = {
+                        "living_area_sqft": _field_available("living_sf > 0") or pt1_living or pt1_total_sqft,
+                        "lot_size_sqft": _field_available("building_sf >= 0"),
+                        "lot_size_acres": _field_available("building_sf >= 0"),
+                        "beds": _field_available("bedrooms > 0"),
+                        "baths": _field_available("bathrooms > 0"),
+                        "year_built": _field_available("year_built > 0") or pt1_year,
+                        "total_value": _field_available("just_value > 0") or pt1_total_value,
+                        "land_value": _field_available("land_value > 0") or pt1_land,
+                        "building_value": _field_available("improvement_value > 0") or pt1_building,
+                        "assessed_value": _field_available("assessed_value > 0") or pt1_assessed,
+                        "last_sale_date": _field_available("last_sale_date is not null AND last_sale_date != ''"),
+                        "ownership_years": _field_available("last_sale_date is not null AND last_sale_date != ''"),
+                        "property_type": _field_available("use_type != ''"),
+                        "zoning": _field_available("zoning != ''"),
+                        "future_land_use": _field_available("future_land_use != ''"),
+                    }
+
+                    keys: set[str] = set()
+                    for row in cur.execute(
+                        "SELECT details_json FROM parcel_trigger_rollups WHERE county=? LIMIT 2000",
+                        (county_key,),
+                    ).fetchall():
+                        try:
+                            raw = row[0]
+                            if not raw:
+                                continue
+                            data = json.loads(raw)
+                            klist = data.get("trigger_keys") or []
+                            if isinstance(klist, (list, tuple)):
+                                for k in klist:
+                                    s = str(k or "").strip()
+                                    if s:
+                                        keys.add(s)
+                        except Exception:
+                            continue
+
+                    rollup_flags = []
+                    if _count("parcel_trigger_rollups", "county=? AND has_permits=1", (county_key,)) > 0:
+                        rollup_flags.append("has_permits")
+                    if _count("parcel_trigger_rollups", "county=? AND has_tax=1", (county_key,)) > 0:
+                        rollup_flags.append("has_tax_events")
+                    if _count("parcel_trigger_rollups", "county=? AND has_official_records=1", (county_key,)) > 0:
+                        rollup_flags.append("has_official_records")
+                    if _count("parcel_trigger_rollups", "county=? AND has_code_enforcement=1", (county_key,)) > 0:
+                        rollup_flags.append("has_code_enforcement")
+                    if _count("parcel_trigger_rollups", "county=? AND has_courts=1", (county_key,)) > 0:
+                        rollup_flags.append("has_courts")
+                    if _count("parcel_trigger_rollups", "county=? AND has_gis_planning=1", (county_key,)) > 0:
+                        rollup_flags.append("has_gis_planning")
+
+                    derived_signals = []
+                    if out["counts"]["pa_properties"] > 0:
+                        derived_signals.extend(["absentee_owner", "homestead", "entity_owner"])
+
+                    out["available_trigger_keys"] = sorted(keys)
+                    out["available_signal_keys"] = sorted(set(keys) | set(rollup_flags) | set(derived_signals))
+                    groups_raw = [
+                        "permits" if "has_permits" in rollup_flags else "",
+                        "tax" if "has_tax_events" in rollup_flags else "",
+                        "official_records" if "has_official_records" in rollup_flags else "",
+                        "code_enforcement" if "has_code_enforcement" in rollup_flags else "",
+                        "courts" if "has_courts" in rollup_flags else "",
+                        "gis" if "has_gis_planning" in rollup_flags else "",
+                        "ownership" if derived_signals else "",
+                    ]
+                    out["available_signal_groups"] = sorted({g for g in groups_raw if g})
+                finally:
+                    con.close()
+            except Exception:
+                pass
+
+        return out
+
+    @app.get("/api/debug/sample_record")
+    def debug_sample_record(county: str, parcel_id: str):
+        import sqlite3
+
+        county_key = (county or "").strip().lower()
+        geom_pid = str(parcel_id or "").strip()
+        if not county_key or not geom_pid:
+            raise HTTPException(status_code=400, detail="county and parcel_id are required")
+
+        leads_db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+        parcels_db_path = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+
+        mapping_row = None
+        pa_parcel_id = geom_pid
+        pa_row = None
+        record_json = None
+        record_json_parsed = None
+        pt1_row = None
+        parcels_pa_row = None
+
+        if os.path.exists(leads_db_path):
+            con = sqlite3.connect(leads_db_path)
+            con.row_factory = sqlite3.Row
+            try:
+                mapping_row = con.execute(
+                    "SELECT * FROM parcel_id_map WHERE lower(county)=? AND geom_parcel_id=? LIMIT 1",
+                    (county_key, geom_pid),
+                ).fetchone()
+                if mapping_row:
+                    mapping_row = dict(mapping_row)
+                if mapping_row and mapping_row.get("pa_parcel_id"):
+                    pa_parcel_id = str(mapping_row["pa_parcel_id"])
+                pa_row = con.execute(
+                    "SELECT * FROM pa_properties WHERE lower(county)=? AND parcel_id=? LIMIT 1",
+                    (county_key, pa_parcel_id),
+                ).fetchone()
+                if pa_row:
+                    pa_row = dict(pa_row)
+                    record_json = pa_row.get("record_json")
+                    try:
+                        record_json_parsed = json.loads(record_json) if record_json else None
+                    except Exception:
+                        record_json_parsed = None
+                pt1_row = con.execute(
+                    "SELECT * FROM parcel_table1 WHERE PARCEL=? LIMIT 1",
+                    (pa_parcel_id,),
+                ).fetchone()
+                if pt1_row:
+                    pt1_row = dict(pt1_row)
+            finally:
+                con.close()
+
+        if os.path.exists(parcels_db_path):
+            pcon = sqlite3.connect(parcels_db_path)
+            pcon.row_factory = sqlite3.Row
+            try:
+                parcels_pa_row = pcon.execute(
+                    "SELECT * FROM parcels_pa WHERE county=? AND parcel_id=? LIMIT 1",
+                    (county_key, geom_pid),
+                ).fetchone()
+                if parcels_pa_row:
+                    parcels_pa_row = dict(parcels_pa_row)
+            finally:
+                pcon.close()
+
+        def _norm_num(value: object) -> float | None:
+            try:
+                if value is None:
+                    return None
+                if isinstance(value, (int, float)):
+                    return float(value)
+                s = str(value).strip()
+                if not s or s.upper() == "NULL":
+                    return None
+                return float(s)
+            except Exception:
+                return None
+
+        merged: dict[str, object] = {"parcel_id": geom_pid, "pa_parcel_id": pa_parcel_id, "county": county_key}
+        sources: dict[str, str] = {}
+
+        def _set(field: str, value: object, source: str) -> None:
+            if value is None:
+                return
+            if isinstance(value, str) and not value.strip():
+                return
+            if merged.get(field) not in (None, ""):
+                return
+            merged[field] = value
+            sources[field] = source
+
+        if pa_row:
+            _set("beds", _norm_num(pa_row.get("bedrooms")), "pa_properties")
+            _set("baths", _norm_num(pa_row.get("bathrooms")), "pa_properties")
+            _set("living_area_sqft", _norm_num(pa_row.get("living_sf")) or _norm_num(pa_row.get("building_sf")), "pa_properties")
+            _set("year_built", _norm_num(pa_row.get("year_built")), "pa_properties")
+            _set("zoning", pa_row.get("zoning"), "pa_properties")
+            _set("future_land_use", pa_row.get("future_land_use"), "pa_properties")
+            _set("last_sale_date", pa_row.get("last_sale_date"), "pa_properties")
+            _set("last_sale_price", _norm_num(pa_row.get("last_sale_price")), "pa_properties")
+            _set("assessed_value", _norm_num(pa_row.get("assessed_value")), "pa_properties")
+            _set("taxable_value", _norm_num(pa_row.get("taxable_value")), "pa_properties")
+            _set("just_value", _norm_num(pa_row.get("just_value")), "pa_properties")
+
+        if record_json_parsed:
+            def _get(*keys: str):
+                for k in keys:
+                    if k in record_json_parsed and record_json_parsed[k] not in (None, ""):
+                        return record_json_parsed[k]
+                return None
+
+            _set("beds", _norm_num(_get("beds", "bedrooms")), "pa_properties.record_json")
+            _set("baths", _norm_num(_get("baths", "bathrooms")), "pa_properties.record_json")
+            _set(
+                "living_area_sqft",
+                _norm_num(_get("living_area_sqft", "living_sf", "living_area", "heated_area", "building_sf")),
+                "pa_properties.record_json",
+            )
+            _set("year_built", _norm_num(_get("year_built", "yr_built")), "pa_properties.record_json")
+            _set("zoning", _get("zoning"), "pa_properties.record_json")
+            _set("future_land_use", _get("future_land_use"), "pa_properties.record_json")
+            _set("last_sale_date", _get("last_sale_date", "sale_date"), "pa_properties.record_json")
+            _set("last_sale_price", _norm_num(_get("last_sale_price", "sale_price")), "pa_properties.record_json")
+            _set("assessed_value", _norm_num(_get("assessed_value")), "pa_properties.record_json")
+            _set("taxable_value", _norm_num(_get("taxable_value")), "pa_properties.record_json")
+            _set("just_value", _norm_num(_get("just_value", "total_value")), "pa_properties.record_json")
+
+        if pt1_row:
+            _set("living_area_sqft", _norm_num(pt1_row.get("LIVING_AREA")) or _norm_num(pt1_row.get("TOTAL_SQFT")), "parcel_table1")
+            _set("year_built", _norm_num(pt1_row.get("BASE_YR_BLT")), "parcel_table1")
+            _set("just_value", _norm_num(pt1_row.get("TOTAL_JUST_VALUE")), "parcel_table1")
+            _set("assessed_value", _norm_num(pt1_row.get("TOTAL_ASSESSED_VALUE")), "parcel_table1")
+            _set("land_value", _norm_num(pt1_row.get("APPR_LAND")), "parcel_table1")
+            _set("improvement_value", _norm_num(pt1_row.get("APPR_BLDG")), "parcel_table1")
+
+        if parcels_pa_row:
+            _set("beds", _norm_num(parcels_pa_row.get("beds")), "parcels_pa")
+            _set("baths", _norm_num(parcels_pa_row.get("baths")), "parcels_pa")
+            _set("living_area_sqft", _norm_num(parcels_pa_row.get("living_area_sqft")), "parcels_pa")
+            _set("year_built", _norm_num(parcels_pa_row.get("year_built")), "parcels_pa")
+            _set("last_sale_date", parcels_pa_row.get("last_sale_date"), "parcels_pa")
+            _set("last_sale_price", _norm_num(parcels_pa_row.get("last_sale_price")), "parcels_pa")
+
+        return {
+            "county": county_key,
+            "geom_parcel_id": geom_pid,
+            "pa_parcel_id": pa_parcel_id,
+            "mapping_row": dict(mapping_row) if mapping_row else None,
+            "pa_properties": dict(pa_row) if pa_row else None,
+            "record_json": record_json_parsed,
+            "parcel_table1": dict(pt1_row) if pt1_row else None,
+            "parcels_pa": dict(parcels_pa_row) if parcels_pa_row else None,
+            "merged_record": merged,
+            "merged_sources": sources,
+        }
+
+    @app.get("/api/owners/enrich")
+    def owners_enrich(county: str, parcel_id: str):
+        from florida_property_scraper.enrichment.providers.registry import get_owner_enrichment_provider
+        from florida_property_scraper.pa.storage import PASQLite
+        from florida_property_scraper.storage import SQLiteStore
+
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        if not county_key or not pid:
+            raise HTTPException(status_code=400, detail="county and parcel_id are required")
+
+        def _resolve_pa_parcel_id() -> str:
+            try:
+                import sqlite3 as _sqlite3
+
+                leads_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if not leads_path or not os.path.exists(leads_path):
+                    return pid
+                con = _sqlite3.connect(leads_path)
+                try:
+                    row = con.execute(
+                        "SELECT pa_parcel_id FROM parcel_id_map WHERE county=? AND geom_parcel_id=?",
+                        (county_key, pid),
+                    ).fetchone()
+                    if row and row[0]:
+                        return str(row[0])
+                finally:
+                    con.close()
+            except Exception:
+                return pid
+            return pid
+
+        pa_parcel_id = _resolve_pa_parcel_id()
+
+        pa_store = PASQLite(os.getenv("PA_DB", DEFAULT_LEADS_DB))
+        try:
+            pa = pa_store.get(county=county_key, parcel_id=pa_parcel_id)
+        finally:
+            pa_store.close()
+
+        if pa is None:
+            raise HTTPException(status_code=404, detail="PA record not found")
+
+        owner_name = "; ".join([n for n in (pa.owner_names or []) if n]).strip()
+        mailing_address = ", ".join(
+            [
+                str(pa.mailing_address or "").strip(),
+                " ".join(
+                    [
+                        str(pa.mailing_city or "").strip(),
+                        str(pa.mailing_state or "").strip(),
+                        str(pa.mailing_zip or "").strip(),
+                    ]
+                ).strip(),
+            ]
+        ).replace(" ,", ",").strip(" ,")
+
+        provider = get_owner_enrichment_provider()
+        provider_name = provider.name if provider is not None else ""
+        provider_configured = bool(provider is not None and provider.is_configured())
+
+        store = SQLiteStore(os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB))
+        try:
+            cached = None
+            if provider_name:
+                cached = store.get_owner_enrichment(
+                    county=county_key,
+                    parcel_id=pa_parcel_id,
+                    provider=provider_name,
+                )
+
+            if cached:
+                return JSONResponse(
+                    {
+                        "county": county_key,
+                        "parcel_id": pid,
+                        "pa_parcel_id": pa_parcel_id if pa_parcel_id != pid else None,
+                        "owner_name": owner_name or None,
+                        "owner_mailing_address": mailing_address or None,
+                        "provider": provider_name,
+                        "configured": provider_configured,
+                        "status": cached.get("status"),
+                        "phones": cached.get("phones") or [],
+                        "emails": cached.get("emails") or [],
+                        "cache_hit": True,
+                    }
+                )
+
+            if not provider_configured:
+                return JSONResponse(
+                    {
+                        "county": county_key,
+                        "parcel_id": pid,
+                        "pa_parcel_id": pa_parcel_id if pa_parcel_id != pid else None,
+                        "owner_name": owner_name or None,
+                        "owner_mailing_address": mailing_address or None,
+                        "provider": provider_name,
+                        "configured": False,
+                        "status": "not_configured",
+                        "phones": [],
+                        "emails": [],
+                        "cache_hit": False,
+                    }
+                )
+
+            assert provider is not None
+            result = provider.enrich(
+                owner_name=owner_name,
+                mailing_address=mailing_address,
+                county=county_key,
+                parcel_id=pa_parcel_id,
+            )
+            store.upsert_owner_enrichment(
+                county=county_key,
+                parcel_id=pa_parcel_id,
+                provider=result.provider,
+                status=result.status,
+                owner_name=owner_name,
+                mailing_address=mailing_address,
+                phones=result.phones,
+                emails=result.emails,
+                raw=result.raw,
+            )
+
+            return JSONResponse(
+                {
+                    "county": county_key,
+                    "parcel_id": pid,
+                    "pa_parcel_id": pa_parcel_id if pa_parcel_id != pid else None,
+                    "owner_name": owner_name or None,
+                    "owner_mailing_address": mailing_address or None,
+                    "provider": result.provider,
+                    "configured": True,
+                    "status": result.status,
+                    "phones": result.phones,
+                    "emails": result.emails,
+                    "cache_hit": False,
+                }
+            )
+        finally:
+            store.close()
 
 
     @app.get("/api/parcels/{parcel_id}")
@@ -3590,7 +6181,7 @@ if app:
         if include_geometry and county_key == "seminole":
             try:
                 import sqlite3, json as _json
-                parcels_db = os.getenv("PARCELS_DB_PATH", "")
+                parcels_db = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
                 if parcels_db:
                     con = sqlite3.connect(parcels_db)
                     cur = con.cursor()
@@ -3605,7 +6196,7 @@ if app:
                 geom = None
 
         parcel_key = str(parcel_id)
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
 
         pa_store = PASQLite(db_path)
         try:
@@ -3717,6 +6308,8 @@ if app:
                     result.setdefault(k, v)
 
         # UI_TOPLEVEL_FROM_PA_FALLBACKS: populate UI top-level fields from PA with common key fallbacks
+        pa_dict = pa if isinstance(pa, dict) else {}
+
         def _first(*vals):
             for v in vals:
                 if v is None:
@@ -3728,14 +6321,14 @@ if app:
 
         # living area / sqft
         la = _first(
-            pa.get("living_area_sqft"),
-            pa.get("living_area"),
-            pa.get("living_sf"),
-            pa.get("heated_area"),
-            pa.get("building_sf"),
-            pa.get("gross_area"),
-            pa.get("building_area"),
-            pa.get("sqft"),
+            pa_dict.get("living_area_sqft"),
+            pa_dict.get("living_area"),
+            pa_dict.get("living_sf"),
+            pa_dict.get("heated_area"),
+            pa_dict.get("building_sf"),
+            pa_dict.get("gross_area"),
+            pa_dict.get("building_area"),
+            pa_dict.get("sqft"),
         )
         if la is not None and result.get("living_area_sqft") in (None, ""):
             try:
@@ -3744,7 +6337,7 @@ if app:
                 result["living_area_sqft"] = la
 
         # lot size
-        ls = _first(pa.get("lot_size_sqft"), pa.get("lot_sqft"), pa.get("land_sqft"))
+        ls = _first(pa_dict.get("lot_size_sqft"), pa_dict.get("lot_sqft"), pa_dict.get("land_sqft"))
         if ls is not None and result.get("lot_size_sqft") in (None, ""):
             try:
                 result["lot_size_sqft"] = int(float(ls))
@@ -3752,7 +6345,7 @@ if app:
                 result["lot_size_sqft"] = ls
 
         # acreage
-        la_ac = _first(pa.get("lot_size_acres"), pa.get("land_acres"))
+        la_ac = _first(pa_dict.get("lot_size_acres"), pa_dict.get("land_acres"))
         if la_ac is not None and result.get("lot_size_acres") in (None, ""):
             try:
                 result["lot_size_acres"] = float(la_ac)
@@ -3760,12 +6353,12 @@ if app:
                 result["lot_size_acres"] = la_ac
 
         # mailing address (single string OR parts)
-        maddr = _first(pa.get("mailing_address"), pa.get("mail_address"))
+        maddr = _first(pa_dict.get("mailing_address"), pa_dict.get("mail_address"))
         if (not maddr):
-            ms = _first(pa.get("mailing_street"), pa.get("mailing_addr1"), pa.get("mail_addr1"))
-            mc = _first(pa.get("mailing_city"), pa.get("mail_city"))
-            mst = _first(pa.get("mailing_state"), pa.get("mail_state"))
-            mz = _first(pa.get("mailing_zip"), pa.get("mail_zip"))
+            ms = _first(pa_dict.get("mailing_street"), pa_dict.get("mailing_addr1"), pa_dict.get("mail_addr1"))
+            mc = _first(pa_dict.get("mailing_city"), pa_dict.get("mail_city"))
+            mst = _first(pa_dict.get("mailing_state"), pa_dict.get("mail_state"))
+            mz = _first(pa_dict.get("mailing_zip"), pa_dict.get("mail_zip"))
             parts = [x for x in [ms, mc, mst, mz] if x not in (None,"")]
             if parts:
                 maddr = ", ".join([str(x) for x in parts])
@@ -3774,14 +6367,14 @@ if app:
             result["mailing_address"] = str(maddr)
 
         # ensure owner_names/year_built bubble up if UI reads top-level
-        if result.get("owner_names") in (None, [], "") and pa.get("owner_names"):
-            result["owner_names"] = pa.get("owner_names")
-        if result.get("year_built") in (None, "") and pa.get("year_built") is not None:
-            result["year_built"] = pa.get("year_built")
+        if result.get("owner_names") in (None, [], "") and pa_dict.get("owner_names"):
+            result["owner_names"] = pa_dict.get("owner_names")
+        if result.get("year_built") in (None, "") and pa_dict.get("year_built") is not None:
+            result["year_built"] = pa_dict.get("year_built")
 
             # FLATTEN_PA_TOPLEVEL: expose key PA fields at top-level for UI panels
             # (Use setdefault so Seminole fallback / earlier values are not overwritten)
-            _pa = pa if isinstance(pa, dict) else {}
+            _pa = pa_dict
             for _k in (
                 "owner_names",
                 "mailing_address",
@@ -3807,15 +6400,15 @@ if app:
                 except Exception:
                     pass
 
-            result.setdefault("situs_address", pa.get("situs_address") or "")
-            result.setdefault("situs_city", pa.get("situs_city") or "")
-            result.setdefault("situs_state", pa.get("situs_state") or "")
-            result.setdefault("situs_zip", pa.get("situs_zip") or "")
-            owners = pa.get("owner_names") or []
-            result["owner_name"] = (owners[0] if owners else (pa.get("owner_name") or ""))
-            result["last_sale_date"] = pa.get("last_sale_date") or ""
-            result["last_sale_price"] = pa.get("last_sale_price") or 0
-            result["just_value"] = pa.get("just_value") or 0
+            result.setdefault("situs_address", pa_dict.get("situs_address") or "")
+            result.setdefault("situs_city", pa_dict.get("situs_city") or "")
+            result.setdefault("situs_state", pa_dict.get("situs_state") or "")
+            result.setdefault("situs_zip", pa_dict.get("situs_zip") or "")
+            owners = pa_dict.get("owner_names") or []
+            result["owner_name"] = (owners[0] if owners else (pa_dict.get("owner_name") or ""))
+            result["last_sale_date"] = pa_dict.get("last_sale_date") or ""
+            result["last_sale_price"] = pa_dict.get("last_sale_price") or 0
+            result["just_value"] = pa_dict.get("just_value") or 0
 
         # Source URLs and missing fields for UI
         try:
@@ -3881,7 +6474,7 @@ if app:
     def api_parcel_meta_get(parcel_id: str, county: str = ""):
         county_key = (county or "").strip().lower() or "seminole"
         parcel_key = str(parcel_id)
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         user_db = os.getenv("USER_META_DB", db_path)
 
         meta_store = UserMetaSQLite(user_db)
@@ -3899,7 +6492,7 @@ if app:
     def api_parcel_meta_put(parcel_id: str, payload: dict, county: str = ""):
         county_key = (county or "").strip().lower() or "seminole"
         parcel_key = str(parcel_id)
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
         user_db = os.getenv("USER_META_DB", db_path)
 
         starred = bool(payload.get("starred", False))
@@ -3933,7 +6526,7 @@ if app:
 
         county_key = (county or "").strip().lower()
         parcel_key = str(parcel_id)
-        db_path = os.getenv("PA_DB", "./leads.sqlite")
+        db_path = os.getenv("PA_DB", DEFAULT_LEADS_DB)
 
         cache_key = ("pa:hover", county_key, parcel_key)
         cached = cache_get(cache_key)
@@ -4031,7 +6624,11 @@ if app:
         raise HTTPException(status_code=404, detail="web UI not built")
 
     # Ensure leads DB exists on startup
-    from florida_property_scraper.db.init import init_db
+    try:
+        from florida_property_scraper.db.init import init_db
+    except Exception as e:
+        init_db = None
+        logging.getLogger("fps.startup").warning("init_db import failed: %s", e)
 
     @app.on_event("startup")
     def _ensure_leads_db():
@@ -4043,9 +6640,197 @@ if app:
             os.getenv("APP_GIT_SHA", ""),
             os.getenv("APP_GIT_BRANCH", ""),
         )
-        init_db(os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite"))
+        if init_db is None:
+            logger.warning("init_db unavailable; skipping leads DB initialization")
+            return
+        try:
+            init_db(os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB))
+        except Exception as e:
+            logger.warning("init_db failed: %s", e)
 
-    _watchlists_scheduler_task = {"task": None}
+        def _maybe_seed_demo_parcels() -> None:
+            try:
+                import sqlite3 as _sqlite3
+                import json as _json
+
+                parcels_db = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+                if not parcels_db:
+                    return
+                Path(parcels_db).parent.mkdir(parents=True, exist_ok=True)
+                con = _sqlite3.connect(parcels_db)
+                try:
+                    cur = con.cursor()
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS parcels (
+                          county TEXT NOT NULL,
+                          parcel_id TEXT NOT NULL,
+                          geom_geojson TEXT,
+                          minx REAL, miny REAL, maxx REAL, maxy REAL
+                        )
+                        """
+                    )
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_parcels_county ON parcels(county)")
+                    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_parcels_county_pid ON parcels(county, parcel_id)")
+                    cur.execute(
+                        """
+                        CREATE VIRTUAL TABLE IF NOT EXISTS parcels_rtree
+                        USING rtree(id, minx, maxx, miny, maxy)
+                        """
+                    )
+                    cnt = int(cur.execute("SELECT count(*) FROM parcels").fetchone()[0])
+                    if cnt > 0:
+                        return
+
+                    base_lng = -81.35
+                    base_lat = 28.70
+                    step = 0.002
+                    created = 0
+                    for i in range(50):
+                        row = i // 10
+                        col = i % 10
+                        minx = base_lng + col * step
+                        miny = base_lat + row * step
+                        maxx = minx + step * 0.8
+                        maxy = miny + step * 0.8
+                        geom = {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [minx, miny],
+                                    [maxx, miny],
+                                    [maxx, maxy],
+                                    [minx, maxy],
+                                    [minx, miny],
+                                ]
+                            ],
+                        }
+                        pid = f"DEMO{i:03d}"
+                        cur.execute(
+                            "INSERT OR IGNORE INTO parcels(county, parcel_id, geom_geojson, minx, miny, maxx, maxy) VALUES (?,?,?,?,?,?,?)",
+                            ("seminole", pid, _json.dumps(geom), minx, miny, maxx, maxy),
+                        )
+                        rowid = cur.lastrowid
+                        if rowid:
+                            cur.execute(
+                                "INSERT OR IGNORE INTO parcels_rtree(id, minx, maxx, miny, maxy) VALUES (?,?,?,?,?)",
+                                (rowid, minx, maxx, miny, maxy),
+                            )
+                            created += 1
+                    con.commit()
+                    logger.warning("seeded demo parcels: %s", created)
+                finally:
+                    con.close()
+            except Exception as e:
+                logger.warning("demo parcels seed failed: %s", e)
+
+        def _maybe_seed_demo_rollups() -> None:
+            try:
+                import sqlite3 as _sqlite3
+                import json as _json
+
+                leads_db = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+                if not leads_db:
+                    return
+                con = _sqlite3.connect(leads_db)
+                try:
+                    cur = con.cursor()
+                    cnt = int(cur.execute("SELECT count(*) FROM parcel_trigger_rollups").fetchone()[0])
+                    if cnt > 0:
+                        try:
+                            rollup_ids = [
+                                str(r[0])
+                                for r in cur.execute(
+                                    "SELECT parcel_id FROM parcel_trigger_rollups WHERE county='seminole' LIMIT 50"
+                                ).fetchall()
+                                if r and r[0]
+                            ]
+                            parcels_db = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+                            if parcels_db and Path(parcels_db).exists() and rollup_ids:
+                                pcon = _sqlite3.connect(parcels_db)
+                                try:
+                                    placeholders = ",".join(["?"] * len(rollup_ids))
+                                    row = pcon.execute(
+                                        f"SELECT parcel_id FROM parcels WHERE county='seminole' AND geom_geojson IS NOT NULL AND parcel_id IN ({placeholders}) LIMIT 1",
+                                        rollup_ids,
+                                    ).fetchone()
+                                    if row and row[0]:
+                                        return
+                                finally:
+                                    pcon.close()
+                        except Exception:
+                            return
+                        # Rollups exist but don't align with parcels geometry; reseed.
+                        cur.execute("DELETE FROM parcel_trigger_rollups")
+
+                    parcels_db = os.getenv("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
+                    parcel_ids = []
+                    try:
+                        if parcels_db and Path(parcels_db).exists():
+                            pcon = _sqlite3.connect(parcels_db)
+                            try:
+                                rows = pcon.execute(
+                                    "SELECT parcel_id FROM parcels WHERE county='seminole' AND geom_geojson IS NOT NULL LIMIT 10"
+                                ).fetchall()
+                                parcel_ids = [str(r[0]) for r in rows if r and r[0]]
+                            finally:
+                                pcon.close()
+                    except Exception:
+                        parcel_ids = []
+                    if not parcel_ids:
+                        parcel_ids = [f"DEMO{i:03d}" for i in range(10)]
+
+                    now = datetime.now(timezone.utc).isoformat()
+                    for i, pid in enumerate(parcel_ids):
+                        details = {
+                            "trigger_keys": ["permit_hvac"] if i % 2 == 0 else ["lis_pendens"],
+                            "groups": ["permits"] if i % 2 == 0 else ["official_records"],
+                        }
+                        cur.execute(
+                            """
+                            INSERT OR REPLACE INTO parcel_trigger_rollups (
+                              county, parcel_id, rebuilt_at, last_seen_any,
+                              last_seen_permits, last_seen_tax, last_seen_official_records,
+                              last_seen_code_enforcement, last_seen_courts, last_seen_gis_planning,
+                              has_permits, has_tax, has_official_records, has_code_enforcement,
+                              has_courts, has_gis_planning, count_critical, count_strong, count_support,
+                              seller_score, details_json
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            """,
+                            (
+                                "seminole",
+                                pid,
+                                now,
+                                now,
+                                now if i % 2 == 0 else None,
+                                None,
+                                now if i % 2 == 1 else None,
+                                None,
+                                None,
+                                None,
+                                1 if i % 2 == 0 else 0,
+                                0,
+                                1 if i % 2 == 1 else 0,
+                                0,
+                                0,
+                                0,
+                                1 if i % 2 == 1 else 0,
+                                1 if i % 2 == 0 else 0,
+                                0,
+                                45 + i,
+                                _json.dumps(details),
+                            ),
+                        )
+                    con.commit()
+                    logger.warning("seeded demo rollups: %s", len(parcel_ids))
+                finally:
+                    con.close()
+            except Exception as e:
+                logger.warning("demo rollups seed failed: %s", e)
+
+        # Demo seeding disabled: production must use real data sources only.
+
+    _watchlists_scheduler_task: dict[str, Any] = {"task": None}
 
     @app.on_event("startup")
     async def _start_watchlists_scheduler():
@@ -4075,7 +6860,7 @@ if app:
             # Ensure builtin connectors are registered.
             import florida_property_scraper.triggers.connectors  # noqa: F401
 
-            db_path = os.getenv("LEADS_SQLITE_PATH", "./leads.sqlite")
+            db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
 
             while True:
                 try:
@@ -4132,7 +6917,10 @@ if app:
 
                 await asyncio.sleep(interval_s)
 
-        _watchlists_scheduler_task["task"] = asyncio.create_task(_loop())
+        try:
+            _watchlists_scheduler_task["task"] = asyncio.create_task(_loop())
+        except Exception as e:
+            logger.warning("watchlists scheduler failed to start: %s", e)
 
     @app.on_event("shutdown")
     async def _stop_watchlists_scheduler():

@@ -202,9 +202,9 @@ class PASQLite:
 
         placeholders = ",".join(["?"] * len(ids))
         sql = (
-            f"SELECT parcel_id FROM pa_properties WHERE county=? AND parcel_id IN ({placeholders})"
+            f"SELECT parcel_id FROM pa_properties WHERE lower(county)=? AND parcel_id IN ({placeholders})"
         )
-        args: List[Any] = [county, *ids]
+        args: List[Any] = [str(county or "").strip().lower(), *ids]
         if where_sql:
             sql += " AND (" + where_sql + ")"
             args.extend(list(params))
@@ -220,8 +220,8 @@ class PASQLite:
 
     def get(self, *, county: str, parcel_id: str) -> Optional[PAProperty]:
         row = self.conn.execute(
-            "SELECT record_json FROM pa_properties WHERE county=? AND parcel_id=?",
-            (county, parcel_id),
+            "SELECT record_json FROM pa_properties WHERE lower(county)=? AND parcel_id=?",
+            (str(county or "").strip().lower(), parcel_id),
         ).fetchone()
         if not row:
             return None
@@ -240,8 +240,8 @@ class PASQLite:
 
         placeholders = ",".join(["?"] * len(ids))
         rows = self.conn.execute(
-            f"SELECT parcel_id, record_json FROM pa_properties WHERE county=? AND parcel_id IN ({placeholders})",
-            (county, *ids),
+            f"SELECT parcel_id, record_json FROM pa_properties WHERE lower(county)=? AND parcel_id IN ({placeholders})",
+            (str(county or "").strip().lower(), *ids),
         ).fetchall()
 
         out: Dict[str, PAProperty] = {}
@@ -295,8 +295,8 @@ class PASQLite:
 
         placeholders = ",".join(["?"] * len(ids))
         rows = self.conn.execute(
-            f"SELECT parcel_id, record_json FROM pa_properties WHERE county=? AND parcel_id IN ({placeholders})",
-            (county, *ids),
+            f"SELECT parcel_id, record_json FROM pa_properties WHERE lower(county)=? AND parcel_id IN ({placeholders})",
+            (str(county or "").strip().lower(), *ids),
         ).fetchall()
 
         out: Dict[str, Dict[str, Any]] = {}
