@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import json
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
@@ -70,6 +71,74 @@ def normalize_property_type(*values: Any) -> str:
 
     # Fall back to a sanitized string so it is never empty when inputs exist.
     return combined
+
+
+def _parse_num(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            v = float(value)
+        except Exception:
+            return None
+        return v if v > 0 else None
+    if not isinstance(value, str):
+        return None
+    s = value.strip().lower()
+    if not s or s in {"null", "none"}:
+        return None
+    s = s.replace(",", "")
+    s = re.sub(r"\b(sqft|sq ft|sf)\b", "", s)
+    m = re.search(r"[-+]?\d*\.?\d+", s)
+    if not m:
+        return None
+    try:
+        v = float(m.group(0))
+    except Exception:
+        return None
+    return v if v > 0 else None
+
+
+def effective_living_sqft(record: Dict[str, Any]) -> float | None:
+    if not isinstance(record, dict):
+        return None
+
+    def _get_from_obj(obj: Dict[str, Any]) -> float | None:
+        for k in (
+            "living_area_sqft",
+            "living_sf",
+            "living_area",
+            "building_sf",
+            "total_sqft",
+            "heated_area",
+            "gross_area",
+        ):
+            if k in obj:
+                v = _parse_num(obj.get(k))
+                if v is not None:
+                    return v
+        return None
+
+    direct = _get_from_obj(record)
+    if direct is not None:
+        return direct
+
+    for key in ("record_json", "record", "raw_record", "raw"):
+        raw = record.get(key)
+        data: Dict[str, Any] | None = None
+        if isinstance(raw, dict):
+            data = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = None
+        if isinstance(data, dict):
+            v = _get_from_obj(data)
+            if v is not None:
+                return v
+
+    return None
 
 
 def _get_field(fields: Dict[str, Any], name: str) -> Tuple[bool, Any]:

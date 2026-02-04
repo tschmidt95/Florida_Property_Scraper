@@ -72,6 +72,8 @@ requirements.txt.bak
 # local dev-run artifacts
 .up_run.pid
 .up_run*.log
+.logs/
+*.pid
 data/sem_co/
 
 # big generated datasets (rebuild locally)

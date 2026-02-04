@@ -1031,6 +1031,7 @@ if app:
             compile_triggers,
             eval_condition,
             eval_triggers,
+            effective_living_sqft,
             normalize_property_type,
         )
         from florida_property_scraper.parcels.geometry_search import (
@@ -3559,7 +3560,10 @@ if app:
             if pa is not None:
                 try:
                     living = float(pa.living_sf or 0) or float(pa.building_sf or 0) or 0.0
-                    fields["living_area_sqft"] = living if living > 0 else None
+                    if living > 0:
+                        fields["living_area_sqft"] = living
+                    elif fields.get("living_area_sqft") in (None, "", 0):
+                        fields["living_area_sqft"] = None
                 except Exception:
                     fields["living_area_sqft"] = None
                 try:
@@ -3644,6 +3648,15 @@ if app:
                     fields["future_land_use_norm"] = _norm_choice(flu_raw)
                 except Exception:
                     fields["future_land_use_norm"] = "UNKNOWN"
+
+            try:
+                normalized_living = effective_living_sqft(fields)
+                if normalized_living is not None:
+                    fields["living_area_sqft"] = normalized_living
+                elif fields.get("living_area_sqft") in (None, "", 0):
+                    fields["living_area_sqft"] = None
+            except Exception:
+                pass
 
             # Optional safety valve: prevent sale-based filtering/triggering.
             if not flags.sale_filtering:
@@ -4758,6 +4771,25 @@ if app:
             scanned = int(len(rows))
             present: dict[str, int] = {k: 0 for k in fields}
 
+            def _num(value: object) -> float | None:
+                try:
+                    if value is None:
+                        return None
+                    if isinstance(value, (int, float)):
+                        v = float(value)
+                        return v if v > 0 else None
+                    s = str(value).strip()
+                    if not s or s.upper() == "NULL":
+                        return None
+                    s = s.replace(",", "")
+                    m = re.search(r"[-+]?\d*\.?\d+", s)
+                    if not m:
+                        return None
+                    v = float(m.group(0))
+                    return v if v > 0 else None
+                except Exception:
+                    return None
+
             def _present(field: str, value: object) -> bool:
                 if value is None:
                     return False
@@ -4765,12 +4797,14 @@ if app:
                     return bool(value.strip())
                 if field in {"beds", "baths", "year_built", "ownership_years"}:
                     try:
-                        return float(value) > 0
+                        v = _num(value)
+                        return bool(v and v > 0)
                     except Exception:
                         return False
                 if field in {"living_area_sqft", "lot_size_sqft", "lot_size_acres", "total_value", "land_value", "building_value", "assessed_value"}:
                     try:
-                        return float(value) > 0
+                        v = _num(value)
+                        return bool(v and v > 0)
                     except Exception:
                         return False
                 return True

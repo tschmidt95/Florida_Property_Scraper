@@ -26,12 +26,21 @@ PY
 resp_tmp=$(mktemp)
 http_status=$(curl -sS -o "$resp_tmp" -w "%{http_code}" -X POST "$BASE/api/parcels/search" -H "Content-Type: application/json" -d "$payload")
 
+if [[ "$http_status" != "200" ]]; then
+  echo "FAIL: http_status=$http_status"
+  cat "$resp_tmp"
+  rm -f "$resp_tmp"
+  exit 2
+fi
+
 echo "status=$http_status"
 python - <<'PY' "$resp_tmp"
 import json,sys
 path=sys.argv[1]
 with open(path, 'r', encoding='utf-8') as f:
     j=json.load(f)
+if isinstance(j, dict) and j.get('ok') is False:
+    raise SystemExit("FAIL: ok=false")
 returned=j.get('returned_count') or j.get('summary',{}).get('returned_count') or 0
 parcels=j.get('parcels') or j.get('records') or []
 ids=[(p.get('parcel_id') or '').strip() for p in parcels if isinstance(p, dict)]

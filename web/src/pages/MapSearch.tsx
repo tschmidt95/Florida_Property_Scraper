@@ -1810,7 +1810,7 @@ export default function MapSearch({
     }
     const hasAnyFilters = Object.keys(filters).length > 0;
     if (hasAnyFilters) {
-      filters.missing_policy = 'strict';
+      filters.missing_policy = 'lenient';
     }
 
     const resolvedCounty = county.trim();
@@ -3486,6 +3486,12 @@ payload.polygon_geojson = polyOut;
                 : `Loaded ${parcels.length} · Displaying ${visibleRows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
             </div>
           </div>
+          {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null ? (
+            <div className="mt-1 text-[11px] text-cre-muted">
+              Candidates: {lastCounts.candidateCount} • Returned: {lastResponseCount} • Filtered:{' '}
+              {Math.max(0, Number(lastCounts.candidateCount) - Number(lastCounts.filteredCount))}
+            </div>
+          ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
             <button
