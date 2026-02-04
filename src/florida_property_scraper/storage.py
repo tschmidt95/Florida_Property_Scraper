@@ -694,6 +694,25 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_owner_enrichment_lookup ON owner_enrichment(county, parcel_id, provider)"
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_enrichment (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(county, parcel_id, provider)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_enrichment_lookup ON provider_enrichment(county, parcel_id, provider)"
+        )
+
         self.conn.commit()
 
     @staticmethod
@@ -959,6 +978,70 @@ class SQLiteStore:
                 self._clean_json(phones),
                 self._clean_json(emails),
                 self._clean_json(raw),
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    def get_provider_enrichment(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        provider: str,
+    ) -> Dict[str, Any] | None:
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        prov = str(provider or "").strip().lower()
+        if not county_key or not pid or not prov:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM provider_enrichment WHERE county=? AND parcel_id=? AND provider=? LIMIT 1",
+            (county_key, pid, prov),
+        ).fetchone()
+        if not row:
+            return None
+        rec = dict(row)
+        try:
+            rec["result"] = json.loads(rec.get("result_json") or "{}")
+        except Exception:
+            rec["result"] = {}
+        try:
+            rec["evidence"] = json.loads(rec.get("evidence_json") or "[]")
+        except Exception:
+            rec["evidence"] = []
+        return rec
+
+    def upsert_provider_enrichment(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        provider: str,
+        status: str,
+        result: dict[str, Any],
+        evidence: list[dict[str, Any]],
+        updated_at: str | None = None,
+    ) -> None:
+        now = (updated_at or "").strip() or self._utc_now_iso()
+        self.conn.execute(
+            """
+            INSERT INTO provider_enrichment (
+                county, parcel_id, provider, status, result_json, evidence_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(county, parcel_id, provider) DO UPDATE SET
+                status=excluded.status,
+                result_json=excluded.result_json,
+                evidence_json=excluded.evidence_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                (county or "").strip().lower(),
+                str(parcel_id or "").strip(),
+                str(provider or "").strip().lower(),
+                str(status or ""),
+                self._clean_json(result),
+                self._clean_json(evidence),
                 now,
             ),
         )

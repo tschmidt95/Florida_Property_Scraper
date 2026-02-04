@@ -5,12 +5,15 @@ import type { LatLngLiteral } from 'leaflet';
 import { CircleMarker, GeoJSON, MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
 
 import {
-  apiUrl as apiUrlFn,
+  apiFetch,
+  evaluateTriggers,
+  fetchProviderStatus,
   createSavedSearch,
   listAlerts,
   listSavedSearches,
   markAlertRead,
   parcelsEnrich,
+  runEnrichment,
   parcelsGeometry,
   parcelsSearchNormalized,
   fetchParcelDetail,
@@ -23,6 +26,9 @@ import {
   triggersRollupByParcel,
   triggersRollupsSearch,
   type AlertsInboxRecord,
+  type EnrichmentResponse,
+  type ProviderStatusResponse,
+  type TriggerEvaluateResponse,
   type ParcelAttributeFilters,
   type ParcelDetail,
   type ParcelRecord,
@@ -669,6 +675,7 @@ export default function MapSearch({
     candidateCount: number | null;
     filteredCount: number | null;
   } | null>(null);
+  const [hoverFieldsMode, setHoverFieldsMode] = useState<string>('');
 
   const [zoningOptions, setZoningOptions] = useState<string[]>([]);
   const [futureLandUseOptions, setFutureLandUseOptions] = useState<string[]>([]);
@@ -696,6 +703,7 @@ export default function MapSearch({
 
   const [lastRequest, setLastRequest] = useState<any | null>(null);
   const [lastResponseSummary, setLastResponseSummary] = useState<any | null>(null);
+  const [lastResponseRaw, setLastResponseRaw] = useState<any | null>(null);
   const [debugEvidence, setDebugEvidence] = useState<
     | {
         requestJson: string;
@@ -721,6 +729,8 @@ export default function MapSearch({
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
   const [activeFiltersSummary, setActiveFiltersSummary] = useState<string>('None');
   const [activeSignalsSummary, setActiveSignalsSummary] = useState<string>('None');
+  const [lastEnrichment, setLastEnrichment] = useState<EnrichmentResponse | null>(null);
+  const [lastTriggerEval, setLastTriggerEval] = useState<TriggerEvaluateResponse | null>(null);
 
   const [pagingMeta, setPagingMeta] = useState<{
     total: number | null;
@@ -737,6 +747,9 @@ export default function MapSearch({
   const [sourceCoverage, setSourceCoverage] = useState<SourceCoverage | null>(null);
   const [sourceCoverageLoading, setSourceCoverageLoading] = useState(false);
   const [sourceCoverageError, setSourceCoverageError] = useState<string | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [providerStatusLoading, setProviderStatusLoading] = useState(false);
+  const [providerStatusError, setProviderStatusError] = useState<string | null>(null);
 
   const resolveCountyFromGeometry = useCallback(async (): Promise<string> => {
     const existing = county.trim();
@@ -987,28 +1000,38 @@ export default function MapSearch({
     (fieldKey: string, hint: string) => {
       if (resultSetCount <= 0) {
         return (
-          <div className="text-[10px] text-cre-muted" title={hint}>
-            No records yet
+          <div className="text-[10px] text-cre-muted" title={`${hint} (No records yet)`}>
+            —
           </div>
         );
       }
       const cov = (fieldStats?.coverage || {}) as Record<string, number>;
       const present = (fieldStats?.present || {}) as Record<string, number>;
       const missing = (fieldStats?.missing || {}) as Record<string, number>;
+      const candidateFields = (fieldStats?.coverage_candidates as any)?.fields || null;
+      const candidateRow = candidateFields && typeof candidateFields === 'object' ? candidateFields[fieldKey] : null;
       const raw = cov[fieldKey];
       const pct = typeof raw === 'number' ? Math.round(raw * 100) : 0;
       const count =
         typeof present[fieldKey] === 'number' && typeof missing[fieldKey] === 'number'
           ? ` (${present[fieldKey]}/${present[fieldKey] + missing[fieldKey]})`
           : '';
-      const label = `Coverage: ${pct}%${count}`;
+      let label = `Coverage: ${pct}%${count}`;
+      if (filtersActive && candidateRow && typeof candidateRow.pct === 'number') {
+        const candPct = Math.round(candidateRow.pct * 100);
+        const candCount =
+          typeof candidateRow.present === 'number' && typeof candidateRow.total === 'number'
+            ? ` (${candidateRow.present}/${candidateRow.total})`
+            : '';
+        label = `Coverage (returned): ${pct}%${count} · Candidates: ${candPct}%${candCount}`;
+      }
       return (
         <div className="text-[10px] text-cre-muted" title={hint}>
           {label}
         </div>
       );
     },
-    [fieldStats, resultSetCount]
+    [fieldStats, filtersActive, resultSetCount]
   );
 
   const downloadCsv = useCallback(() => {
@@ -1211,7 +1234,7 @@ export default function MapSearch({
     let cancelled = false;
     async function loadSignalsCatalog() {
       try {
-        const resp = await fetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
+        const resp = await apiFetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         const items = Array.isArray((data as any)?.signals) ? (data as any).signals : null;
@@ -1256,7 +1279,7 @@ export default function MapSearch({
       setOwnerEnrichmentLoading(true);
       setOwnerEnrichmentError(null);
       try {
-        const resp = await fetch(
+        const resp = await apiFetch(
           `/api/owners/enrich?county=${encodeURIComponent(countyKey)}&parcel_id=${encodeURIComponent(
             selectedParcelId,
           )}`,
@@ -1311,6 +1334,42 @@ export default function MapSearch({
       }
     }
     void loadCoverage();
+    return () => {
+      cancelled = true;
+    };
+  }, [county, resolveCountyFromGeometry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadProviderStatus() {
+      let c = county.trim();
+      if (!c) {
+        c = await resolveCountyFromGeometry();
+      }
+      if (!c) {
+        if (!cancelled) {
+          setProviderStatus(null);
+          setProviderStatusError('County auto-detection required to load providers.');
+        }
+        return;
+      }
+      setProviderStatusLoading(true);
+      try {
+        const data = await fetchProviderStatus(c);
+        if (!cancelled) {
+          setProviderStatus(data);
+          setProviderStatusError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setProviderStatus(null);
+          setProviderStatusError('Failed to load provider status.');
+        }
+      } finally {
+        if (!cancelled) setProviderStatusLoading(false);
+      }
+    }
+    void loadProviderStatus();
     return () => {
       cancelled = true;
     };
@@ -2072,9 +2131,97 @@ payload.polygon_geojson = polyOut;
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
       setLastError(msg);
-      setErrorBanner(`Enrichment failed: ${msg}`);
+      if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
+        setErrorBanner('Enrichment not implemented on backend yet.');
+      } else {
+        setErrorBanner(`Enrichment failed: ${msg}`);
+      }
     } finally {
       if (reqId === activeReq.current) setLoading(false);
+    }
+  }
+
+  async function enrichSelectedProviders() {
+    setLastError(null);
+    setErrorBanner(null);
+    const ids = selectedParcelId ? [selectedParcelId] : visibleRows.map((p) => p.parcel_id).slice(0, 50);
+    if (!ids.length) {
+      setErrorBanner('Select a parcel or load results before enrichment.');
+      return;
+    }
+
+    let countyForEnrich = county.trim() || (ids.length === 1 ? (records.find((r) => r.parcel_id === ids[0])?.county || '') : '');
+    if (!countyForEnrich) {
+      countyForEnrich = await resolveCountyFromGeometry();
+    }
+    if (!countyForEnrich) {
+      setErrorBanner('Select a county to enrich results.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const resp = await runEnrichment({
+        county: countyForEnrich,
+        parcel_ids: ids,
+        providers: [
+          'permits',
+          'tax',
+          'courts',
+          'official_records',
+          'deeds',
+          'code_enforcement',
+          'liens',
+          'utilities',
+        ],
+        limit: ids.length,
+      });
+      setLastEnrichment(resp);
+      setErrorBanner(`Enrichment complete (${resp.results.length} provider results).`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
+        setErrorBanner('Provider enrichment not implemented on backend yet.');
+      } else {
+        setErrorBanner(`Enrichment failed: ${msg}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runTriggersForSelected() {
+    setLastError(null);
+    setErrorBanner(null);
+    const ids = selectedParcelId ? [selectedParcelId] : visibleRows.map((p) => p.parcel_id).slice(0, 50);
+    if (!ids.length) {
+      setErrorBanner('Select a parcel or load results before running triggers.');
+      return;
+    }
+
+    let countyForEval = county.trim() || (ids.length === 1 ? (records.find((r) => r.parcel_id === ids[0])?.county || '') : '');
+    if (!countyForEval) {
+      countyForEval = await resolveCountyFromGeometry();
+    }
+    if (!countyForEval) {
+      setErrorBanner('Select a county to evaluate triggers.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const resp = await evaluateTriggers({ county: countyForEval, parcel_ids: ids, trigger_keys: null });
+      setLastTriggerEval(resp);
+      setErrorBanner(`Triggers evaluated (${resp.results.length} parcels).`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
+        setErrorBanner('Trigger evaluation not implemented on backend yet.');
+      } else {
+        setErrorBanner(`Trigger evaluation failed: ${msg}`);
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -2366,6 +2513,13 @@ payload.polygon_geojson = polyOut;
         throw new Error('No response received from backend.');
       }
 
+      setLastResponseRaw(resp);
+      try {
+        setHoverFieldsMode(String((resp as any).hover_fields_mode || '').trim());
+      } catch {
+        setHoverFieldsMode('');
+      }
+
       if (debugUiEnabled) {
         try {
           const summary = (resp as any).summary || {};
@@ -2472,8 +2626,14 @@ payload.polygon_geojson = polyOut;
       const coverageRows: Array<Partial<ParcelRecord>> = recs.length
         ? recs
         : (list as Array<Partial<ParcelRecord>>);
-      setFieldStats(computeResultSetFieldStats(coverageRows));
-      setResultSetCount((list.length || recs.length) ?? 0);
+      const backendFieldStats = (resp as any).field_stats;
+      const fallbackFieldStats = computeResultSetFieldStats(coverageRows);
+      const nextFieldStats = backendFieldStats && typeof backendFieldStats === 'object'
+        ? backendFieldStats
+        : fallbackFieldStats;
+      setFieldStats(nextFieldStats);
+      const nextResultCount = (list.length || recs.length) ?? 0;
+      setResultSetCount(nextResultCount);
 
       const isSoftWarning = (w: string): boolean => {
         const s = String(w || '').toLowerCase();
@@ -2482,7 +2642,16 @@ payload.polygon_geojson = polyOut;
 
       const soft = Array.isArray(warningsAll) ? warningsAll.filter(isSoftWarning) : [];
       const otherWarnings = Array.isArray(warningsAll) ? warningsAll.filter((w) => !isSoftWarning(w)) : [];
-      setSoftWarnings(soft);
+      const sqftMin = (payload as any)?.filters?.min_sqft;
+      const sqftMax = (payload as any)?.filters?.max_sqft;
+      const needsSqft = sqftMin !== null && sqftMin !== undefined || sqftMax !== null && sqftMax !== undefined;
+      const cov = (nextFieldStats as any)?.coverage || {};
+      const sqftCoverage = typeof cov.living_area_sqft === 'number' ? cov.living_area_sqft : null;
+      const lowSqftCoverage = Boolean(needsSqft && nextResultCount > 0 && sqftCoverage !== null && sqftCoverage < 0.2);
+      const coverageWarning = lowSqftCoverage
+        ? 'Most records missing sqft; consider lenient missing policy.'
+        : null;
+      setSoftWarnings(coverageWarning ? [...soft, coverageWarning] : soft);
       setLastResponseCount(list.length || recs.length);
 
       const rawCounts = resp.summary?.source_counts || {};
@@ -2585,14 +2754,18 @@ payload.polygon_geojson = polyOut;
       setPagingMeta({ total: totalCount ?? list.length, loaded: list.length, isPaging: false, hasMore: false });
     } catch (e) {
       if (reqId !== activeReq.current) return;
-      const status = (e as any)?.status as number | undefined;
-      const statusText = (e as any)?.statusText as string | undefined;
-      const responseText = (e as any)?.responseText as string | undefined;
+      const payload = (e as any)?.payload ?? null;
+      const status = (payload as any)?.http_status ?? (payload as any)?.status ?? (e as any)?.status;
+      const statusText = (payload as any)?.status_text ?? (payload as any)?.statusText ?? (e as any)?.statusText;
+      const responseText =
+        (payload as any)?.response_text_snippet ??
+        (payload as any)?.responseTextSnippet ??
+        (payload as any)?.responseText ??
+        (e as any)?.responseText;
       const baseMsg = e instanceof Error ? e.message : String(e);
       const statusLine = status ? `HTTP ${status}${statusText ? ` ${statusText}` : ''}` : '';
       const detail = responseText ? String(responseText).slice(0, 300) : '';
       const msg = [statusLine, baseMsg, detail ? `(${detail})` : ''].filter(Boolean).join(' ');
-      const payload = (e as any)?.payload ?? null;
       if (payload && typeof payload === 'object') {
         setLastExplainError(payload);
       } else {
@@ -2659,9 +2832,9 @@ payload.polygon_geojson = polyOut;
     let cancelled = false;
     async function checkBackend() {
       try {
-        const health = await fetch(apiUrlFn('/api/health'));
+        const health = await apiFetch('/api/health');
         if (!health.ok) throw new Error(`health ${health.status}`);
-        const ping = await fetch(apiUrlFn('/api/debug/ping'));
+        const ping = await apiFetch('/api/debug/ping');
         if (!ping.ok) throw new Error(`ping ${ping.status}`);
         if (!cancelled) {
           setBackendStatus('ok');
@@ -2688,6 +2861,32 @@ payload.polygon_geojson = polyOut;
         ? String((lastExplainError as any).request_url)
         : '';
   const lastExplainAbsolute = /^https?:\/\//i.test(lastExplainRequestUrl);
+  const lastExplainHttpStatus =
+    typeof (lastExplainError as any)?.http_status === 'number'
+      ? Number((lastExplainError as any).http_status)
+      : typeof (lastExplainError as any)?.status === 'number'
+        ? Number((lastExplainError as any).status)
+        : null;
+  const lastExplainContentType =
+    typeof (lastExplainError as any)?.content_type === 'string'
+      ? String((lastExplainError as any).content_type)
+      : typeof (lastExplainError as any)?.contentType === 'string'
+        ? String((lastExplainError as any).contentType)
+        : '';
+  const lastExplainBodySnippet =
+    typeof (lastExplainError as any)?.response_text_snippet === 'string'
+      ? String((lastExplainError as any).response_text_snippet)
+      : typeof (lastExplainError as any)?.responseTextSnippet === 'string'
+        ? String((lastExplainError as any).responseTextSnippet)
+        : typeof (lastExplainError as any)?.responseText === 'string'
+          ? String((lastExplainError as any).responseText)
+          : '';
+  const lastExplainDetail = typeof (lastExplainError as any)?.detail === 'string'
+    ? String((lastExplainError as any).detail)
+    : '';
+  const lastExplainHint = typeof (lastExplainError as any)?.hint === 'string'
+    ? String((lastExplainError as any).hint)
+    : '';
 
   return (
     <div
@@ -2728,7 +2927,16 @@ payload.polygon_geojson = polyOut;
               <div className="mt-2 space-y-2 text-[11px] text-cre-muted">
                 <div>Backend error: {String(lastExplainError.error || lastExplainError.message || 'Unknown')}</div>
                 {lastExplainError.where ? <div>Where: {String(lastExplainError.where)}</div> : null}
+                {lastExplainDetail ? <div>Detail: {lastExplainDetail}</div> : null}
+                {lastExplainHint ? <div>Hint: {lastExplainHint}</div> : null}
+                {lastExplainHttpStatus ? <div>http_status: {lastExplainHttpStatus}</div> : null}
+                {lastExplainContentType ? <div>content_type: {lastExplainContentType}</div> : null}
                 {lastExplainRequestUrl ? <div>request_url: {lastExplainRequestUrl}</div> : null}
+                {lastExplainBodySnippet ? (
+                  <div className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+                    response_snippet: {lastExplainBodySnippet}
+                  </div>
+                ) : null}
                 {lastExplainAbsolute ? (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">
                     ABSOLUTE API URL DETECTED – THIS IS WRONG IN DEV
@@ -2742,15 +2950,19 @@ payload.polygon_geojson = polyOut;
                       const payload = {
                         request: lastRequest,
                         error: lastExplainError,
+                        request_url: lastExplainRequestUrl || null,
+                        http_status: lastExplainHttpStatus,
+                        content_type: lastExplainContentType || null,
+                        response_snippet: lastExplainBodySnippet || null,
                       };
                       void navigator.clipboard?.writeText?.(JSON.stringify(payload, null, 2));
-                      showToast('Debug payload copied.');
+                      showToast('Bug payload copied.');
                     } catch {
                       // ignore
                     }
                   }}
                 >
-                  Copy debug payload
+                  Copy bug payload
                 </button>
               </div>
             ) : null}
@@ -3486,6 +3698,11 @@ payload.polygon_geojson = polyOut;
                 : `Loaded ${parcels.length} · Displaying ${visibleRows.length} (live ${sourceCounts.live} / cache ${sourceCounts.cache})`}
             </div>
           </div>
+          {hoverFieldsMode === 'evidence_only' ? (
+            <div className="mt-1 text-[11px] text-cre-muted">
+              Hover fields: not enriched yet (evidence-only).
+            </div>
+          ) : null}
           {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null ? (
             <div className="mt-1 text-[11px] text-cre-muted">
               Candidates: {lastCounts.candidateCount} • Returned: {lastResponseCount} • Filtered:{' '}
@@ -3505,6 +3722,24 @@ payload.polygon_geojson = polyOut;
             </button>
             <button
               type="button"
+              className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
+              onClick={() => void enrichSelectedProviders()}
+              disabled={loading || parcels.length === 0}
+              title={parcels.length === 0 ? 'No parcels loaded yet.' : 'Run provider enrichment for selected parcels'}
+            >
+              Enrich selected
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface disabled:opacity-60"
+              onClick={() => void runTriggersForSelected()}
+              disabled={loading || parcels.length === 0}
+              title={parcels.length === 0 ? 'No parcels loaded yet.' : 'Evaluate triggers for selected parcels'}
+            >
+              Run triggers
+            </button>
+            <button
+              type="button"
               className="rounded-xl border border-cre-border/60 bg-cre-bg px-4 py-2 text-sm text-cre-text hover:bg-cre-surface"
               onClick={() => void saveCurrentSearch()}
               title="Saves the current polygon + filters as a saved search"
@@ -3512,6 +3747,18 @@ payload.polygon_geojson = polyOut;
               Save search
             </button>
           </div>
+
+          {lastEnrichment || lastTriggerEval ? (
+            <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-2 text-[11px] text-cre-muted">
+              {lastEnrichment
+                ? `Enrichment: ${lastEnrichment.results.length} provider results`
+                : 'Enrichment: —'}
+              {' • '}
+              {lastTriggerEval
+                ? `Triggers: ${lastTriggerEval.results.length} parcels evaluated`
+                : 'Triggers: —'}
+            </div>
+          ) : null}
 
           <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-bg p-3">
             <div className="flex items-center justify-between">

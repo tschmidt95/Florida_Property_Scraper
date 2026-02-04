@@ -99,7 +99,7 @@ def _parse_num(value: Any) -> float | None:
     return v if v > 0 else None
 
 
-def effective_living_sqft(record: Dict[str, Any]) -> float | None:
+def effective_living_sqft(record: Dict[str, Any]) -> int | None:
     if not isinstance(record, dict):
         return None
 
@@ -116,7 +116,10 @@ def effective_living_sqft(record: Dict[str, Any]) -> float | None:
             if k in obj:
                 v = _parse_num(obj.get(k))
                 if v is not None:
-                    return v
+                    try:
+                        return int(round(float(v)))
+                    except Exception:
+                        return None
         return None
 
     direct = _get_from_obj(record)
@@ -136,7 +139,10 @@ def effective_living_sqft(record: Dict[str, Any]) -> float | None:
         if isinstance(data, dict):
             v = _get_from_obj(data)
             if v is not None:
-                return v
+                try:
+                    return int(round(float(v)))
+                except Exception:
+                    return None
 
     return None
 

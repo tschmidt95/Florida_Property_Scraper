@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="http://127.0.0.1:5173"
+BASE="http://127.0.0.1:8000"
 
 stats_tmp="$(mktemp)"
 polygon_tmp="$(mktemp)"
@@ -54,6 +54,7 @@ http_status="$(curl -sS -o "$resp_tmp" -w "%{http_code}" \
   --data-binary "@$payload_tmp")"
 
 echo "status=$http_status"
+echo "raw_response=$resp_tmp"
 if [[ "$http_status" != "200" ]]; then
   cat "$resp_tmp"
   exit 2
@@ -68,7 +69,4 @@ if isinstance(j, dict) and j.get("ok") is False:
     raise SystemExit("FAIL: ok=false")
 print("returned_count=", j.get("returned_count", 0))
 print("total_count=", j.get("total_count", 0))
-fs = j.get("field_stats") or (j.get("explain") or {}).get("field_stats") or {}
-keys = sorted(k for k in fs.keys())
-print("field_stats_keys=", ", ".join(keys))
 PY

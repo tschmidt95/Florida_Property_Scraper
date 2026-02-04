@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd /workspaces/Florida_Property_Scraper
 
-bash scripts/stop_8000_5173.sh || true
+bash scripts/stop_all.sh || true
 
 bash scripts/start_backend_minimal.sh
 bash scripts/start_ui_minimal.sh

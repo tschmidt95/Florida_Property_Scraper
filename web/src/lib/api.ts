@@ -48,8 +48,35 @@ export function apiUrl(path: string, opts?: { county?: string; params?: ApiUrlPa
   return apiPath(p);
 }
 
+export async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
+  const raw = String(path || '');
+  const isAbsolute = /^https?:\/\//i.test(raw);
+  const normalized = raw.startsWith('/') ? raw : `/${raw}`;
+  if (isAbsolute) {
+    const err = new Error('Absolute API URL detected. Use a relative /api/... path.');
+    (err as any).payload = {
+      error: 'absolute_url',
+      hint: 'Replace absolute API URLs with /api/... so the Vite proxy works in dev.',
+      request_url: raw,
+      http_status: 0,
+    };
+    throw err;
+  }
+  if (!normalized.startsWith('/api/')) {
+    const err = new Error('API path must start with /api/.');
+    (err as any).payload = {
+      error: 'invalid_api_path',
+      hint: 'Prefix requests with /api/... so they proxy to the backend.',
+      request_url: normalized,
+      http_status: 0,
+    };
+    throw err;
+  }
+  return fetch(normalized, opts);
+}
+
 export async function getParcelsCoverage(county: string) {
-  const res = await fetch(apiUrl('/api/debug/parcels_coverage', { county }));
+  const res = await apiFetch(apiUrl('/api/debug/parcels_coverage', { county }));
   if (!res.ok) throw new Error('Failed to fetch coverage');
   return await res.json();
 }
@@ -65,8 +92,30 @@ export type SourceCoverage = {
   available_signal_groups: string[];
 };
 
+export type ProviderStatusCategory = {
+  status: 'OK' | 'DEGRADED' | 'DOWN';
+  reason?: string | null;
+  last_checked?: string | null;
+  mode?: string | null;
+  providers?: Array<Record<string, unknown>>;
+};
+
+export type ProviderStatusResponse = {
+  ok: boolean;
+  county: string;
+  checked_at?: string;
+  categories: Record<string, ProviderStatusCategory>;
+  providers?: Array<Record<string, unknown>>;
+};
+
+export async function fetchProviderStatus(county: string): Promise<ProviderStatusResponse> {
+  const res = await apiFetch(apiUrl('/api/debug/provider_status', { county }));
+  if (!res.ok) throw new Error('Failed to fetch provider status');
+  return (await res.json()) as ProviderStatusResponse;
+}
+
 export async function fetchSourceCoverage(county: string): Promise<SourceCoverage> {
-  const res = await fetch(apiUrl('/api/debug/source_coverage', { county }));
+  const res = await apiFetch(apiUrl('/api/debug/source_coverage', { county }));
   if (!res.ok) throw new Error('Failed to fetch source coverage');
   return (await res.json()) as SourceCoverage;
 }
@@ -299,6 +348,7 @@ export type PermitRecord = {
 
 export type ParcelSearchResponse = {
   county: string;
+  hover_fields_mode?: 'evidence_only' | 'enriched' | string;
   zoning_options?: string[];
   future_land_use_options?: string[];
   summary: {
@@ -626,7 +676,7 @@ export type DebugPingResponse = {
 };
 
 export async function debugPing(): Promise<DebugPingResponse> {
-  const resp = await fetch('/api/debug/ping', { headers: { Accept: 'application/json' } });
+  const resp = await apiFetch('/api/debug/ping', { headers: { Accept: 'application/json' } });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     const detail = text ? `: ${text}` : '';
@@ -645,7 +695,7 @@ export type SignalsCatalogItem = {
 };
 
 export async function fetchSignalsCatalog(): Promise<SignalsCatalogItem[]> {
-  const resp = await fetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
+  const resp = await apiFetch('/api/signals/catalog', { headers: { Accept: 'application/json' } });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     const detail = text ? `: ${text}` : '';
@@ -672,7 +722,7 @@ export type ResolveCountyResponse = {
 };
 
 export async function resolveCountyAuto(payload: ResolveCountyRequest): Promise<ResolveCountyResponse> {
-  const resp = await fetch('/api/geo/resolve_county', {
+  const resp = await apiFetch('/api/geo/resolve_county', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -693,7 +743,7 @@ export async function permitsByParcel(params: {
   parcel_id: string;
   limit?: number;
 }): Promise<PermitRecord[]> {
-  const resp = await fetch(apiUrl('/api/permits/by_parcel', {
+  const resp = await apiFetch(apiUrl('/api/permits/by_parcel', {
     county: params.county,
     params: {
       parcel_id: params.parcel_id,
@@ -798,7 +848,7 @@ export async function triggersByParcel(params: {
   limit_alerts?: number;
   status?: string;
 }): Promise<TriggersByParcelResponse> {
-  const resp = await fetch(apiUrl('/api/triggers/by_parcel', {
+  const resp = await apiFetch(apiUrl('/api/triggers/by_parcel', {
     county: params.county,
     params: {
       parcel_id: params.parcel_id,
@@ -823,7 +873,7 @@ export async function triggersByParcel(params: {
 export async function triggersRollupsSearch(
   payload: TriggerRollupsSearchRequest
 ): Promise<TriggerRollupsSearchResponse> {
-  const resp = await fetch('/api/triggers/rollups/search', {
+  const resp = await apiFetch('/api/triggers/rollups/search', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -845,7 +895,7 @@ export async function triggersRollupByParcel(params: {
   county: string;
   parcel_id: string;
 }): Promise<TriggerRollupRecord | null> {
-  const resp = await fetch(apiUrl('/api/triggers/rollups/by_parcel', {
+  const resp = await apiFetch(apiUrl('/api/triggers/rollups/by_parcel', {
     county: params.county,
     params: {
       parcel_id: params.parcel_id,
@@ -886,7 +936,7 @@ export async function listSavedSearches(params?: { county?: string }): Promise<S
   const qs = new URLSearchParams();
   if (params?.county && params.county.trim()) qs.set('county', params.county.trim());
 
-  const resp = await fetch(`/api/saved-searches?${qs.toString()}`, {
+  const resp = await apiFetch(`/api/saved-searches?${qs.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
@@ -911,7 +961,7 @@ export async function createSavedSearch(payload: {
   sort?: string | null;
   watchlist_id?: string | null;
 }): Promise<SavedSearchRecord> {
-  const resp = await fetch('/api/saved-searches', {
+  const resp = await apiFetch('/api/saved-searches', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -944,7 +994,7 @@ export async function runSavedSearch(params: {
     qs.set('limit', String(params.limit));
   }
 
-  const resp = await fetch(`/api/saved-searches/${encodeURIComponent(sid)}/run?${qs.toString()}`, {
+  const resp = await apiFetch(`/api/saved-searches/${encodeURIComponent(sid)}/run?${qs.toString()}`, {
     method: 'POST',
     headers: { Accept: 'application/json' },
   });
@@ -988,7 +1038,7 @@ export async function listAlerts(params: {
   if (typeof params.limit === 'number') qs.set('limit', String(params.limit));
   if (typeof params.offset === 'number') qs.set('offset', String(params.offset));
 
-  const resp = await fetch(`/api/alerts?${qs.toString()}`, {
+  const resp = await apiFetch(`/api/alerts?${qs.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });
@@ -1005,7 +1055,7 @@ export async function listAlerts(params: {
 }
 
 export async function markAlertRead(alertId: number): Promise<void> {
-  const resp = await fetch(`/api/alerts/${encodeURIComponent(String(alertId))}/read`, {
+  const resp = await apiFetch(`/api/alerts/${encodeURIComponent(String(alertId))}/read`, {
     method: 'POST',
     headers: { Accept: 'application/json' },
   });
@@ -1047,7 +1097,7 @@ function buildSearchUrl(q: string, county: string): string {
 }
 
 export async function search(q: string, county: string): Promise<SearchResult[]> {
-  const resp = await fetch(buildSearchUrl(q, county), {
+  const resp = await apiFetch(buildSearchUrl(q, county), {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -1104,7 +1154,7 @@ export async function search(q: string, county: string): Promise<SearchResult[]>
 }
 
 export async function advancedSearch(payload: AdvancedSearchRequest): Promise<SearchResult[]> {
-  const resp = await fetch('/api/search/advanced', {
+  const resp = await apiFetch('/api/search/advanced', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -1199,7 +1249,7 @@ export async function parcelsSearch(
 
   let resp: Response;
   try {
-    resp = await fetch(url, {
+    resp = await apiFetch(url, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1208,13 +1258,17 @@ export async function parcelsSearch(
       body: requestBody,
     });
   } catch (e) {
+    if ((e as any)?.payload) {
+      throw e;
+    }
     const errMessage = e instanceof Error ? e.message : String(e);
     const payloadInfo = {
-      url,
+      request_url: url,
       method: 'POST',
-      status: 0,
-      statusText: 'fetch_failed',
-      responseTextSnippet: '',
+      http_status: 0,
+      status_text: 'fetch_failed',
+      content_type: '',
+      response_text_snippet: '',
       errMessage,
     };
     const err = new Error(`fetch_failed url=${url} msg=${errMessage}`);
@@ -1222,15 +1276,27 @@ export async function parcelsSearch(
     throw err;
   }
 
+  const contentType = resp.headers.get('content-type') || '';
+  const text = await resp.text().catch(() => '');
+  const head = String(text || '').slice(0, 500);
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      data = null;
+    }
+  }
+
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    const head = String(text || '').slice(0, 500);
     const payloadInfo = {
-      url: resp.url || url,
+      request_url: resp.url || url,
       method: 'POST',
-      status: resp.status,
-      statusText: resp.statusText,
-      responseTextSnippet: head,
+      http_status: resp.status,
+      status_text: resp.statusText,
+      content_type: contentType,
+      response_text_snippet: head,
+      response_body: data && typeof data === 'object' ? data : null,
       errMessage: `HTTP ${resp.status} ${resp.statusText}`,
     };
     const err = new Error(`HTTP ${resp.status} ${resp.statusText} url=${resp.url || url}: ${head}`);
@@ -1238,16 +1304,33 @@ export async function parcelsSearch(
     throw err;
   }
 
-  const data: unknown = await resp.json();
   if (!data || typeof data !== 'object') {
-    throw new Error('Unexpected response: expected JSON object');
+    const err = new Error('Unexpected response: expected JSON object');
+    (err as any).payload = {
+      request_url: resp.url || url,
+      method: 'POST',
+      http_status: resp.status,
+      status_text: resp.statusText,
+      content_type: contentType,
+      response_text_snippet: head,
+      response_body: null,
+      errMessage: 'json_parse_failed',
+    };
+    throw err;
   }
 
   const obj = data as any;
   if (obj && obj.ok === false) {
     const msg = String(obj.error || obj.message || 'Search failed');
     const err = new Error(msg);
-    (err as any).payload = obj;
+    (err as any).payload = {
+      ...obj,
+      request_url: resp.url || url,
+      http_status: resp.status,
+      status_text: resp.statusText,
+      content_type: contentType,
+      response_text_snippet: head,
+    };
     throw err;
   }
 
@@ -1283,7 +1366,7 @@ export type ParcelsGeometryRequest = {
 export type ParcelsGeometryResponse = GeoJSON.FeatureCollection;
 
 export async function parcelsGeometry(payload: ParcelsGeometryRequest): Promise<ParcelsGeometryResponse> {
-  const resp = await fetch('/api/parcels/geometry', {
+  const resp = await apiFetch('/api/parcels/geometry', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -1317,7 +1400,7 @@ export async function parcelsEnrich(
     }
     return { county: resolvedCounty, count: 0, records: [] };
   }
-  const resp = await fetch(apiUrl('/api/parcels/enrich', { county: resolvedCounty }), {
+  const resp = await apiFetch(apiUrl('/api/parcels/enrich', { county: resolvedCounty }), {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -1339,6 +1422,92 @@ export async function parcelsEnrich(
   return data
 }
 
+export type EnrichmentEvidence = {
+  source: string;
+  retrieved_at: string;
+  url: string;
+  method: string;
+  raw_id?: string | null;
+  parsed_fields?: Record<string, unknown>;
+};
+
+export type EnrichmentResult = {
+  county: string;
+  parcel_id: string;
+  provider: string;
+  status: string;
+  fields?: Record<string, unknown>;
+  evidence?: EnrichmentEvidence[];
+  error?: string | null;
+};
+
+export type EnrichmentRequest = {
+  county: string;
+  parcel_ids: string[];
+  providers?: string[];
+  limit?: number;
+  force?: boolean;
+};
+
+export type EnrichmentResponse = {
+  ok: boolean;
+  county: string;
+  results: EnrichmentResult[];
+};
+
+export async function runEnrichment(payload: EnrichmentRequest): Promise<EnrichmentResponse> {
+  const resp = await apiFetch('/api/enrich', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  return (await resp.json()) as EnrichmentResponse;
+}
+
+export type TriggerEvaluateRequest = {
+  county: string;
+  parcel_ids: string[];
+  trigger_keys?: string[] | null;
+};
+
+export type TriggerEvaluateResult = {
+  parcel_id: string;
+  status: string;
+  triggers: TriggerEventRecord[];
+  evidence?: EnrichmentEvidence[];
+};
+
+export type TriggerEvaluateResponse = {
+  ok: boolean;
+  county: string;
+  results: TriggerEvaluateResult[];
+};
+
+export async function evaluateTriggers(payload: TriggerEvaluateRequest): Promise<TriggerEvaluateResponse> {
+  const resp = await apiFetch('/api/triggers/evaluate', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  return (await resp.json()) as TriggerEvaluateResponse;
+}
+
 export async function fetchParcelDetail(params: {
   parcel_id: string;
   county?: string;
@@ -1352,7 +1521,7 @@ export async function fetchParcelDetail(params: {
       include_fields: 1,
     },
   });
-  const resp = await fetch(url, { signal: params.signal });
+  const resp = await apiFetch(url, { signal: params.signal });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     const detail = text ? `: ${text}` : '';

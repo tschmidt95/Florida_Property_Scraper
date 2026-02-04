@@ -15,6 +15,7 @@ import { EditControl } from 'react-leaflet-draw';
 
 import {
   advancedSearch,
+  apiFetch,
   parcelsSearch,
   type ParcelRecord,
   type SearchResult,
@@ -163,7 +164,7 @@ export default function LegacyApp() {
     setLookupError(null);
     setLookupResult(null);
     try {
-      const resp = await fetch('/api/lookup/address', {
+      const resp = await apiFetch('/api/lookup/address', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({

@@ -13,7 +13,14 @@ import type { LatLngLiteral } from 'leaflet';
 import { FeatureGroup, MapContainer, TileLayer, GeoJSON, Circle, Marker, useMap, useMapEvents } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 
-import { advancedSearch, debugPing, parcelsSearch, type ParcelRecord, type SearchResult } from './lib/api';
+import {
+  advancedSearch,
+  apiFetch,
+  debugPing,
+  parcelsSearch,
+  type ParcelRecord,
+  type SearchResult,
+} from './lib/api';
 
 const LazyMapSearch = lazy(() => import('./pages/MapSearch'));
 const LazySafeMap = lazy(() => import('./pages/SafeMap'));
@@ -232,7 +239,7 @@ export default function App() {
     let cancelled = false;
     const load = async () => {
       try {
-        const resp = await fetch('/api/lookup/capabilities', {
+        const resp = await apiFetch('/api/lookup/capabilities', {
           headers: { Accept: 'application/json' },
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -302,7 +309,7 @@ export default function App() {
       if (liveFetchEnabled && liveFetchToggleDisabled) {
         throw new Error(`Live fetch is not available: ${liveFetchStatusText}`);
       }
-      const resp = await fetch('/api/lookup/address', {
+      const resp = await apiFetch('/api/lookup/address', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ county: selectedCounty.toLowerCase(), address: query, include_contacts: false, live: liveFetchEnabled }),
