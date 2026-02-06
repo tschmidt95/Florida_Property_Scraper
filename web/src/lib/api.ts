@@ -1423,36 +1423,52 @@ export async function parcelsEnrich(
 }
 
 export type EnrichmentEvidence = {
-  source: string;
-  retrieved_at: string;
-  url: string;
-  method: string;
-  raw_id?: string | null;
-  parsed_fields?: Record<string, unknown>;
-};
-
-export type EnrichmentResult = {
-  county: string;
+  provider_key: string;
+  provider_id?: string;
+  provider_name?: string;
+  county?: string;
   parcel_id: string;
-  provider: string;
-  status: string;
-  fields?: Record<string, unknown>;
-  evidence?: EnrichmentEvidence[];
-  error?: string | null;
+  field: string;
+  value: unknown;
+  confidence: number;
+  confidence_label?: string;
+  source: { source_type?: string | null; url?: string | null; label?: string | null };
+  fetched_at?: string;
+  retrieved_at: string;
+  content_hash: string;
+  extract_method: string;
+  raw_reference?: string | null;
+  raw_ref?: number | null;
 };
 
 export type EnrichmentRequest = {
   county: string;
   parcel_ids: string[];
   providers?: string[];
-  limit?: number;
-  force?: boolean;
+  provider_keys?: string[];
+  dry_run?: boolean;
+  fixture_mode?: boolean;
 };
 
 export type EnrichmentResponse = {
   ok: boolean;
-  county: string;
-  results: EnrichmentResult[];
+  mode: string;
+  dry_run?: boolean;
+  enriched: string[];
+  evidence: EnrichmentEvidence[];
+  merged_fields?: Record<string, Record<string, unknown>>;
+  provider_results?: Array<{
+    ok?: boolean;
+    provider_key?: string;
+    county?: string;
+    parcel_id?: string | null;
+    status?: string;
+    fetched_at?: string;
+    evidence_ids?: number[];
+    raw_artifacts?: Array<Record<string, unknown>>;
+    warnings?: string[];
+    errors?: string[];
+  }>;
 };
 
 export async function runEnrichment(payload: EnrichmentRequest): Promise<EnrichmentResponse> {
@@ -1475,20 +1491,24 @@ export async function runEnrichment(payload: EnrichmentRequest): Promise<Enrichm
 export type TriggerEvaluateRequest = {
   county: string;
   parcel_ids: string[];
-  trigger_keys?: string[] | null;
 };
 
-export type TriggerEvaluateResult = {
+export type TriggerEvaluateItem = {
+  trigger_key: string;
+  trigger_id?: string | null;
   parcel_id: string;
-  status: string;
-  triggers: TriggerEventRecord[];
-  evidence?: EnrichmentEvidence[];
+  fired: boolean;
+  severity: number;
+  reason: string;
+  evidence_ids: number[];
+  fields_used: string[];
+  evaluated_at: string;
 };
 
 export type TriggerEvaluateResponse = {
   ok: boolean;
   county: string;
-  results: TriggerEvaluateResult[];
+  results: TriggerEvaluateItem[];
 };
 
 export async function evaluateTriggers(payload: TriggerEvaluateRequest): Promise<TriggerEvaluateResponse> {

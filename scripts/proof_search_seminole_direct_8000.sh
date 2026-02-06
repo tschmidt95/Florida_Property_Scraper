@@ -3,6 +3,9 @@ set -euo pipefail
 
 BASE="http://127.0.0.1:8000"
 
+# shellcheck disable=SC1091
+source "/workspaces/Florida_Property_Scraper/scripts/_curl_json_helper.sh"
+
 stats_tmp="$(mktemp)"
 polygon_tmp="$(mktemp)"
 payload_tmp="$(mktemp)"
@@ -12,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl -fsS "$BASE/api/debug/db_stats?county=seminole" -o "$stats_tmp"
+curl_json_or_fail "$BASE/api/debug/db_stats?county=seminole" "$stats_tmp"
 
 python - <<'PY' "$stats_tmp" "$polygon_tmp"
 import json
@@ -48,17 +51,10 @@ with open(sys.argv[2], "w", encoding="utf-8") as f:
     json.dump(payload, f)
 PY
 
-http_status="$(curl -sS -o "$resp_tmp" -w "%{http_code}" \
-  -X POST "$BASE/api/parcels/search" \
+curl_json_or_fail "$BASE/api/parcels/search" "$resp_tmp" \
+  -X POST \
   -H "Content-Type: application/json" \
-  --data-binary "@$payload_tmp")"
-
-echo "status=$http_status"
-echo "raw_response=$resp_tmp"
-if [[ "$http_status" != "200" ]]; then
-  cat "$resp_tmp"
-  exit 2
-fi
+  --data-binary "@$payload_tmp"
 
 python - <<'PY' "$resp_tmp"
 import json

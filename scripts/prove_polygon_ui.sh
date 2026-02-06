@@ -16,6 +16,15 @@ export BASE_URL
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/_curl_json_helper.sh"
+
+ping_tmp="$(mktemp)"
+cleanup_tmp() {
+  rm -f "$ping_tmp"
+}
+trap cleanup_tmp EXIT
+
 wait_ping() {
   local tries="${1:-60}"
   for _ in $(seq 1 "$tries"); do
@@ -59,7 +68,8 @@ start_backend_if_needed() {
 start_backend_if_needed
 
 echo "== /api/debug/ping =="
-curl -sS "$BASE_URL/api/debug/ping" | python -m json.tool
+curl_json_or_fail "$BASE_URL/api/debug/ping" "$ping_tmp"
+python -m json.tool "$ping_tmp"
 
 python -u - <<'PY'
 import json

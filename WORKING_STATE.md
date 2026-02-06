@@ -37,3 +37,37 @@
 - Backend logs: `.logs/backend_8000.log`
 - UI logs: `.logs/ui_5173.log`
 - Startup scripts warn if local sqlite files are missing.
+- Proof scripts do not manage processes; use `scripts/start_*` to run services.
+
+## Evidence-first enrichment + triggers
+- `/api/enrich` returns `mode=evidence_only` with evidence rows and does not populate fields without evidence.
+- Evidence persists in `leads.sqlite` tables: `provider_fetch_log`, `provider_raw`, `provider_evidence`, `parcel_enrichment_snapshot`.
+- `/api/triggers/evaluate` returns all trigger keys; missing evidence returns `fired=false` with `reason=insufficient_evidence`.
+- Provider catalog endpoints: `/api/providers/catalog` and `/api/providers/status` (Seminole).
+- Evidence-only UI banner shows: "Not enriched yet (evidence-only)."
+
+## How enrichment works
+- Providers return evidence-only results with provider metadata (`provider_id`, `provider_name`, `county`, `parcel_id`, `fetched_at`).
+- Evidence includes `source_type`, `source_url`, `raw_reference`, `confidence_label`, `confidence` (score), `content_hash`, `extract_method`.
+- Only evidence with `confidence_label=high` is merged into fields (threshold configurable via `FPS_EVIDENCE_MIN_CONFIDENCE`).
+- Raw responses are stored in `provider_raw`; fetch metadata is logged in `provider_fetch_log`.
+- `provider_evidence` is upserted by `(provider_key, county, parcel_id, field, content_hash)`.
+- Enrichment snapshots select the best evidence per field (confidence, then recency).
+
+## How to add a new provider (official source)
+- Create a provider class in `src/florida_property_scraper/enrichment/providers/` implementing `PropertyProvider`.
+- Use fixture mode first: add sample JSON under `fixtures/providers/<provider_key>/`.
+- Store raw responses with `SQLiteStore.store_provider_raw` and evidence with `upsert_provider_evidence`.
+- Register the provider in `enrichment/providers/registry.py` and in `providers/catalog.py` (status `implemented`).
+
+## Manual ingest fallback
+- `/api/providers/manual_ingest` accepts JSON evidence bundles for a parcel.
+- Use for official-first data when no live connector is available yet.
+
+## How triggers are evaluated from evidence
+- Evaluation lives in `src/florida_property_scraper/triggers/evidence_rules.py`.
+- Each trigger rule references evidence fields and emits `evidence_ids` + `fields_used`.
+- Current evidence-based triggers: `permit_recent_major`, `code_enforcement_open_case`, `tax_delinquent`, `deed_transfer_recent`, `foreclosure_or_lis_pendens`, `owner_mailing_change`.
+
+## Still stubbed / placeholders
+- Live provider fetches beyond SQLite (code enforcement, courts, liens, utilities) remain placeholders pending external auth.

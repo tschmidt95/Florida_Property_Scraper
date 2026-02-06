@@ -713,6 +713,183 @@ class SQLiteStore:
             "CREATE INDEX IF NOT EXISTS idx_provider_enrichment_lookup ON provider_enrichment(county, parcel_id, provider)"
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS enrichment_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_url TEXT,
+                retrieved_at TEXT NOT NULL,
+                fields_json TEXT NOT NULL,
+                raw_json TEXT,
+                evidence_hash TEXT NOT NULL,
+                UNIQUE(evidence_hash)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enrichment_evidence_county_parcel ON enrichment_evidence(county, parcel_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enrichment_evidence_provider ON enrichment_evidence(provider_id, retrieved_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL UNIQUE,
+                county TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                error_text TEXT,
+                stats_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_runs_provider_time ON provider_runs(provider_id, started_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_runs_county_time ON provider_runs(county, started_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trigger_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                trigger_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                evidence_ids_json TEXT NOT NULL,
+                evaluated_at TEXT NOT NULL,
+                result_hash TEXT NOT NULL,
+                UNIQUE(result_hash)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trigger_results_county_parcel_time ON trigger_results(county, parcel_id, evaluated_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_fetch_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_key TEXT NOT NULL,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                request_fingerprint TEXT NOT NULL,
+                url TEXT NOT NULL,
+                http_status INTEGER,
+                fetched_at TEXT NOT NULL,
+                duration_ms INTEGER,
+                ok INTEGER NOT NULL DEFAULT 0,
+                error TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_fetch_log_provider_time ON provider_fetch_log(provider_key, fetched_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_fetch_log_parcel ON provider_fetch_log(county, parcel_id, fetched_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_raw (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_key TEXT NOT NULL,
+                county TEXT NOT NULL,
+                parcel_id TEXT,
+                url TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                content_type TEXT,
+                sha256 TEXT NOT NULL,
+                body_bytes INTEGER NOT NULL,
+                body_text_or_path TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_raw_provider_time ON provider_raw(provider_key, fetched_at DESC)"
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_key TEXT NOT NULL,
+                provider_name TEXT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                field TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                confidence_label TEXT,
+                source_type TEXT,
+                source_url TEXT,
+                fetched_at TEXT,
+                retrieved_at TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                extract_method TEXT NOT NULL,
+                raw_reference TEXT,
+                raw_snippet TEXT,
+                raw_id INTEGER,
+                UNIQUE(provider_key, county, parcel_id, field, content_hash)
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_evidence_parcel ON provider_evidence(county, parcel_id, retrieved_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_evidence_field ON provider_evidence(field, retrieved_at DESC)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_evidence_reference ON provider_evidence(provider_key, county, parcel_id, field, raw_reference, retrieved_at DESC)"
+        )
+
+        cur = self.conn.cursor()
+        cur.execute("PRAGMA table_info(provider_evidence)")
+        pe_cols = {row[1] for row in cur.fetchall()}
+        if "provider_name" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN provider_name TEXT")
+        if "confidence_label" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN confidence_label TEXT")
+        if "source_type" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN source_type TEXT")
+        if "fetched_at" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN fetched_at TEXT")
+        if "raw_reference" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN raw_reference TEXT")
+        if "raw_snippet" not in pe_cols:
+            self.conn.execute("ALTER TABLE provider_evidence ADD COLUMN raw_snippet TEXT")
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS parcel_enrichment_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                county TEXT NOT NULL,
+                parcel_id TEXT NOT NULL,
+                snapshot_at TEXT NOT NULL,
+                merged_fields_json TEXT NOT NULL,
+                evidence_ids_json TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parcel_enrichment_snapshot_parcel ON parcel_enrichment_snapshot(county, parcel_id, snapshot_at DESC)"
+        )
+
         self.conn.commit()
 
     @staticmethod
@@ -1043,6 +1220,563 @@ class SQLiteStore:
                 self._clean_json(result),
                 self._clean_json(evidence),
                 now,
+            ),
+        )
+        self.conn.commit()
+
+    def upsert_enrichment_evidence(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        provider_id: str,
+        source: str,
+        source_url: str | None,
+        retrieved_at: str,
+        fields: dict[str, Any],
+        raw: dict[str, Any] | None,
+        evidence_hash: str,
+    ) -> int | None:
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        prov = str(provider_id or "").strip().lower()
+        src = str(source or "").strip().lower()
+        evh = str(evidence_hash or "").strip()
+        if not county_key or not pid or not prov or not src or not evh:
+            return None
+
+        row = self.conn.execute(
+            "SELECT id FROM enrichment_evidence WHERE evidence_hash=? LIMIT 1",
+            (evh,),
+        ).fetchone()
+        if row:
+            return int(row["id"] or 0) or None
+
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO enrichment_evidence (
+                county, parcel_id, provider_id, source, source_url,
+                retrieved_at, fields_json, raw_json, evidence_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                county_key,
+                pid,
+                prov,
+                src,
+                source_url,
+                str(retrieved_at or "").strip(),
+                self._clean_json(fields or {}),
+                self._clean_json(raw or {}),
+                evh,
+            ),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM enrichment_evidence WHERE evidence_hash=? LIMIT 1",
+            (evh,),
+        ).fetchone()
+        if not row:
+            return None
+        return int(row["id"] or 0) or None
+
+    def list_enrichment_evidence_for_parcels(
+        self,
+        *,
+        county: str,
+        parcel_ids: List[str],
+        provider_ids: List[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        county_key = (county or "").strip().lower()
+        ids = [str(x or "").strip() for x in (parcel_ids or [])]
+        ids = [x for x in ids if x]
+        if not county_key or not ids:
+            return []
+
+        where = ["county=?"]
+        params: list[Any] = [county_key]
+
+        placeholders = ",".join(["?"] * len(ids))
+        where.append(f"parcel_id IN ({placeholders})")
+        params.extend(ids)
+
+        prov_ids = [str(p or "").strip().lower() for p in (provider_ids or [])]
+        prov_ids = [p for p in prov_ids if p]
+        if prov_ids:
+            prov_placeholders = ",".join(["?"] * len(prov_ids))
+            where.append(f"provider_id IN ({prov_placeholders})")
+            params.extend(prov_ids)
+
+        sql = "SELECT * FROM enrichment_evidence WHERE " + " AND ".join(where)
+        rows = self.conn.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            rec = dict(row)
+            try:
+                rec["fields"] = json.loads(rec.get("fields_json") or "{}")
+            except Exception:
+                rec["fields"] = {}
+            try:
+                rec["raw"] = json.loads(rec.get("raw_json") or "{}")
+            except Exception:
+                rec["raw"] = {}
+            out.append(rec)
+        return out
+
+    def create_provider_run(
+        self,
+        *,
+        run_id: str,
+        county: str,
+        provider_id: str,
+        started_at: str,
+        status: str = "running",
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO provider_runs (
+                run_id, county, provider_id, started_at, status
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                str(run_id or "").strip(),
+                (county or "").strip().lower(),
+                str(provider_id or "").strip().lower(),
+                str(started_at or "").strip(),
+                str(status or "").strip().lower(),
+            ),
+        )
+        self.conn.commit()
+
+    def finish_provider_run(
+        self,
+        *,
+        run_id: str,
+        finished_at: str,
+        status: str,
+        stats: dict[str, Any] | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE provider_runs
+            SET finished_at=?, status=?, stats_json=?, error_text=?
+            WHERE run_id=?
+            """,
+            (
+                str(finished_at or "").strip(),
+                str(status or "").strip().lower(),
+                self._clean_json(stats or {}),
+                error_text,
+                str(run_id or "").strip(),
+            ),
+        )
+        self.conn.commit()
+
+    def list_provider_runs(
+        self,
+        *,
+        county: str,
+        provider_id: str | None = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        county_key = (county or "").strip().lower()
+        if not county_key:
+            return []
+        lim = max(1, min(int(limit or 0) if str(limit).isdigit() else 50, 500))
+        where = ["county=?"]
+        params: list[Any] = [county_key]
+        if provider_id:
+            where.append("provider_id=?")
+            params.append(str(provider_id or "").strip().lower())
+        sql = "SELECT * FROM provider_runs WHERE " + " AND ".join(where) + " ORDER BY started_at DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            rec = dict(row)
+            try:
+                rec["stats"] = json.loads(rec.get("stats_json") or "{}")
+            except Exception:
+                rec["stats"] = {}
+            out.append(rec)
+        return out
+
+    def upsert_trigger_results(
+        self,
+        *,
+        run_id: str,
+        county: str,
+        results: List[Dict[str, Any]],
+    ) -> List[int]:
+        out_ids: list[int] = []
+        county_key = (county or "").strip().lower()
+        if not county_key or not results:
+            return out_ids
+
+        for r in results:
+            try:
+                evh = str(r.get("result_hash") or "").strip()
+                if not evh:
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO trigger_results (
+                        run_id, county, parcel_id, trigger_id,
+                        reason, evidence_ids_json, evaluated_at, result_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(run_id or "").strip(),
+                        county_key,
+                        str(r.get("parcel_id") or "").strip(),
+                        str(r.get("trigger_id") or "").strip(),
+                        str(r.get("reason") or "").strip(),
+                        self._clean_json(r.get("evidence_ids") or []),
+                        str(r.get("evaluated_at") or "").strip(),
+                        evh,
+                    ),
+                )
+                row = self.conn.execute(
+                    "SELECT id FROM trigger_results WHERE result_hash=? LIMIT 1",
+                    (evh,),
+                ).fetchone()
+                if row and row["id"]:
+                    out_ids.append(int(row["id"]))
+            except Exception:
+                continue
+
+        self.conn.commit()
+        return out_ids
+
+    def log_provider_fetch(
+        self,
+        *,
+        provider_key: str,
+        county: str,
+        parcel_id: str | None,
+        request_fingerprint: str,
+        url: str,
+        http_status: int | None,
+        fetched_at: str,
+        duration_ms: int | None,
+        ok: bool,
+        error: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO provider_fetch_log (
+                provider_key, county, parcel_id, request_fingerprint,
+                url, http_status, fetched_at, duration_ms, ok, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(provider_key or "").strip().lower(),
+                str(county or "").strip().lower(),
+                str(parcel_id or "").strip() or None,
+                str(request_fingerprint or "").strip(),
+                str(url or "").strip(),
+                int(http_status) if http_status is not None else None,
+                str(fetched_at or "").strip(),
+                int(duration_ms) if duration_ms is not None else None,
+                1 if ok else 0,
+                error,
+            ),
+        )
+        self.conn.commit()
+
+    def list_provider_fetch_log(
+        self,
+        *,
+        county: str,
+        provider_key: str | None = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        county_key = str(county or "").strip().lower()
+        if not county_key:
+            return []
+        lim = max(1, min(int(limit or 0) if str(limit).isdigit() else 50, 500))
+        where = ["county=?"]
+        params: list[Any] = [county_key]
+        if provider_key:
+            where.append("provider_key=?")
+            params.append(str(provider_key or "").strip().lower())
+        sql = "SELECT * FROM provider_fetch_log WHERE " + " AND ".join(where) + " ORDER BY fetched_at DESC LIMIT ?"
+        params.append(lim)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def _provider_raw_dir(self) -> Path:
+        raw_dir = os.getenv("PROVIDER_RAW_DIR", ".logs/provider_raw")
+        path = Path(raw_dir)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        return path
+
+    def store_provider_raw(
+        self,
+        *,
+        provider_key: str,
+        county: str,
+        parcel_id: str | None,
+        url: str,
+        fetched_at: str,
+        content_type: str | None,
+        body: bytes,
+        max_inline_bytes: int = 20000,
+    ) -> int | None:
+        raw = body or b""
+        sha256 = hashlib.sha256(raw).hexdigest()
+        body_len = len(raw)
+        text_or_path: str | None = None
+
+        if body_len <= max_inline_bytes:
+            try:
+                text_or_path = raw.decode("utf-8")
+            except Exception:
+                text_or_path = None
+
+        if text_or_path is None:
+            try:
+                path = self._provider_raw_dir() / f"{sha256}.bin"
+                path.write_bytes(raw)
+                text_or_path = str(path)
+            except Exception:
+                text_or_path = None
+
+        self.conn.execute(
+            """
+            INSERT INTO provider_raw (
+                provider_key, county, parcel_id, url,
+                fetched_at, content_type, sha256, body_bytes, body_text_or_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(provider_key or "").strip().lower(),
+                str(county or "").strip().lower(),
+                str(parcel_id or "").strip() or None,
+                str(url or "").strip(),
+                str(fetched_at or "").strip(),
+                str(content_type or "").strip() or None,
+                sha256,
+                int(body_len),
+                text_or_path,
+            ),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM provider_raw WHERE sha256=? ORDER BY id DESC LIMIT 1",
+            (sha256,),
+        ).fetchone()
+        if not row:
+            return None
+        return int(row["id"] or 0) or None
+
+    def upsert_provider_evidence(
+        self,
+        *,
+        provider_key: str,
+        provider_name: str | None,
+        county: str,
+        parcel_id: str,
+        field: str,
+        value: Any,
+        confidence: float,
+        confidence_label: str | None,
+        source_type: str | None,
+        source_url: str | None,
+        fetched_at: str | None,
+        retrieved_at: str,
+        content_hash: str,
+        extract_method: str,
+        raw_reference: str | None,
+        raw_snippet: str | None,
+        raw_id: int | None,
+    ) -> int | None:
+        prov = str(provider_key or "").strip().lower()
+        prov_name = str(provider_name or "").strip() or None
+        county_key = str(county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        field_key = str(field or "").strip()
+        chash = str(content_hash or "").strip()
+        if not prov or not county_key or not pid or not field_key or not chash:
+            return None
+
+        raw_ref = str(raw_reference or "").strip() or None
+        fetched = str(fetched_at or "").strip() or None
+        retrieved = str(retrieved_at or "").strip()
+
+        if raw_ref:
+            row = self.conn.execute(
+                """
+                SELECT id, retrieved_at FROM provider_evidence
+                WHERE provider_key=? AND county=? AND parcel_id=? AND field=? AND raw_reference=?
+                ORDER BY retrieved_at DESC
+                LIMIT 1
+                """,
+                (prov, county_key, pid, field_key, raw_ref),
+            ).fetchone()
+            if row:
+                prev_dt = self._iso_to_epoch_seconds(str(row["retrieved_at"] or ""))
+                next_dt = self._iso_to_epoch_seconds(retrieved)
+                if prev_dt >= next_dt and int(row["id"] or 0) > 0:
+                    return int(row["id"] or 0)
+
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO provider_evidence (
+                provider_key, provider_name, county, parcel_id, field, value_json,
+                confidence, confidence_label, source_type, source_url, fetched_at,
+                retrieved_at, content_hash, extract_method, raw_reference, raw_snippet, raw_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                prov,
+                prov_name,
+                county_key,
+                pid,
+                field_key,
+                self._clean_json(value),
+                float(confidence or 0.0),
+                str(confidence_label or "").strip() or None,
+                str(source_type or "").strip() or None,
+                source_url,
+                fetched,
+                retrieved,
+                chash,
+                str(extract_method or "").strip(),
+                raw_ref,
+                str(raw_snippet or "").strip() or None,
+                int(raw_id) if raw_id is not None else None,
+            ),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            """
+            SELECT id FROM provider_evidence
+            WHERE provider_key=? AND county=? AND parcel_id=? AND field=? AND content_hash=?
+            LIMIT 1
+            """,
+            (prov, county_key, pid, field_key, chash),
+        ).fetchone()
+        if not row:
+            return None
+        return int(row["id"] or 0) or None
+
+    def list_provider_evidence_for_parcels(
+        self,
+        *,
+        county: str,
+        parcel_ids: List[str],
+        provider_keys: List[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        county_key = str(county or "").strip().lower()
+        ids = [str(x or "").strip() for x in (parcel_ids or [])]
+        ids = [x for x in ids if x]
+        if not county_key or not ids:
+            return []
+
+        where = ["county=?"]
+        params: list[Any] = [county_key]
+
+        placeholders = ",".join(["?"] * len(ids))
+        where.append(f"parcel_id IN ({placeholders})")
+        params.extend(ids)
+
+        prov_keys = [str(p or "").strip().lower() for p in (provider_keys or [])]
+        prov_keys = [p for p in prov_keys if p]
+        if prov_keys:
+            prov_placeholders = ",".join(["?"] * len(prov_keys))
+            where.append(f"provider_key IN ({prov_placeholders})")
+            params.extend(prov_keys)
+
+        sql = "SELECT * FROM provider_evidence WHERE " + " AND ".join(where)
+        rows = self.conn.execute(sql, params).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            rec = dict(row)
+            try:
+                rec["value"] = json.loads(rec.get("value_json") or "null")
+            except Exception:
+                rec["value"] = None
+            out.append(rec)
+        return out
+
+    def build_enriched_fields(
+        self,
+        *,
+        evidence_rows: List[Dict[str, Any]],
+        min_confidence_label: str = "high",
+    ) -> tuple[dict[str, Any], list[int]]:
+        best: dict[str, dict[str, Any]] = {}
+        evidence_ids: list[int] = []
+
+        def _label_rank(label: str | None) -> int:
+            value = str(label or "").strip().lower()
+            if value == "high":
+                return 3
+            if value == "medium":
+                return 2
+            return 1
+
+        min_rank = _label_rank(min_confidence_label)
+
+        def _rank(ev: dict[str, Any]) -> tuple[float, int]:
+            conf = float(ev.get("confidence") or 0.0)
+            ts = self._iso_to_epoch_seconds(str(ev.get("retrieved_at") or ""))
+            return (conf, ts)
+
+        for ev in evidence_rows:
+            field = str(ev.get("field") or "").strip()
+            if not field:
+                continue
+            if _label_rank(ev.get("confidence_label")) < min_rank:
+                continue
+            current = best.get(field)
+            if current is None or _rank(ev) > _rank(current):
+                best[field] = ev
+
+        merged: dict[str, Any] = {}
+        for field, ev in best.items():
+            merged[field] = ev.get("value")
+            try:
+                evidence_ids.append(int(ev.get("id") or 0))
+            except Exception:
+                continue
+
+        all_ids: list[int] = []
+        for ev in evidence_rows:
+            try:
+                all_ids.append(int(ev.get("id") or 0))
+            except Exception:
+                continue
+        all_ids = [x for x in all_ids if x > 0]
+
+        return merged, (evidence_ids or all_ids)
+
+    def save_parcel_enrichment_snapshot(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+        snapshot_at: str,
+        merged_fields: Dict[str, Any],
+        evidence_ids: List[int],
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO parcel_enrichment_snapshot (
+                county, parcel_id, snapshot_at, merged_fields_json, evidence_ids_json
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                str(county or "").strip().lower(),
+                str(parcel_id or "").strip(),
+                str(snapshot_at or "").strip(),
+                self._clean_json(merged_fields or {}),
+                self._clean_json([int(x) for x in (evidence_ids or []) if int(x) > 0]),
             ),
         )
         self.conn.commit()

@@ -1,0 +1,24 @@
+{
+  "provider_key": "seminole_official_records",
+  "county": "seminole",
+  "records": [
+    {
+      "parcel_id": "SEM-0001",
+      "doc_type": "Warranty Deed",
+      "rec_date": "2026-01-15",
+      "consideration": 350000,
+      "book_page_or_instrument": "2026/000123",
+      "parties": "DOE JOHN -> SMITH JANE",
+      "source_url": "https://www.seminoleclerk.org/official-records/2026-000123"
+    },
+    {
+      "parcel_id": "SEM-0002",
+      "doc_type": "Lis Pendens",
+      "rec_date": "2026-01-10",
+      "consideration": null,
+      "book_page_or_instrument": "2026/000456",
+      "parties": "ACME BANK vs DOE JOHN",
+      "source_url": "https://www.seminoleclerk.org/official-records/2026-000456"
+    }
+  ]
+}

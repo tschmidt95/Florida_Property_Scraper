@@ -29,7 +29,7 @@ def _log_path() -> Path:
 
 def _write_event(payload: dict) -> None:
     try:
-        line = json.dumps(payload, ensure_ascii=False, default=str)
+        line = json.dumps(payload, ensure_ascii=True, default=str)
         path = _log_path()
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -44,6 +44,51 @@ def _signal_name(signum: int) -> str:
         return f"SIGNAL_{signum}"
 
 
+def _read_proc_cmdline(pid: int | None) -> str:
+    if not pid:
+        return ""
+    try:
+        path = Path(f"/proc/{int(pid)}/cmdline")
+        raw = path.read_bytes()
+        if not raw:
+            return ""
+        return " ".join([p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p])
+    except Exception:
+        return ""
+
+
+def _process_metadata() -> dict:
+    pid = os.getpid()
+    ppid = os.getppid()
+    try:
+        pgid = os.getpgid(pid)
+    except Exception:
+        pgid = None
+    try:
+        sid = os.getsid(pid)
+    except Exception:
+        sid = None
+    return {
+        "pid": pid,
+        "ppid": ppid,
+        "pgid": pgid,
+        "sid": sid,
+        "argv": list(sys.argv),
+        "ppid_cmdline": _read_proc_cmdline(ppid),
+    }
+
+
+def _emit_event(event: str, extra: dict | None = None) -> None:
+    payload = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        **_process_metadata(),
+    }
+    if extra:
+        payload.update(extra)
+    _write_event(payload)
+
+
 def _handle_signal(signum: int, frame) -> None:
     try:
         stack = "".join(traceback.format_stack(frame)) if frame is not None else ""
@@ -53,26 +98,23 @@ def _handle_signal(signum: int, frame) -> None:
     if len(stack) > 64000:
         stack = stack[-64000:]
 
-    payload = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "signal": _signal_name(signum),
-        "pid": os.getpid(),
-        "ppid": os.getppid(),
-        "thread": threading.current_thread().name,
-        "stack": stack,
-        "argv": list(sys.argv),
-    }
-    _write_event(payload)
+    _emit_event(
+        "signal",
+        {
+            "signal": _signal_name(signum),
+            "signal_num": int(signum),
+            "thread": threading.current_thread().name,
+            "stack": stack,
+        },
+    )
 
 
 def _handle_exit() -> None:
-    payload = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "event": "atexit",
-        "pid": os.getpid(),
-        "ppid": os.getppid(),
-    }
-    _write_event(payload)
+    _emit_event("atexit")
+
+
+def record_shutdown_event(reason: str = "shutdown") -> None:
+    _emit_event("shutdown", {"reason": str(reason)})
 
 
 def install_process_watch() -> None:
@@ -80,6 +122,11 @@ def install_process_watch() -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    try:
+        _log_path().touch(exist_ok=True)
+    except Exception:
+        pass
 
     for name in ("SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT"):
         sig = getattr(signal, name, None)
@@ -94,3 +141,5 @@ def install_process_watch() -> None:
         atexit.register(_handle_exit)
     except Exception:
         pass
+
+    _emit_event("watch_installed")

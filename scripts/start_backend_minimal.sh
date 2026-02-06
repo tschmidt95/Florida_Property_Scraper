@@ -11,30 +11,47 @@ fi
 mkdir -p .logs
 rm -f .logs/backend_8000.log || true
 
+listener_pid_for_port() {
+	local port="$1"
+	if [[ -z "$port" ]]; then
+		return 1
+	fi
+	if command -v lsof >/dev/null 2>&1; then
+		lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+		return 0
+	fi
+	if command -v ss >/dev/null 2>&1; then
+		ss -ltnp 2>/dev/null | awk -v p=":${port}" '$0 ~ p { if (match($0, /pid=([0-9]+)/, m)) { print m[1]; exit } }'
+		return 0
+	fi
+	return 1
+}
+
 is_listening_pid() {
-	local pid="$1"
-	if [[ -z "$pid" ]]; then
+	local port="$1"
+	local pid="$2"
+	if [[ -z "$pid" || -z "$port" ]]; then
 		return 1
 	fi
-	if ! command -v lsof >/dev/null 2>&1; then
-		return 1
-	fi
-	lsof -t -iTCP:8000 -sTCP:LISTEN 2>/dev/null | grep -q "^${pid}$"
+	local listener_pid
+	listener_pid="$(listener_pid_for_port "$port")"
+	[[ -n "$listener_pid" && "$listener_pid" == "$pid" ]]
 }
 
 if [[ -f .logs/backend_8000.pid ]]; then
 	pid=$(cat .logs/backend_8000.pid || true)
 	if [[ -n "$pid" ]] && ps -p "$pid" >/dev/null 2>&1; then
 		if curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+			listener_pid="$(listener_pid_for_port 8000)"
+			if [[ -n "$listener_pid" ]]; then
+				echo "$listener_pid" > .logs/backend_8000.pid
+			fi
 			echo "Backend already running (pid=$pid)"
 			exit 0
 		fi
-		if is_listening_pid "$pid"; then
-			kill "$pid" >/dev/null 2>&1 || true
-			sleep 1
-			if ps -p "$pid" >/dev/null 2>&1; then
-				kill -9 "$pid" >/dev/null 2>&1 || true
-			fi
+		if is_listening_pid 8000 "$pid"; then
+			echo "FAIL backend already listening on 8000 (pid=$pid)"
+			exit 2
 		fi
 	fi
 	rm -f .logs/backend_8000.pid || true
@@ -56,29 +73,32 @@ if curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
 	exit 0
 fi
 
+listener_pid="$(listener_pid_for_port 8000)"
+if [[ -n "$listener_pid" ]]; then
+	echo "FAIL port 8000 already in use (pid=$listener_pid)"
+	exit 2
+fi
+
 nohup python -m uvicorn florida_property_scraper.api.app:app --host 127.0.0.1 --port 8000 --workers 1 --log-level info > .logs/backend_8000.log 2>&1 &
 launcher_pid=$!
 echo "Backend starting (logs: .logs/backend_8000.log)"
 
 listener_pid=""
-if command -v lsof >/dev/null 2>&1; then
-	for i in {1..30}; do
-		listener_pid="$(lsof -t -iTCP:8000 -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
-		if [[ -n "$listener_pid" ]]; then
-			break
-		fi
-		if ! ps -p "$launcher_pid" >/dev/null 2>&1; then
-			break
-		fi
-		sleep 1
-	done
-else
-	echo "WARN lsof not found; using launcher pid for tracking"
-fi
+for i in {1..30}; do
+	listener_pid="$(listener_pid_for_port 8000)"
+	if [[ -n "$listener_pid" ]]; then
+		break
+	fi
+	if ! ps -p "$launcher_pid" >/dev/null 2>&1; then
+		break
+	fi
+	sleep 1
+done
 
 if [[ -n "$listener_pid" ]]; then
 	echo "$listener_pid" > .logs/backend_8000.pid
 else
+	echo "WARN listener pid not detected; tracking launcher pid"
 	echo "$launcher_pid" > .logs/backend_8000.pid
 fi
 

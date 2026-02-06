@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import json
+import hashlib
 import logging
 import os
 import re
@@ -20,7 +21,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from florida_property_scraper.debug.process_watch import install_process_watch
+from florida_property_scraper.debug.process_watch import install_process_watch, record_shutdown_event
 from florida_property_scraper.api.geojson import to_featurecollection
 from florida_property_scraper.cache import cache_get, cache_set
 from florida_property_scraper.feature_flags import get_flags
@@ -29,6 +30,12 @@ from florida_property_scraper.parcels.geometry_provider import parse_bbox
 from florida_property_scraper.parcels.geometry_registry import (
     get_provider as get_geometry_provider,
 )
+from florida_property_scraper.enrichment.providers.registry import (
+    get_property_provider,
+    get_property_providers,
+)
+from florida_property_scraper.enrichment.providers.model import compute_request_fingerprint
+from florida_property_scraper.triggers.evidence_rules import evaluate_triggers_from_evidence
 from florida_property_scraper.routers.registry import get_router
 from florida_property_scraper.registry import get_county as get_registry_county
 from florida_property_scraper.registry import normalize_county_slug, registry_payload
@@ -166,6 +173,285 @@ def _bad_request_response(detail: str, hint: str = "") -> JSONResponse:
 class ParcelsGeometryRequest(BaseModel):
     county: str
     parcel_ids: list[str]
+
+
+class EnrichRequest(BaseModel):
+    county: str
+    parcel_ids: list[str]
+    providers: list[str] | None = None
+    provider_keys: list[str] | None = None
+    dry_run: bool | None = None
+    fixture_mode: bool | None = None
+
+
+class ManualEvidenceItem(BaseModel):
+    field: str
+    value: Any
+    source_type: str
+    source_url: str
+    confidence_label: str | None = None
+    fetched_at: str | None = None
+    content_hash: str | None = None
+    extract_method: str | None = None
+    raw_reference: str | None = None
+    raw_snippet: str | None = None
+
+
+class ManualIngestRequest(BaseModel):
+    county: str
+    parcel_id: str
+    provider_key: str | None = None
+    fetched_at: str | None = None
+    evidence: list[ManualEvidenceItem]
+
+
+class ManualEvidenceIn(BaseModel):
+    field: str
+    value: Any
+    source_url: str
+    source_label: str | None = None
+    source_type: str
+    confidence_label: str
+    extract_method: str
+    content_hash: str | None = None
+    raw_reference: str | None = None
+    fetched_at: str | None = None
+
+
+class ManualIngestRequest(BaseModel):
+    county: str
+    parcel_id: str
+    provider_key: str | None = None
+    evidence: list[ManualEvidenceIn]
+    fetched_at: str | None = None
+
+
+class EvidenceSourceOut(BaseModel):
+    source_type: str | None = None
+    url: str | None = None
+    label: str | None = None
+
+
+class EvidenceOut(BaseModel):
+    provider_key: str
+    provider_id: str
+    provider_name: str
+    county: str
+    parcel_id: str
+    field: str
+    value: Any
+    confidence: float
+    confidence_label: str
+    source: EvidenceSourceOut
+    fetched_at: str
+    retrieved_at: str
+    content_hash: str
+    extract_method: str
+    raw_reference: str | None = None
+    raw_ref: int | None = None
+
+
+class ArtifactRefOut(BaseModel):
+    raw_id: int | None = None
+    url: str
+    content_type: str | None = None
+    sha256: str
+    body_bytes: int
+    storage_path: str | None = None
+
+
+class ProviderResultOut(BaseModel):
+    ok: bool
+    provider_key: str
+    county: str
+    parcel_id: str | None = None
+    status: str
+    fetched_at: str
+    evidence_ids: list[int]
+    raw_artifacts: list[ArtifactRefOut]
+    warnings: list[str]
+    errors: list[str]
+
+
+class EnrichResponse(BaseModel):
+    ok: bool
+    mode: str
+    dry_run: bool
+    enriched: list[str]
+    evidence: list[EvidenceOut]
+    merged_fields: dict[str, dict[str, Any]]
+    provider_results: list[ProviderResultOut]
+
+
+class TriggerEvaluateRequest(BaseModel):
+    county: str
+    parcel_ids: list[str]
+
+
+class TriggerEvaluateItem(BaseModel):
+    trigger_key: str
+    trigger_id: str | None = None
+    parcel_id: str
+    fired: bool
+    severity: int
+    reason: str
+    evidence_ids: list[int]
+    fields_used: list[str]
+    evaluated_at: str
+
+
+class TriggerEvaluateResponse(BaseModel):
+    ok: bool
+    county: str
+    results: list[TriggerEvaluateItem]
+
+
+class ProviderCatalogEntryOut(BaseModel):
+    provider_id: str
+    category: str
+    method: str
+    supports_counties: list[str]
+    target_ids: list[str]
+    base_url: str
+    supported_fields: list[str]
+    rate_limit: dict[str, int] | None = None
+    status: str
+    notes: str | None = None
+
+
+class ProviderCatalogResponse(BaseModel):
+    ok: bool
+    county: str
+    providers: list[ProviderCatalogEntryOut]
+
+
+class ManualIngestResponse(BaseModel):
+    ok: bool
+    provider_key: str
+    parcel_id: str
+    evidence_ids: list[int]
+    warnings: list[str]
+    errors: list[str]
+
+
+class ProviderStatusEntry(BaseModel):
+    provider_id: str
+    category: str
+    base_url: str
+    status: str
+    last_run_at: str | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+
+
+class ProviderStatusResponse(BaseModel):
+    ok: bool
+    county: str
+    providers: list[ProviderStatusEntry]
+
+
+def _compact_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, v in (fields or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        out[str(k)] = v
+    return out
+
+
+def _maybe_url(value: Any) -> str | None:
+    try:
+        s = str(value or "").strip()
+        if not s:
+            return None
+        if s.startswith("http://") or s.startswith("https://"):
+            return s
+    except Exception:
+        return None
+    return None
+
+
+def _evidence_hash(
+    *,
+    county: str,
+    parcel_id: str,
+    provider_id: str,
+    source: str,
+    source_url: str | None,
+    fields: dict[str, Any],
+) -> str:
+    payload = {
+        "county": str(county or "").strip().lower(),
+        "parcel_id": str(parcel_id or "").strip(),
+        "provider_id": str(provider_id or "").strip().lower(),
+        "source": str(source or "").strip().lower(),
+        "source_url": str(source_url or "").strip(),
+        "fields": fields or {},
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _trigger_result_hash(
+    *,
+    county: str,
+    parcel_id: str,
+    trigger_id: str,
+    reason: str,
+    evidence_ids: list[int],
+) -> str:
+    payload = {
+        "county": str(county or "").strip().lower(),
+        "parcel_id": str(parcel_id or "").strip(),
+        "trigger_id": str(trigger_id or "").strip(),
+        "reason": str(reason or "").strip(),
+        "evidence_ids": sorted({int(x) for x in evidence_ids if int(x) > 0}),
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _run_with_retries(
+    fn,
+    *,
+    retries: int = 2,
+    sleep_s: float = 0.25,
+    logger: logging.Logger | None = None,
+    label: str = "",
+) -> Any:
+    last_err: Exception | None = None
+    for attempt in range(int(retries) + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if logger is not None:
+                logger.warning("retry %s (%s/%s): %s", label, attempt + 1, retries + 1, e)
+            if attempt < int(retries):
+                time.sleep(float(sleep_s) * float(attempt + 1))
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("retry failed")
+
+
+def _safe_error_response(*, error: str, detail: str, status_code: int = 500) -> JSONResponse:
+    trace_id = uuid.uuid4().hex[:12]
+    _record_last_error(trace_id)
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": str(error),
+            "detail": str(detail),
+            "correlation_id": trace_id,
+        },
+        status_code=status_code,
+    )
+
+
+def _fixture_mode_default() -> bool:
+    return str(os.getenv("FPS_PROVIDER_FIXTURES", "1")).strip().lower() in {"1", "true", "yes"}
 
 
 def _health_payload() -> dict[str, Any]:
@@ -419,26 +705,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    trace_id = uuid.uuid4().hex[:12]
-    _record_last_error(trace_id)
-    try:
-        path = str(request.url.path or "")
-    except Exception:
-        path = ""
-    payload = {
-        "error": "server_error",
-        "detail": str(exc),
-        "hint": "Check server logs for details",
-        "trace_id": trace_id,
-        "path": path,
-    }
-    if _should_wrap_error(request):
-        payload["ok"] = False
-    return JSONResponse(payload, status_code=500)
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
     if not _should_wrap_error(request):
         return JSONResponse(
             {"detail": "Internal Server Error"},
@@ -505,6 +771,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
         stack = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     trace_id = uuid.uuid4().hex[:12]
+    _record_last_error(trace_id)
     return JSONResponse(
         _error_payload(
             message=str(exc),
@@ -815,7 +1082,9 @@ if app:
     def api_parcels_search(request: Request, payload: dict = Body(default={})): 
         try:
             return _api_parcels_search_impl(request, payload)
-        except Exception as exc:
+        except BaseException as exc:
+            if isinstance(exc, KeyboardInterrupt):
+                raise
             error_id = uuid.uuid4().hex[:12]
             correlation_id = ""
             try:
@@ -6373,6 +6642,875 @@ if app:
 
         return out
 
+    def _select_provider_entries(
+        *,
+        county_key: str,
+        providers: list[str] | None,
+        default_categories: list[str],
+    ) -> list[ProviderCatalogEntryOut]:
+        from florida_property_scraper.providers.catalog import get_provider_catalog
+
+        entries = get_provider_catalog(county_key)
+        by_id = {e.provider_id: e for e in entries}
+        by_cat: dict[str, list] = {}
+        for e in entries:
+            by_cat.setdefault(e.category, []).append(e)
+
+        selected: list = []
+        if providers:
+            for p in providers:
+                key = str(p or "").strip().lower()
+                if not key:
+                    continue
+                if key in by_id:
+                    selected.append(by_id[key])
+                    continue
+                if key in by_cat:
+                    selected.extend(by_cat[key])
+        else:
+            for cat in default_categories:
+                selected.extend(by_cat.get(cat, []))
+
+        deduped: dict[str, ProviderCatalogEntryOut] = {}
+        for e in selected:
+            try:
+                deduped[e.provider_id] = ProviderCatalogEntryOut(
+                    provider_id=e.provider_id,
+                    category=e.category,
+                    base_url=e.base_url,
+                    supported_fields=list(e.supported_fields),
+                    rate_limit=e.rate_limit,
+                    status=e.status,
+                    notes=e.notes,
+                )
+            except Exception:
+                continue
+        return list(deduped.values())
+
+    def _fetch_evidence_for_provider(
+        *,
+        store: Any,
+        county_key: str,
+        parcel_ids: list[str],
+        provider: ProviderCatalogEntryOut,
+        now_iso: str,
+        logger: logging.Logger,
+    ) -> list[dict[str, Any]]:
+        if not parcel_ids:
+            return []
+
+        placeholders = ",".join(["?"] * len(parcel_ids))
+        params = [county_key, *parcel_ids]
+
+        evidence: list[dict[str, Any]] = []
+        category = str(provider.category or "").strip().lower()
+        source = ""
+        sql = ""
+
+        if category == "permits":
+            source = "permit"
+            sql = f"SELECT * FROM permits WHERE county=? AND parcel_id IN ({placeholders})"
+        elif category == "official_records":
+            source = "official_record"
+            sql = f"SELECT * FROM official_records WHERE county=? AND parcel_id IN ({placeholders})"
+        elif category == "tax":
+            source = "tax"
+            sql = f"SELECT * FROM tax_collector_events WHERE county=? AND parcel_id IN ({placeholders})"
+        elif category == "code_enforcement":
+            source = "code_enforcement"
+            sql = f"SELECT * FROM code_enforcement_events WHERE county=? AND parcel_id IN ({placeholders})"
+        else:
+            return []
+
+        rows = store.conn.execute(sql, params).fetchall()
+        for row in rows:
+            rec = dict(row)
+            parcel_id = str(rec.get("parcel_id") or "").strip()
+            if not parcel_id:
+                continue
+
+            fields: dict[str, Any] = {}
+            if category == "permits":
+                fields = _compact_fields(
+                    {
+                        "permit_number": rec.get("permit_number"),
+                        "permit_type": rec.get("permit_type"),
+                        "status": rec.get("status"),
+                        "issue_date": rec.get("issue_date"),
+                        "final_date": rec.get("final_date"),
+                        "description": rec.get("description"),
+                        "address": rec.get("address"),
+                    }
+                )
+            elif category == "official_records":
+                fields = _compact_fields(
+                    {
+                        "doc_type": rec.get("doc_type"),
+                        "rec_date": rec.get("rec_date"),
+                        "parties": rec.get("parties"),
+                        "book_page_or_instrument": rec.get("book_page_or_instrument"),
+                        "consideration": rec.get("consideration"),
+                        "owner_name": rec.get("owner_name"),
+                        "address": rec.get("address"),
+                    }
+                )
+            elif category == "tax":
+                fields = _compact_fields(
+                    {
+                        "event_type": rec.get("event_type"),
+                        "event_date": rec.get("event_date"),
+                        "amount_due": rec.get("amount_due"),
+                        "status": rec.get("status"),
+                        "description": rec.get("description"),
+                    }
+                )
+            elif category == "code_enforcement":
+                fields = _compact_fields(
+                    {
+                        "event_type": rec.get("event_type"),
+                        "event_date": rec.get("event_date"),
+                        "case_number": rec.get("case_number"),
+                        "status": rec.get("status"),
+                        "description": rec.get("description"),
+                        "fine_amount": rec.get("fine_amount"),
+                        "lien_amount": rec.get("lien_amount"),
+                    }
+                )
+
+            source_url = _maybe_url(rec.get("source"))
+            evidence_hash = _evidence_hash(
+                county=county_key,
+                parcel_id=parcel_id,
+                provider_id=provider.provider_id,
+                source=source,
+                source_url=source_url,
+                fields=fields,
+            )
+
+            evidence_id = store.upsert_enrichment_evidence(
+                county=county_key,
+                parcel_id=parcel_id,
+                provider_id=provider.provider_id,
+                source=source,
+                source_url=source_url,
+                retrieved_at=now_iso,
+                fields=fields,
+                raw=rec,
+                evidence_hash=evidence_hash,
+            )
+
+            if evidence_id is None:
+                logger.warning("evidence insert failed: %s %s", provider.provider_id, parcel_id)
+                continue
+
+            evidence.append(
+                {
+                    "id": evidence_id,
+                    "parcel_id": parcel_id,
+                    "provider_id": provider.provider_id,
+                    "source": source,
+                    "source_url": source_url,
+                    "retrieved_at": now_iso,
+                    "fields": fields,
+                }
+            )
+        return evidence
+
+    def _evaluate_triggers_from_evidence(
+        *,
+        county_key: str,
+        evidence_rows: list[dict[str, Any]],
+        now_iso: str,
+    ) -> list[dict[str, Any]]:
+        by_key: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def _add_trigger(
+            *,
+            parcel_id: str,
+            trigger_id: str,
+            reason: str,
+            evidence_id: int,
+        ) -> None:
+            k = (parcel_id, trigger_id)
+            entry = by_key.get(k)
+            if entry is None:
+                entry = {
+                    "parcel_id": parcel_id,
+                    "trigger_id": trigger_id,
+                    "reason": reason,
+                    "evidence_ids": set(),
+                    "evaluated_at": now_iso,
+                }
+                by_key[k] = entry
+            try:
+                entry["evidence_ids"].add(int(evidence_id))
+            except Exception:
+                pass
+
+        for ev in evidence_rows:
+            parcel_id = str(ev.get("parcel_id") or "").strip()
+            if not parcel_id:
+                continue
+            ev_id = int(ev.get("id") or 0)
+            if ev_id <= 0:
+                continue
+
+            source = str(ev.get("source") or "").strip().lower()
+            fields = ev.get("fields") or {}
+
+            if source == "permit":
+                _add_trigger(
+                    parcel_id=parcel_id,
+                    trigger_id="permit_filed",
+                    reason=f"permit_number={fields.get('permit_number') or ''}".strip(),
+                    evidence_id=ev_id,
+                )
+                ptype = str(fields.get("permit_type") or "").strip().lower()
+                if "hvac" in ptype:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="permit_hvac",
+                        reason=f"permit_type={fields.get('permit_type')}",
+                        evidence_id=ev_id,
+                    )
+                if "roof" in ptype:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="permit_roof",
+                        reason=f"permit_type={fields.get('permit_type')}",
+                        evidence_id=ev_id,
+                    )
+                if "electrical" in ptype or "electric" in ptype:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="permit_electrical",
+                        reason=f"permit_type={fields.get('permit_type')}",
+                        evidence_id=ev_id,
+                    )
+
+            if source == "official_record":
+                doc_type = str(fields.get("doc_type") or "").strip().lower()
+                if "deed" in doc_type or "warranty" in doc_type or "quitclaim" in doc_type:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="ownership_change",
+                        reason=f"doc_type={fields.get('doc_type')}",
+                        evidence_id=ev_id,
+                    )
+
+            if source == "tax":
+                event_type = str(fields.get("event_type") or "").strip().lower()
+                status = str(fields.get("status") or "").strip().lower()
+                if "delinquent" in event_type or "delinquent" in status:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="tax_delinquent",
+                        reason=f"event_type={fields.get('event_type')}",
+                        evidence_id=ev_id,
+                    )
+
+            if source == "code_enforcement":
+                event_type = str(fields.get("event_type") or "").strip().lower()
+                if "case_opened" in event_type or "case opened" in event_type or "code_case_opened" in event_type:
+                    _add_trigger(
+                        parcel_id=parcel_id,
+                        trigger_id="code_case_opened",
+                        reason=f"event_type={fields.get('event_type')}",
+                        evidence_id=ev_id,
+                    )
+
+        out: list[dict[str, Any]] = []
+        for entry in by_key.values():
+            ev_ids = sorted(int(x) for x in (entry.get("evidence_ids") or []) if int(x) > 0)
+            out.append(
+                {
+                    "parcel_id": entry.get("parcel_id"),
+                    "trigger_id": entry.get("trigger_id"),
+                    "reason": entry.get("reason") or "",
+                    "evidence_ids": ev_ids,
+                    "evaluated_at": entry.get("evaluated_at") or now_iso,
+                }
+            )
+        return out
+
+    @app.get("/api/providers/catalog", response_model=ProviderCatalogResponse)
+    def providers_catalog(county: str = "seminole") -> ProviderCatalogResponse:
+        try:
+            county_key = (county or "").strip().lower() or "seminole"
+            providers = _select_provider_entries(
+                county_key=county_key,
+                providers=None,
+                default_categories=[
+                    "permits",
+                    "official_records",
+                    "tax",
+                    "code_enforcement",
+                    "courts",
+                    "liens",
+                    "utilities",
+                    "manual",
+                ],
+            )
+            implemented = {p.key for p in get_property_providers(county=county_key) if p.implemented}
+            out: list[ProviderCatalogEntryOut] = []
+            for p in providers:
+                status = "implemented" if p.provider_id in implemented else "not_implemented"
+                out.append(
+                    ProviderCatalogEntryOut(
+                        provider_id=p.provider_id,
+                        category=p.category,
+                        method=p.method,
+                        supports_counties=p.supports_counties,
+                        target_ids=p.target_ids,
+                        base_url=p.base_url,
+                        supported_fields=p.supported_fields,
+                        rate_limit=p.rate_limit,
+                        status=status,
+                        notes=p.notes,
+                    )
+                )
+            return ProviderCatalogResponse(ok=True, county=county_key, providers=out)
+        except Exception as exc:
+            return _safe_error_response(error="providers_catalog_failed", detail=str(exc), status_code=500)
+
+    @app.get("/api/providers/status", response_model=ProviderStatusResponse)
+    def providers_status(county: str = "seminole") -> ProviderStatusResponse:
+        from florida_property_scraper.storage import SQLiteStore
+
+        try:
+            county_key = (county or "").strip().lower() or "seminole"
+            providers = _select_provider_entries(
+                county_key=county_key,
+                providers=None,
+                default_categories=[
+                    "permits",
+                    "official_records",
+                    "tax",
+                    "code_enforcement",
+                    "courts",
+                    "liens",
+                    "utilities",
+                ],
+            )
+
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            store = SQLiteStore(db_path)
+            try:
+                out: list[ProviderStatusEntry] = []
+                for p in providers:
+                    rows = store.list_provider_fetch_log(county=county_key, provider_key=p.provider_id, limit=1)
+                    last = rows[0] if rows else None
+                    status = "unknown"
+                    last_status = None
+                    last_error = None
+                    last_run_at = None
+                    if isinstance(last, dict):
+                        last_run_at = last.get("fetched_at")
+                        ok_flag = int(last.get("ok") or 0)
+                        last_status = "ok" if ok_flag == 1 else "error"
+                        last_error = last.get("error")
+                        status = last_status
+                    out.append(
+                        ProviderStatusEntry(
+                            provider_id=p.provider_id,
+                            category=p.category,
+                            base_url=p.base_url,
+                            status=status,
+                            last_run_at=last_run_at,
+                            last_status=last_status,
+                            last_error=last_error,
+                        )
+                    )
+            finally:
+                store.close()
+            return ProviderStatusResponse(ok=True, county=county_key, providers=out)
+        except Exception as exc:
+            return _safe_error_response(error="providers_status_failed", detail=str(exc), status_code=500)
+
+    @app.post("/api/providers/manual_ingest", response_model=ManualIngestResponse)
+    def manual_ingest(payload: ManualIngestRequest) -> ManualIngestResponse:
+        from florida_property_scraper.storage import SQLiteStore
+        from florida_property_scraper.enrichment.providers.model import (
+            compute_content_hash,
+            confidence_score_from_label,
+            normalize_confidence_label,
+        )
+
+        try:
+            county_key = (payload.county or "").strip().lower()
+            parcel_id = str(payload.parcel_id or "").strip()
+            if not county_key or not parcel_id:
+                return _safe_error_response(error="bad_request", detail="county and parcel_id are required", status_code=400)
+
+            provider_key = str(payload.provider_key or "manual_ingest").strip().lower()
+            if not provider_key:
+                provider_key = "manual_ingest"
+
+            evidence_items = payload.evidence or []
+            if not evidence_items:
+                return ManualIngestResponse(
+                    ok=True,
+                    provider_key=provider_key,
+                    parcel_id=parcel_id,
+                    evidence_ids=[],
+                    warnings=["no_evidence"],
+                    errors=[],
+                )
+
+            now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            fetched_at = str(payload.fetched_at or "").strip() or now_iso
+
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            store = SQLiteStore(db_path)
+            evidence_ids: list[int] = []
+            warnings: list[str] = []
+            errors: list[str] = []
+
+            try:
+                for ev in evidence_items:
+                    field = str(ev.field or "").strip()
+                    source_url = str(ev.source_url or "").strip()
+                    source_type = str(ev.source_type or "").strip().lower()
+                    if not field or not source_url or not source_type:
+                        warnings.append("skipped_evidence_missing_required_fields")
+                        continue
+
+                    confidence_label = normalize_confidence_label(ev.confidence_label)
+                    confidence_score = confidence_score_from_label(confidence_label)
+                    content_hash = str(ev.content_hash or "").strip() or compute_content_hash(
+                        field=field,
+                        value=ev.value,
+                        source_url=source_url,
+                    )
+
+                    ev_id = store.upsert_provider_evidence(
+                        provider_key=provider_key,
+                        provider_name="Manual Ingest",
+                        county=county_key,
+                        parcel_id=parcel_id,
+                        field=field,
+                        value=ev.value,
+                        confidence=confidence_score,
+                        confidence_label=confidence_label,
+                        source_type=source_type,
+                        source_url=source_url,
+                        fetched_at=fetched_at,
+                        retrieved_at=str(ev.fetched_at or "").strip() or fetched_at,
+                        content_hash=content_hash,
+                        extract_method=str(ev.extract_method or "").strip() or "manual_ingest",
+                        raw_reference=str(ev.raw_reference or "").strip() or None,
+                        raw_snippet=str(ev.raw_snippet or "").strip() or None,
+                        raw_id=None,
+                    )
+                    if ev_id:
+                        evidence_ids.append(ev_id)
+            finally:
+                store.close()
+
+            if evidence_ids:
+                store = SQLiteStore(db_path)
+                try:
+                    store.log_provider_fetch(
+                        provider_key=provider_key,
+                        county=county_key,
+                        parcel_id=parcel_id,
+                        request_fingerprint=compute_request_fingerprint(
+                            provider_key=provider_key,
+                            county=county_key,
+                            parcel_id=parcel_id,
+                            url=f"manual_ingest://{parcel_id}",
+                        ),
+                        url=f"manual_ingest://{parcel_id}",
+                        http_status=200,
+                        fetched_at=fetched_at,
+                        duration_ms=0,
+                        ok=True,
+                        error=None,
+                    )
+                finally:
+                    store.close()
+
+            return ManualIngestResponse(
+                ok=True,
+                provider_key=provider_key,
+                parcel_id=parcel_id,
+                evidence_ids=evidence_ids,
+                warnings=warnings,
+                errors=errors,
+            )
+        except Exception as exc:
+            return _safe_error_response(error="manual_ingest_failed", detail=str(exc), status_code=500)
+
+    @app.get("/api/debug/provider_evidence")
+    def debug_provider_evidence(county: str = "seminole", parcel_id: str = "", limit: int = 50):
+        from florida_property_scraper.storage import SQLiteStore
+
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        if not county_key or not pid:
+            return _bad_request_response("county and parcel_id are required")
+
+        db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+        store = SQLiteStore(db_path)
+        try:
+            rows = store.list_provider_evidence_for_parcels(county=county_key, parcel_ids=[pid])
+        finally:
+            store.close()
+
+        lim = max(1, min(int(limit or 50), 200))
+        trimmed = []
+        for row in rows[:lim]:
+            trimmed.append(
+                {
+                    "id": row.get("id"),
+                    "provider_key": row.get("provider_key"),
+                    "provider_name": row.get("provider_name"),
+                    "field": row.get("field"),
+                    "value": row.get("value"),
+                    "confidence": row.get("confidence"),
+                    "confidence_label": row.get("confidence_label"),
+                    "fetched_at": row.get("fetched_at"),
+                    "retrieved_at": row.get("retrieved_at"),
+                    "source_url": row.get("source_url"),
+                    "source_type": row.get("source_type"),
+                    "raw_reference": row.get("raw_reference"),
+                    "raw_snippet": row.get("raw_snippet"),
+                }
+            )
+
+        return {
+            "ok": True,
+            "county": county_key,
+            "parcel_id": pid,
+            "count": len(rows),
+            "evidence": trimmed,
+        }
+
+    @app.post("/api/enrich", response_model=EnrichResponse)
+    def enrich(payload: EnrichRequest) -> EnrichResponse:
+        from florida_property_scraper.storage import SQLiteStore
+        from florida_property_scraper.enrichment.providers.model import EvidenceItem
+
+        try:
+            logger = logging.getLogger("fps.enrich")
+            county_key = (payload.county or "").strip().lower()
+            if not county_key:
+                return _safe_error_response(error="bad_request", detail="county is required", status_code=400)
+
+            parcel_ids = [str(p or "").strip() for p in (payload.parcel_ids or [])]
+            parcel_ids = [p for p in parcel_ids if p]
+            if not parcel_ids:
+                return EnrichResponse(
+                    ok=True,
+                    mode="evidence_only",
+                    dry_run=bool(payload.dry_run),
+                    enriched=[],
+                    evidence=[],
+                    merged_fields={},
+                    provider_results=[],
+                )
+
+            if len(parcel_ids) > 500:
+                logger.warning("enrich: parcel_ids capped (got %s)", len(parcel_ids))
+                parcel_ids = parcel_ids[:500]
+
+            provider_keys = payload.provider_keys or payload.providers or []
+            provider_keys = [str(p or "").strip().lower() for p in provider_keys if str(p or "").strip()]
+
+            providers: list[tuple[str, Any]] = []
+            if provider_keys:
+                for key in provider_keys:
+                    provider = get_property_provider(provider_key=key)
+                    providers.append((key, provider))
+            else:
+                providers = [(p.key, p) for p in get_property_providers(county=county_key)]
+
+            dry_run = bool(payload.dry_run)
+            fixture_mode = bool(payload.fixture_mode) if payload.fixture_mode is not None else _fixture_mode_default()
+
+            now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            store = SQLiteStore(db_path)
+
+            provider_results: list[ProviderResultOut] = []
+            evidence_out: list[EvidenceOut] = []
+
+            try:
+                for pid in parcel_ids:
+                    for provider_key, provider in providers:
+                        if provider is None:
+                            provider_results.append(
+                                ProviderResultOut(
+                                    ok=True,
+                                    provider_key=provider_key,
+                                    county=county_key,
+                                    parcel_id=pid,
+                                    status="not_supported",
+                                    fetched_at=now_iso,
+                                    evidence_ids=[],
+                                    raw_artifacts=[],
+                                    warnings=[],
+                                    errors=[],
+                                )
+                            )
+                            continue
+
+                        start_ts = time.perf_counter()
+                        result = provider.fetch(
+                            county=county_key,
+                            parcel_id=pid,
+                            dry_run=dry_run,
+                            fixture_mode=fixture_mode,
+                            store=store,
+                        )
+                        elapsed_ms = int((time.perf_counter() - start_ts) * 1000)
+
+                        evidence_ids: list[int] = []
+                        local_warnings: list[str] = []
+
+                        for ev in result.evidence:
+                            if not isinstance(ev, EvidenceItem):
+                                continue
+                            if not ev.field or not ev.content_hash:
+                                local_warnings.append("invalid_evidence_missing_field_or_hash")
+                                continue
+                            if str(ev.provider_id or "").strip().lower() != str(result.provider_key or "").strip().lower():
+                                local_warnings.append("invalid_evidence_provider_id_mismatch")
+                                continue
+                            if str(ev.county or "").strip().lower() != county_key:
+                                local_warnings.append("invalid_evidence_county_mismatch")
+                                continue
+                            if str(ev.parcel_id or "").strip() != pid:
+                                local_warnings.append("invalid_evidence_parcel_mismatch")
+                                continue
+                            if not str(ev.source.source_type or "").strip():
+                                local_warnings.append("invalid_evidence_missing_source_type")
+                                continue
+                            if not str(ev.confidence_label or "").strip():
+                                local_warnings.append("invalid_evidence_missing_confidence")
+                                continue
+                            provider_name = str(ev.provider_name or "").strip() or str(result.provider_key or "").strip()
+                            ev_id = store.upsert_provider_evidence(
+                                provider_key=result.provider_key,
+                                provider_name=provider_name,
+                                county=county_key,
+                                parcel_id=pid,
+                                field=ev.field,
+                                value=ev.value,
+                                confidence=ev.confidence_score,
+                                confidence_label=ev.confidence_label,
+                                source_type=ev.source.source_type,
+                                source_url=ev.source.url,
+                                fetched_at=ev.fetched_at,
+                                retrieved_at=ev.retrieved_at,
+                                content_hash=ev.content_hash,
+                                extract_method=ev.extract_method,
+                                raw_reference=ev.raw_reference,
+                                raw_snippet=ev.raw_snippet,
+                                raw_id=ev.raw_ref,
+                            )
+                            if ev_id:
+                                evidence_ids.append(ev_id)
+                                evidence_out.append(
+                                    EvidenceOut(
+                                        provider_key=result.provider_key,
+                                        provider_id=ev.provider_id,
+                                        provider_name=provider_name,
+                                        county=county_key,
+                                        parcel_id=pid,
+                                        field=ev.field,
+                                        value=ev.value,
+                                        confidence=ev.confidence_score,
+                                        confidence_label=ev.confidence_label,
+                                        source=EvidenceSourceOut(
+                                            source_type=ev.source.source_type,
+                                            url=ev.source.url,
+                                            label=ev.source.label,
+                                        ),
+                                        fetched_at=ev.fetched_at,
+                                        retrieved_at=ev.retrieved_at,
+                                        content_hash=ev.content_hash,
+                                        extract_method=ev.extract_method,
+                                        raw_reference=ev.raw_reference,
+                                        raw_ref=ev.raw_ref,
+                                    )
+                                )
+
+                        provider_results.append(
+                            ProviderResultOut(
+                                ok=result.ok,
+                                provider_key=result.provider_key,
+                                county=county_key,
+                                parcel_id=pid,
+                                status=result.status,
+                                fetched_at=result.fetched_at,
+                                evidence_ids=evidence_ids,
+                                raw_artifacts=[
+                                    ArtifactRefOut(
+                                        raw_id=a.raw_id,
+                                        url=a.url,
+                                        content_type=a.content_type,
+                                        sha256=a.sha256,
+                                        body_bytes=a.body_bytes,
+                                        storage_path=a.storage_path,
+                                    )
+                                    for a in (result.raw_artifacts or [])
+                                ],
+                                warnings=list(result.warnings or []) + local_warnings,
+                                errors=list(result.errors or []),
+                            )
+                        )
+
+                        store.log_provider_fetch(
+                            provider_key=result.provider_key,
+                            county=county_key,
+                            parcel_id=pid,
+                            request_fingerprint=compute_request_fingerprint(
+                                provider_key=result.provider_key,
+                                county=county_key,
+                                parcel_id=pid,
+                                url=result.raw_artifacts[0].url if result.raw_artifacts else "fixture://" + result.provider_key,
+                            ),
+                            url=result.raw_artifacts[0].url if result.raw_artifacts else "fixture://" + result.provider_key,
+                            http_status=200 if result.ok else None,
+                            fetched_at=result.fetched_at,
+                            duration_ms=elapsed_ms,
+                            ok=result.ok,
+                            error="; ".join(result.errors) if result.errors else None,
+                        )
+            finally:
+                store.close()
+
+            store = SQLiteStore(db_path)
+            merged_fields: dict[str, dict[str, Any]] = {}
+            try:
+                min_conf_label = str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "high")).strip().lower() or "high"
+                rows = store.list_provider_evidence_for_parcels(county=county_key, parcel_ids=parcel_ids)
+                by_parcel: dict[str, list[dict[str, Any]]] = {}
+                for row in rows:
+                    pid = str(row.get("parcel_id") or "").strip()
+                    if not pid:
+                        continue
+                    by_parcel.setdefault(pid, []).append(row)
+                for pid in parcel_ids:
+                    merged, evidence_ids = store.build_enriched_fields(
+                        evidence_rows=by_parcel.get(pid, []),
+                        min_confidence_label=min_conf_label,
+                    )
+                    merged_fields[pid] = merged
+                    store.save_parcel_enrichment_snapshot(
+                        county=county_key,
+                        parcel_id=pid,
+                        snapshot_at=now_iso,
+                        merged_fields=merged,
+                        evidence_ids=evidence_ids,
+                    )
+            finally:
+                store.close()
+
+            enriched_ids = sorted([pid for pid, fields in merged_fields.items() if fields])
+
+            return EnrichResponse(
+                ok=True,
+                mode="evidence_only",
+                dry_run=dry_run,
+                enriched=enriched_ids,
+                evidence=evidence_out,
+                merged_fields=merged_fields,
+                provider_results=provider_results,
+            )
+        except Exception as exc:
+            return _safe_error_response(error="enrich_failed", detail=str(exc), status_code=500)
+
+    @app.post("/api/triggers/evaluate", response_model=TriggerEvaluateResponse)
+    def triggers_evaluate(payload: TriggerEvaluateRequest) -> TriggerEvaluateResponse:
+        from florida_property_scraper.storage import SQLiteStore
+
+        try:
+            logger = logging.getLogger("fps.triggers")
+            county_key = (payload.county or "").strip().lower()
+            if not county_key:
+                return _safe_error_response(error="bad_request", detail="county is required", status_code=400)
+
+            parcel_ids = [str(p or "").strip() for p in (payload.parcel_ids or [])]
+            parcel_ids = [p for p in parcel_ids if p]
+            if not parcel_ids:
+                return TriggerEvaluateResponse(ok=True, county=county_key, results=[])
+
+            if len(parcel_ids) > 500:
+                logger.warning("triggers evaluate: parcel_ids capped (got %s)", len(parcel_ids))
+                parcel_ids = parcel_ids[:500]
+
+            now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            store = SQLiteStore(db_path)
+            try:
+                evidence_rows = store.list_provider_evidence_for_parcels(
+                    county=county_key,
+                    parcel_ids=parcel_ids,
+                )
+            finally:
+                store.close()
+
+            trigger_rows = evaluate_triggers_from_evidence(
+                county=county_key,
+                evidence_rows=evidence_rows,
+                parcel_ids=parcel_ids,
+                now_iso=now_iso,
+            )
+
+            results: list[TriggerEvaluateItem] = []
+            to_persist: list[dict[str, Any]] = []
+            for row in trigger_rows:
+                evidence_ids = [int(x) for x in (row.evidence_ids or []) if int(x) > 0]
+                if row.fired:
+                    result_hash = _trigger_result_hash(
+                        county=county_key,
+                        parcel_id=str(row.parcel_id or ""),
+                        trigger_id=str(row.trigger_key or ""),
+                        reason=str(row.reason or ""),
+                        evidence_ids=evidence_ids,
+                    )
+                    to_persist.append(
+                        {
+                            "parcel_id": row.parcel_id,
+                            "trigger_id": row.trigger_key,
+                            "reason": row.reason,
+                            "evidence_ids": evidence_ids,
+                            "evaluated_at": row.evaluated_at,
+                            "result_hash": result_hash,
+                        }
+                    )
+                results.append(
+                    TriggerEvaluateItem(
+                        trigger_key=row.trigger_key,
+                        trigger_id=row.trigger_key,
+                        parcel_id=row.parcel_id,
+                        fired=row.fired,
+                        severity=row.severity,
+                        reason=row.reason,
+                        evidence_ids=evidence_ids,
+                        fields_used=row.fields_used,
+                        evaluated_at=row.evaluated_at,
+                    )
+                )
+
+            if results:
+                store = SQLiteStore(_resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB))
+                try:
+                    run_id = f"trigger_eval:{county_key}:{uuid.uuid4().hex[:8]}"
+                    store.upsert_trigger_results(run_id=run_id, county=county_key, results=to_persist)
+                finally:
+                    store.close()
+
+            for r in results:
+                if r.fired:
+                    logger.info("trigger fired: %s %s", r.parcel_id, r.trigger_key)
+
+            return TriggerEvaluateResponse(ok=True, county=county_key, results=results)
+        except Exception as exc:
+            return _safe_error_response(error="trigger_eval_failed", detail=str(exc), status_code=500)
+
     def _provider_status_payload(county_key: str) -> dict[str, Any]:
         from florida_property_scraper.providers.catalog import get_targets
 
@@ -7614,6 +8752,13 @@ if app:
                 await t
             except asyncio.CancelledError:
                 pass
+
+    @app.on_event("shutdown")
+    async def _log_shutdown_event():
+        try:
+            record_shutdown_event("fastapi_shutdown")
+        except Exception:
+            pass
 
 # --- alias: county in path ---
 @app.get("/api/parcels/{county}/{parcel_id}/detail")

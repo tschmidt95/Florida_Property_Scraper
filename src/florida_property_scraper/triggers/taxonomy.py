@@ -80,6 +80,15 @@ class TriggerKey(StrEnum):
     DIVORCE_FILED = "divorce_filed"
     EVICTION_FILING = "eviction_filing"
 
+    # Evidence-based evaluation (pipeline v2)
+    PERMIT_RECENT_MAJOR = "permit_recent_major"
+    CODE_ENFORCEMENT_OPEN_CASE = "code_enforcement_open_case"
+    TAX_DELINQUENT = "tax_delinquent"
+    DEED_TRANSFER_RECENT = "deed_transfer_recent"
+    FORECLOSURE_OR_LIS_PENDENS = "foreclosure_or_lis_pendens"
+    OWNER_MAILING_CHANGE = "owner_mailing_change"
+    NEW_RECORDING = "new_recording"
+
     # Tax collector (distress / payment events)
     DELINQUENT_TAX = "delinquent_tax"
     TAX_CERTIFICATE_ISSUED = "tax_certificate_issued"
@@ -158,6 +167,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.LIS_PENDENS,
         TriggerKey.TAX_DEED_APPLICATION,
         TriggerKey.DELINQUENT_TAX,
+        TriggerKey.TAX_DELINQUENT,
         TriggerKey.PROBATE_OPENED,
         TriggerKey.DIVORCE_FILED,
         TriggerKey.EVICTION_FILING,
@@ -166,6 +176,10 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.DIVORCE,
     }:
         return 5
+    if key == TriggerKey.FORECLOSURE_OR_LIS_PENDENS:
+        return 5
+    if key == TriggerKey.NEW_RECORDING:
+        return 3
     if key.startswith("foreclosure_") or key in {TriggerKey.FORECLOSURE}:
         return 5
 
@@ -217,6 +231,12 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         TriggerKey.LIEN_JUDGMENT,
     }:
         return 4
+    if key in {
+        TriggerKey.PERMIT_RECENT_MAJOR,
+        TriggerKey.CODE_ENFORCEMENT_OPEN_CASE,
+        TriggerKey.DEED_TRANSFER_RECENT,
+    }:
+        return 4
 
     # Support: recorded mortgages/assignments/modifications, UCC, nominal consideration flags
     if key in {
@@ -249,5 +269,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     if key == TriggerKey.OWNER_MAILING_CHANGED:
         return 3
     if key == TriggerKey.OWNER_NAME_CHANGED:
+        return 3
+    if key == TriggerKey.OWNER_MAILING_CHANGE:
         return 3
     return 1

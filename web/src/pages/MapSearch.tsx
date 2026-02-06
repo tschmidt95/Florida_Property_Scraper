@@ -12,7 +12,6 @@ import {
   listAlerts,
   listSavedSearches,
   markAlertRead,
-  parcelsEnrich,
   runEnrichment,
   parcelsGeometry,
   parcelsSearchNormalized,
@@ -29,6 +28,7 @@ import {
   type EnrichmentResponse,
   type ProviderStatusResponse,
   type TriggerEvaluateResponse,
+  type TriggerEvaluateItem,
   type ParcelAttributeFilters,
   type ParcelDetail,
   type ParcelRecord,
@@ -471,6 +471,7 @@ const SIGNALS_CATALOG: SignalCatalogItem[] = [
   { key: 'foreclosure_filing', label: 'Foreclosure: filing', group: 'Official Records', tier: 'critical' },
   { key: 'foreclosure_judgment', label: 'Foreclosure: judgment', group: 'Official Records', tier: 'critical' },
   { key: 'foreclosure', label: 'Foreclosure (generic)', group: 'Official Records', tier: 'critical' },
+  { key: 'new_recording', label: 'New recording', group: 'Official Records', tier: 'support' },
   { key: 'deed_recorded', label: 'Deed recorded', group: 'Official Records', tier: 'strong' },
   { key: 'deed_warranty', label: 'Deed: warranty', group: 'Official Records', tier: 'strong' },
   { key: 'deed_quitclaim', label: 'Deed: quitclaim', group: 'Official Records', tier: 'strong' },
@@ -551,11 +552,25 @@ export default function MapSearch({
     | null
   >(null);
 
-  const [parcels, setParcels] = useState<ParcelSearchListItem[]>([]);
-  const [records, setRecords] = useState<ParcelRecord[]>([]);
-  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
-
-  const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
+  const triggerLabel = (raw?: string | null) => {
+    if (!raw) return 'Unknown trigger';
+    const key = String(raw || '').trim().toLowerCase();
+    const labelOverrides: Record<string, string> = {
+      permit_filed: 'New permit',
+      permit_hvac: 'HVAC permit',
+      permit_roof: 'Roof permit',
+      permit_electrical: 'Electrical permit',
+      ownership_change: 'Ownership change',
+      tax_delinquent: 'Tax delinquent',
+      code_case_opened: 'Code case opened',
+      new_recording: 'New recording',
+    };
+    if (labelOverrides[key]) return labelOverrides[key];
+    return key
+      .split('_')
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ');
+  };
   const [selectedPermitsLoading, setSelectedPermitsLoading] = useState(false);
   const [selectedPermitsError, setSelectedPermitsError] = useState<string | null>(null);
 
@@ -605,6 +620,11 @@ export default function MapSearch({
   const [rollupsError, setRollupsError] = useState<string | null>(null);
 
   const [rollupsMap, setRollupsMap] = useState<Record<string, TriggerRollupRecord>>({});
+
+  const [parcels, setParcels] = useState<ParcelSearchListItem[]>([]);
+  const [records, setRecords] = useState<ParcelRecord[]>([]);
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
+  const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(
@@ -867,6 +887,51 @@ export default function MapSearch({
     return m;
   }, [records]);
 
+  const triggerResultsByParcel = useMemo(() => {
+    const out = new Map<string, TriggerEvaluateItem[]>();
+    const items = Array.isArray(lastTriggerEval?.results) ? lastTriggerEval!.results : [];
+    for (const item of items) {
+      if (!item?.fired) continue;
+      const pid = String(item?.parcel_id || '').trim();
+      if (!pid) continue;
+      const arr = out.get(pid) || [];
+      arr.push(item);
+      out.set(pid, arr);
+    }
+    return out;
+  }, [lastTriggerEval]);
+
+  const triggerResultsSummary = useMemo(() => {
+    const items = Array.isArray(lastTriggerEval?.results) ? lastTriggerEval!.results : [];
+    const fired = items.filter((i) => i?.fired);
+    const parcels = new Set(fired.map((i) => String(i?.parcel_id || '').trim()).filter(Boolean));
+    return { firedCount: fired.length, totalCount: items.length, parcelCount: parcels.size };
+  }, [lastTriggerEval]);
+
+  const enrichmentSummary = useMemo(() => {
+    if (!lastEnrichment) return null;
+    const evidence = Array.isArray(lastEnrichment.evidence) ? lastEnrichment.evidence : [];
+    const providers = Array.isArray(lastEnrichment.provider_results) ? lastEnrichment.provider_results : [];
+    const statusCounts: Record<string, number> = {};
+    for (const p of providers) {
+      const status = String(p?.status || 'unknown');
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+    }
+    const preview = evidence.slice(0, 6).map((ev) => ({
+      field: String(ev.field || ''),
+      value: ev.value,
+      confidence: String(ev.confidence_label || ''),
+      source: String(ev.source?.url || ''),
+      reference: String((ev as any).raw_reference || ''),
+    }));
+    return {
+      evidenceCount: evidence.length,
+      enrichedCount: Array.isArray(lastEnrichment.enriched) ? lastEnrichment.enriched.length : 0,
+      statusCounts,
+      preview,
+    };
+  }, [lastEnrichment]);
+
   const rows = useMemo(() => {
     return parcels.filter((p) => {
       const src = p.source;
@@ -993,8 +1058,59 @@ export default function MapSearch({
       future_land_use: has('future_land_use'),
     };
   }, [fieldStats, resultSetCount]);
+  
+  const formatMaybeNumber = useCallback(
+    (
+      val: number | null | undefined,
+      opts?: { zeroIsMissing?: boolean; maxFractionDigits?: number }
+    ): string => {
+      if (val === null || val === undefined) return '—';
+      const num = typeof val === 'number' ? val : Number(val);
+      if (!Number.isFinite(num)) return '—';
+      if (opts?.zeroIsMissing && num === 0) return '—';
+      if (typeof opts?.maxFractionDigits === 'number') {
+        return num.toLocaleString(undefined, { maximumFractionDigits: opts.maxFractionDigits });
+      }
+      return num.toLocaleString();
+    },
+    []
+  );
+  
+  const formatMaybeInt = useCallback((val: number | null | undefined, zeroIsMissing = true): string => {
+    if (val === null || val === undefined) return '—';
+    const num = typeof val === 'number' ? val : Number(val);
+    if (!Number.isFinite(num)) return '—';
+    if (zeroIsMissing && num === 0) return '—';
+    return Math.trunc(num).toLocaleString();
+  }, []);
 
   const lotSizeAvailable = fieldAvailability.lot_size_sqft || fieldAvailability.lot_size_acres;
+
+  const filtersActive = useMemo(() => {
+    const hasText = (s: string) => s.trim().length > 0;
+    if (selectedZoning.length) return true;
+    if (selectedFutureLandUse.length) return true;
+    return (
+      hasText(filterForm.minSqft) ||
+      hasText(filterForm.maxSqft) ||
+      hasText(filterForm.minLotSize) ||
+      hasText(filterForm.maxLotSize) ||
+      hasText(filterForm.minBeds) ||
+      hasText(filterForm.minBaths) ||
+      hasText(filterForm.minYearBuilt) ||
+      hasText(filterForm.maxYearBuilt) ||
+      hasText(filterForm.propertyType) ||
+      hasText(filterForm.zoning) ||
+      hasText(filterForm.minValue) ||
+      hasText(filterForm.maxValue) ||
+      hasText(filterForm.minLandValue) ||
+      hasText(filterForm.maxLandValue) ||
+      hasText(filterForm.minBuildingValue) ||
+      hasText(filterForm.maxBuildingValue) ||
+      hasText(filterForm.lastSaleStart) ||
+      hasText(filterForm.lastSaleEnd)
+    );
+  }, [filterForm, selectedFutureLandUse, selectedZoning]);
 
   const fieldCoverageNote = useCallback(
     (fieldKey: string, hint: string) => {
@@ -1121,32 +1237,6 @@ export default function MapSearch({
     if (drawnCircle) return `Circle selected (${Math.round(drawnCircle.radius_m)} m)`;
     return 'No geometry selected';
   }, [drawnCircle, drawnPolygon]);
-
-  const filtersActive = useMemo(() => {
-    const hasText = (s: string) => s.trim().length > 0;
-    if (selectedZoning.length) return true;
-    if (selectedFutureLandUse.length) return true;
-    return (
-      hasText(filterForm.minSqft) ||
-      hasText(filterForm.maxSqft) ||
-      hasText(filterForm.minLotSize) ||
-      hasText(filterForm.maxLotSize) ||
-      hasText(filterForm.minBeds) ||
-      hasText(filterForm.minBaths) ||
-      hasText(filterForm.minYearBuilt) ||
-      hasText(filterForm.maxYearBuilt) ||
-      hasText(filterForm.propertyType) ||
-      hasText(filterForm.zoning) ||
-      hasText(filterForm.minValue) ||
-      hasText(filterForm.maxValue) ||
-      hasText(filterForm.minLandValue) ||
-      hasText(filterForm.maxLandValue) ||
-      hasText(filterForm.minBuildingValue) ||
-      hasText(filterForm.maxBuildingValue) ||
-      hasText(filterForm.lastSaleStart) ||
-      hasText(filterForm.lastSaleEnd)
-    );
-  }, [filterForm, selectedFutureLandUse, selectedZoning]);
 
   const formatCodeLabel = useMemo(() => {
     return (raw: string) => {
@@ -1557,7 +1647,7 @@ export default function MapSearch({
           '')
           .toString()
           .trim();
-      if (!selectedCounty) {
+      if (!selectedCounty || selectedCounty.toLowerCase() === 'all') {
         selectedCounty = await resolveCountyFromGeometry();
       }
       if (!selectedCounty) {
@@ -1638,7 +1728,7 @@ export default function MapSearch({
           .toString()
           .trim();
       let resolvedCounty = selectedCounty;
-      if (!resolvedCounty) {
+      if (!resolvedCounty || resolvedCounty.toLowerCase() === 'all') {
         resolvedCounty = await resolveCountyFromGeometry();
       }
       if (!resolvedCounty) {
@@ -2104,29 +2194,18 @@ payload.polygon_geojson = polyOut;
     setLoading(true);
     const reqId = ++activeReq.current;
     try {
-      const resp = await parcelsEnrich({ county: countyForEnrich, parcel_ids: ids, limit: ids.length, max_per_minute: 30 });
+      const isSeminole = countyForEnrich.trim().toLowerCase() === 'seminole';
+      const resp = await runEnrichment({
+        county: countyForEnrich,
+        parcel_ids: ids,
+        provider_keys: isSeminole ? ['seminole_official_records'] : undefined,
+        fixture_mode: isSeminole,
+      });
       if (reqId !== activeReq.current) return;
-
-      const enriched = resp.records || [];
-      const map = new Map(enriched.map((r) => [r.parcel_id, r] as const));
-      const merged = records.length
-        ? records.map((r) => map.get(r.parcel_id) ?? r)
-        : enriched;
-
-      setRecords(merged);
-
-      const counts = { live: 0, cache: 0 };
-      for (const r of merged) {
-        if (r.source === 'live') counts.live++;
-        else if (r.source === 'cache') counts.cache++;
-      }
-      setSourceCounts(counts);
-      const fetchedOk = Number((resp as any).fetched_ok || 0);
-      const cached = Number((resp as any).cached || 0);
-      const failed = Number((resp as any).fetched_failed || 0);
-      setErrorBanner(
-        `Enrichment complete (cached=${cached}, fetched_ok=${fetchedOk}, failed=${failed}).`,
-      );
+      setLastEnrichment(resp);
+      const evidenceCount = Array.isArray(resp.evidence) ? resp.evidence.length : 0;
+      const enrichedCount = Array.isArray(resp.enriched) ? resp.enriched.length : 0;
+      setErrorBanner(`Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}).`);
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -2161,23 +2240,17 @@ payload.polygon_geojson = polyOut;
 
     setLoading(true);
     try {
+      const isSeminole = countyForEnrich.trim().toLowerCase() === 'seminole';
       const resp = await runEnrichment({
         county: countyForEnrich,
         parcel_ids: ids,
-        providers: [
-          'permits',
-          'tax',
-          'courts',
-          'official_records',
-          'deeds',
-          'code_enforcement',
-          'liens',
-          'utilities',
-        ],
-        limit: ids.length,
+        provider_keys: isSeminole ? ['seminole_official_records'] : undefined,
+        fixture_mode: isSeminole,
       });
       setLastEnrichment(resp);
-      setErrorBanner(`Enrichment complete (${resp.results.length} provider results).`);
+      const evidenceCount = Array.isArray(resp.evidence) ? resp.evidence.length : 0;
+      const enrichedCount = Array.isArray(resp.enriched) ? resp.enriched.length : 0;
+      setErrorBanner(`Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}).`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
@@ -2210,9 +2283,11 @@ payload.polygon_geojson = polyOut;
 
     setLoading(true);
     try {
-      const resp = await evaluateTriggers({ county: countyForEval, parcel_ids: ids, trigger_keys: null });
+      const resp = await evaluateTriggers({ county: countyForEval, parcel_ids: ids });
       setLastTriggerEval(resp);
-      setErrorBanner(`Triggers evaluated (${resp.results.length} parcels).`);
+      const firedCount = Array.isArray(resp.results) ? resp.results.filter((r) => r?.fired).length : 0;
+      const totalCount = Array.isArray(resp.results) ? resp.results.length : 0;
+      setErrorBanner(`Triggers evaluated (${firedCount} fired of ${totalCount}).`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
@@ -2455,17 +2530,26 @@ payload.polygon_geojson = polyOut;
     try {
       const pageLimit = typeof (payload as any)?.limit === 'number' ? (payload as any).limit : 500;
       let cursor: string | null = null;
+      let offset = 0;
+      let useOffsetPaging = false;
       let hasMore = true;
       let totalCount: number | null = null;
       let lastResp: any = null;
+      let lastLoaded = 0;
+      let safety = 0;
+      const maxPages = 25;
       const allRecords: ParcelRecord[] = [];
       const allParcels: ParcelSearchListItem[] = [];
       const seenRecords = new Set<string>();
       const seenParcels = new Set<string>();
 
-      while (hasMore) {
+      while (true) {
+        safety += 1;
+        if (safety > maxPages) break;
         if (reqId !== activeReq.current) return;
-        const pagePayload = { ...payload, limit: pageLimit, cursor } as any;
+        const pagePayload = useOffsetPaging
+          ? ({ ...payload, limit: pageLimit, offset } as any)
+          : ({ ...payload, limit: pageLimit, cursor } as any);
         const resp = await parcelsSearchNormalized(pagePayload);
         if (reqId !== activeReq.current) return;
 
@@ -2490,22 +2574,41 @@ payload.polygon_geojson = polyOut;
           allParcels.push(p);
         }
 
-        const respTotal = (resp as any).total_count ?? (resp as any)?.summary?.total_count ?? (resp as any)?.explain?.final_count;
+        const respTotal =
+          (resp as any).total_count ?? (resp as any)?.summary?.total_count ?? (resp as any)?.explain?.final_count;
         totalCount = Number.isFinite(Number(respTotal)) ? Number(respTotal) : totalCount;
-        hasMore = Boolean((resp as any).has_more);
-        cursor = (resp as any).next_cursor ?? null;
-        if (hasMore && !cursor) {
-          hasMore = false;
+        if (!useOffsetPaging) {
+          hasMore = Boolean((resp as any).has_more);
+          cursor = (resp as any).next_cursor ?? null;
+          if (hasMore && !cursor) {
+            hasMore = false;
+          }
         }
 
+        const loadedCount = allParcels.length;
         setPagingMeta({
-          total: totalCount ?? allParcels.length,
-          loaded: allParcels.length,
+          total: totalCount ?? loadedCount,
+          loaded: loadedCount,
           isPaging: hasMore,
           hasMore,
         });
 
-        if (!hasMore) break;
+        if (useOffsetPaging) {
+          if (loadedCount <= lastLoaded) break;
+          lastLoaded = loadedCount;
+          if (totalCount !== null && loadedCount >= totalCount) break;
+          offset += pageLimit;
+          continue;
+        }
+
+        if (hasMore) continue;
+        if (totalCount !== null && loadedCount < totalCount) {
+          useOffsetPaging = true;
+          offset = loadedCount;
+          lastLoaded = loadedCount;
+          continue;
+        }
+        break;
       }
 
       const resp = lastResp;
@@ -3700,7 +3803,7 @@ payload.polygon_geojson = polyOut;
           </div>
           {hoverFieldsMode === 'evidence_only' ? (
             <div className="mt-1 text-[11px] text-cre-muted">
-              Hover fields: not enriched yet (evidence-only).
+              Not enriched yet (evidence-only).
             </div>
           ) : null}
           {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null ? (
@@ -3750,13 +3853,46 @@ payload.polygon_geojson = polyOut;
 
           {lastEnrichment || lastTriggerEval ? (
             <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-2 text-[11px] text-cre-muted">
-              {lastEnrichment
-                ? `Enrichment: ${lastEnrichment.results.length} provider results`
+              {lastEnrichment && enrichmentSummary
+                ? `Enrichment: ${enrichmentSummary.evidenceCount} evidence rows · ${enrichmentSummary.enrichedCount} parcels`
                 : 'Enrichment: —'}
               {' • '}
               {lastTriggerEval
-                ? `Triggers: ${lastTriggerEval.results.length} parcels evaluated`
+                ? `Triggers: ${triggerResultsSummary.firedCount} fired across ${triggerResultsSummary.parcelCount} parcels (of ${triggerResultsSummary.totalCount})`
                 : 'Triggers: —'}
+            </div>
+          ) : null}
+
+          {lastEnrichment && enrichmentSummary ? (
+            <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-2 text-[11px] text-cre-muted">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-semibold text-cre-text">Evidence preview</div>
+                {Object.keys(enrichmentSummary.statusCounts).length ? (
+                  <div>
+                    Providers: {Object.entries(enrichmentSummary.statusCounts)
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(' · ')}
+                  </div>
+                ) : null}
+              </div>
+              {enrichmentSummary.preview.length ? (
+                <div className="mt-2 space-y-1">
+                  {enrichmentSummary.preview.map((ev, idx) => (
+                    <div key={`ev:${idx}`} className="rounded border border-cre-border/60 bg-cre-surface px-2 py-1">
+                      <div className="text-[11px] text-cre-text">
+                        {ev.field || 'field'} · {String(ev.value ?? '—')}
+                      </div>
+                      <div className="text-[10px] text-cre-muted">
+                        {ev.confidence ? `confidence=${ev.confidence}` : 'confidence=—'}
+                        {ev.reference ? ` · ref=${ev.reference}` : ''}
+                        {ev.source ? ` · ${ev.source}` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-[11px] text-cre-muted">No evidence rows yet.</div>
+              )}
             </div>
           ) : null}
 
@@ -3923,9 +4059,8 @@ payload.polygon_geojson = polyOut;
                 const yearBuilt = rec?.year_built ?? (p as any)?.year_built ?? null;
                 const zoning = (rec?.zoning ?? (p as any)?.zoning ?? '').trim();
                 const propertyType = (rec?.property_type ?? (rec as any)?.property_type_raw ?? (rec as any)?.land_use ?? '').toString().trim();
-                const fmtNum = (val: number | null | undefined) =>
-                  typeof val === 'number' && Number.isFinite(val) ? val.toLocaleString() : '—';
                 const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
+                const triggerItems = triggerResultsByParcel.get(p.parcel_id) || [];
 
                 const groupsBadges: Array<{ k: string; label: string }> = [];
                 if (rollup && Number(rollup.has_official_records || 0) > 0) groupsBadges.push({ k: 'or', label: 'Records' });
@@ -3963,7 +4098,9 @@ payload.polygon_geojson = polyOut;
                         <div className="text-sm font-semibold text-cre-text">{addr}</div>
                         <div className="mt-1 text-xs text-cre-muted">{owner}</div>
                         <div className="mt-1 text-[11px] text-cre-muted">
-                          {countyLabel} · Beds {beds ?? '—'} · Baths {baths ?? '—'} · Living {fmtNum(sqft)} sqft · Year {yearBuilt ?? '—'}
+                          {countyLabel} · Beds {formatMaybeNumber(beds, { zeroIsMissing: true, maxFractionDigits: 1 })} · Baths{' '}
+                          {formatMaybeNumber(baths, { zeroIsMissing: true, maxFractionDigits: 1 })} · Living{' '}
+                          {formatMaybeNumber(sqft, { zeroIsMissing: true })} sqft · Year {formatMaybeInt(yearBuilt)}
                         </div>
                         <div className="mt-1 text-[11px] text-cre-muted">
                           Zoning {zoning || '—'} · Type {propertyType || '—'}
@@ -3998,6 +4135,20 @@ payload.polygon_geojson = polyOut;
                         View signals →
                       </span>
                     </div>
+
+                    {triggerItems.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {triggerItems.map((t, idx) => (
+                          <span
+                            key={`${p.parcel_id}:trigger:${idx}`}
+                            title={t.reason ? `Reason: ${t.reason}` : undefined}
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700"
+                          >
+                            {triggerLabel(t.trigger_id)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </button>
                 );
               })
@@ -4155,6 +4306,17 @@ payload.polygon_geojson = polyOut;
                   } catch {
                     // ignore
                   }
+                  if (pid) {
+                    try {
+                      (layer as any).on('click', () => {
+                        if (isDrawing) return;
+                        setSelectedParcelId(pid);
+                        setSignalsDrawerOpen(true);
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  }
                 }}
               />
             ) : null}
@@ -4230,9 +4392,10 @@ payload.polygon_geojson = polyOut;
                     {(() => {
                       const rec = selectedParcelId ? records.find((r) => r.parcel_id === selectedParcelId) : null;
                       const p = selectedParcelId ? parcels.find((x) => x.parcel_id === selectedParcelId) : null;
-                      const detail = selectedParcelDetail;
-                      const fmtNum = (val: number | null | undefined) =>
-                        typeof val === 'number' && Number.isFinite(val) ? val.toLocaleString() : '—';
+                      const detail = selectedParcelDetail as any;
+                      const detailPa = (detail && typeof detail === 'object' && (detail as any).pa) || {};
+                      const detailComputed = (detail && typeof detail === 'object' && (detail as any).computed) || {};
+                      const detailFields = { ...detailPa, ...detailComputed, ...(detail || {}) } as any;
                       const fmtMoney = (val: number | null | undefined) =>
                         typeof val === 'number' && Number.isFinite(val) && val > 0
                           ? `$${Math.round(val).toLocaleString()}`
@@ -4240,26 +4403,29 @@ payload.polygon_geojson = polyOut;
                       const addr = (rec?.situs_address || rec?.address || p?.address || '').trim();
                       const owner = (rec?.owner_name || p?.owner_name || '').trim();
                       const mailing = (
-                        detail?.owner_mailing_address ||
-                        detail?.mailing_address ||
+                        detailFields?.owner_mailing_address ||
+                        detailFields?.mailing_address ||
                         (rec as any)?.owner_mailing_address ||
                         p?.owner_mailing_address ||
                         ''
                       ).trim();
-                      const yearBuilt = detail?.year_built ?? rec?.year_built ?? p?.year_built ?? null;
-                      const beds = detail?.beds ?? rec?.beds ?? p?.beds ?? null;
-                      const baths = detail?.baths ?? rec?.baths ?? p?.baths ?? null;
-                      const livingArea = detail?.living_area_sqft ?? rec?.living_area_sqft ?? p?.living_sf ?? null;
-                      const lotSqft = detail?.lot_size_sqft ?? rec?.lot_size_sqft ?? p?.land_sf ?? null;
-                      const lotAcres = detail?.lot_size_acres ?? rec?.lot_size_acres ?? p?.land_acres ?? null;
-                      const zoning = (detail?.zoning ?? rec?.zoning ?? p?.zoning ?? '').trim();
-                      const futureLandUse = (detail?.future_land_use ?? rec?.future_land_use ?? p?.future_land_use ?? '').trim();
-                      const justValue = detail?.just_value ?? rec?.just_value ?? p?.just_value ?? null;
-                      const assessedValue = detail?.assessed_value ?? rec?.assessed_value ?? p?.assessed_value ?? null;
-                      const taxableValue = detail?.taxable_value ?? rec?.taxable_value ?? p?.taxable_value ?? null;
-                      const landValue = detail?.land_value ?? rec?.land_value ?? p?.land_value ?? null;
-                      const buildingValue = detail?.building_value ?? rec?.building_value ?? p?.improvement_value ?? null;
-                      const totalValue = detail?.total_value ?? rec?.total_value ?? null;
+                      const yearBuilt = detailFields?.year_built ?? rec?.year_built ?? p?.year_built ?? null;
+                      const beds = detailFields?.beds ?? rec?.beds ?? p?.beds ?? null;
+                      const baths = detailFields?.baths ?? rec?.baths ?? p?.baths ?? null;
+                      const livingArea =
+                        detailFields?.living_area_sqft ?? rec?.living_area_sqft ?? p?.living_sf ?? null;
+                      const lotSqft = detailFields?.lot_size_sqft ?? rec?.lot_size_sqft ?? p?.land_sf ?? null;
+                      const lotAcres = detailFields?.lot_size_acres ?? rec?.lot_size_acres ?? p?.land_acres ?? null;
+                      const zoning = (detailFields?.zoning ?? rec?.zoning ?? p?.zoning ?? '').trim();
+                      const futureLandUse =
+                        (detailFields?.future_land_use ?? rec?.future_land_use ?? p?.future_land_use ?? '').trim();
+                      const justValue = detailFields?.just_value ?? rec?.just_value ?? p?.just_value ?? null;
+                      const assessedValue = detailFields?.assessed_value ?? rec?.assessed_value ?? p?.assessed_value ?? null;
+                      const taxableValue = detailFields?.taxable_value ?? rec?.taxable_value ?? p?.taxable_value ?? null;
+                      const landValue = detailFields?.land_value ?? rec?.land_value ?? p?.land_value ?? null;
+                      const buildingValue =
+                        detailFields?.building_value ?? rec?.building_value ?? p?.improvement_value ?? null;
+                      const totalValue = detailFields?.total_value ?? rec?.total_value ?? null;
                       return (
                         <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
                           <div className="text-sm font-semibold text-cre-text">{addr || '—'}</div>
@@ -4269,7 +4435,11 @@ payload.polygon_geojson = polyOut;
                           ) : null}
                           {(rec || p || detail) ? (
                             <div className="mt-2 text-[11px] text-cre-muted">
-                              Year {yearBuilt ?? '—'} · Beds {beds ?? '—'} · Baths {baths ?? '—'} · Living {fmtNum(livingArea)} sqft · Lot {fmtNum(lotSqft)} sqft ({fmtNum(lotAcres)} ac)
+                              Year {formatMaybeInt(yearBuilt)} · Beds{' '}
+                              {formatMaybeNumber(beds, { zeroIsMissing: true, maxFractionDigits: 1 })} · Baths{' '}
+                              {formatMaybeNumber(baths, { zeroIsMissing: true, maxFractionDigits: 1 })} · Living{' '}
+                              {formatMaybeNumber(livingArea, { zeroIsMissing: true })} sqft · Lot{' '}
+                              {formatMaybeNumber(lotSqft, { zeroIsMissing: true })} sqft ({formatMaybeNumber(lotAcres, { zeroIsMissing: true, maxFractionDigits: 2 })} ac)
                             </div>
                           ) : null}
                           <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-cre-muted">

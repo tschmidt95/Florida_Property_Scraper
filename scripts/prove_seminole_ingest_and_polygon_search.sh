@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source "/workspaces/Florida_Property_Scraper/scripts/_curl_json_helper.sh"
+
 # 1. Show git SHA
 GIT_SHA=$(git rev-parse --short HEAD)
 echo "GIT SHA: $GIT_SHA"
@@ -13,9 +16,13 @@ cat <<EOF > /tmp/pineapple_polygon.json
 {"type":"Polygon","coordinates":[[[-81.3205,28.7005],[-81.3205,28.6985],[-81.3185,28.6985],[-81.3185,28.7005],[-81.3205,28.7005]]]}
 EOF
 
-curl -sS -X POST http://127.0.0.1:8000/api/parcels/search \
+search_resp="$(mktemp)"
+curl_json_or_fail "http://127.0.0.1:8000/api/parcels/search" "$search_resp" \
+  -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/pineapple_polygon.json)'}' | tee /tmp/parcel_search_result.json
+  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/pineapple_polygon.json)'}'
+cat "$search_resp" > /tmp/parcel_search_result.json
+rm -f "$search_resp"
 
 COUNT=$(jq '.candidate_count' /tmp/parcel_search_result.json)
 echo "Returned candidate_count: $COUNT"

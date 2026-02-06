@@ -5,46 +5,51 @@ cd /workspaces/Florida_Property_Scraper
 
 port_listener_pid() {
 	local port="$1"
-	if ! command -v lsof >/dev/null 2>&1; then
-		return 1
+	if command -v lsof >/dev/null 2>&1; then
+		lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+		return 0
 	fi
-	lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+	if command -v ss >/dev/null 2>&1; then
+		ss -ltnp 2>/dev/null | awk -v p=":${port}" '$0 ~ p { if (match($0, /pid=([0-9]+)/, m)) { print m[1]; exit } }'
+		return 0
+	fi
+	return 1
 }
 
-kill_pid_file_if_listening() {
+kill_listener_pid() {
 	local port="$1"
-	local pid_file="$2"
 	local killed=""
-	if [[ -f "$pid_file" ]]; then
-		local pid
-		pid=$(cat "$pid_file" || true)
-		if [[ -n "$pid" ]] && ps -p "$pid" >/dev/null 2>&1; then
-			local listener_pid
-			listener_pid="$(port_listener_pid "$port")"
-			if [[ -n "$listener_pid" && "$listener_pid" == "$pid" ]]; then
-				kill "$pid" >/dev/null 2>&1 || true
-				sleep 1
-				if ps -p "$pid" >/dev/null 2>&1; then
-					kill -9 "$pid" >/dev/null 2>&1 || true
-				fi
-				killed="$pid"
-			fi
+	local pid
+	pid="$(port_listener_pid "$port")"
+	if [[ -n "$pid" ]]; then
+		kill "$pid" >/dev/null 2>&1 || true
+		sleep 1
+		if ps -p "$pid" >/dev/null 2>&1; then
+			kill -9 "$pid" >/dev/null 2>&1 || true
 		fi
-		rm -f "$pid_file" || true
+		killed="$pid"
 	fi
 	echo "$killed"
 }
 
-backend_killed="$(kill_pid_file_if_listening 8000 .logs/backend_8000.pid)"
-ui_killed="$(kill_pid_file_if_listening 5173 .logs/ui_5173.pid)"
-vite_killed="$(kill_pid_file_if_listening 5173 .logs/vite_5173.pid)"
+backend_killed="$(kill_listener_pid 8000)"
+ui_killed="$(kill_listener_pid 5173)"
+vite_killed="${ui_killed}"
 
-if [[ -z "$backend_killed" ]]; then
-	pkill -f "uvicorn.*8000" >/dev/null 2>&1 || true
+rm -f .logs/backend_8000.pid .logs/ui_5173.pid .logs/vite_5173.pid || true
+
+backend_pkill=""
+ui_pkill=""
+
+if [[ -n "$(port_listener_pid 8000)" ]]; then
+	pkill -f "uvicorn .*--port 8000" >/dev/null 2>&1 || true
+	pkill -f "python -m uvicorn .*--port 8000" >/dev/null 2>&1 || true
+	backend_pkill="pkill"
 fi
-if [[ -z "$ui_killed" && -z "$vite_killed" ]]; then
+if [[ -n "$(port_listener_pid 5173)" ]]; then
 	pkill -f "vite.*5173" >/dev/null 2>&1 || true
 	pkill -f "node .*vite" >/dev/null 2>&1 || true
+	ui_pkill="pkill"
 fi
 
 python scripts/port_inspect.py || true
@@ -55,8 +60,8 @@ echo "$out8000"
 echo "$out5173"
 
 if echo "$out8000" | grep -q "port=8000 FREE" && echo "$out5173" | grep -q "port=5173 FREE"; then
-	echo "PASS ports_free backend=${backend_killed:-none} ui=${ui_killed:-none} vite=${vite_killed:-none}"
+	echo "PASS ports_free backend=${backend_killed:-none} ui=${ui_killed:-none} vite=${vite_killed:-none} backend_fallback=${backend_pkill:-none} ui_fallback=${ui_pkill:-none}"
 else
-	echo "FAIL ports_free backend=${backend_killed:-none} ui=${ui_killed:-none} vite=${vite_killed:-none}"
+	echo "FAIL ports_free backend=${backend_killed:-none} ui=${ui_killed:-none} vite=${vite_killed:-none} backend_fallback=${backend_pkill:-none} ui_fallback=${ui_pkill:-none}"
 	exit 2
 fi

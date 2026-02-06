@@ -1,14 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source "/workspaces/Florida_Property_Scraper/scripts/_curl_json_helper.sh"
+
 API_URL="http://127.0.0.1:8000"
 COUNTY="seminole"
 
 # 1. Ping backend
-curl -sS "$API_URL/api/debug/ping" | jq .
+ping_resp="$(mktemp)"
+curl_json_or_fail "$API_URL/api/debug/ping" "$ping_resp"
+jq . "$ping_resp"
+rm -f "$ping_resp"
 
 # 2. Check parcels coverage
-curl -sS "$API_URL/api/debug/parcels_coverage?county=$COUNTY" | jq .
+coverage_resp="$(mktemp)"
+curl_json_or_fail "$API_URL/api/debug/parcels_coverage?county=$COUNTY" "$coverage_resp"
+jq . "$coverage_resp"
+rm -f "$coverage_resp"
 
 # 3. Optionally, run a polygon search (user can edit BBOX below)
 read -p "Run polygon search test? (y/N): " runpoly
@@ -26,9 +35,13 @@ if [[ "$runpoly" =~ ^[Yy]$ ]]; then
   ]]
 }
 EOF
-  curl -sS -X POST "$API_URL/api/parcels/search" \
+  search_resp="$(mktemp)"
+  curl_json_or_fail "$API_URL/api/parcels/search" "$search_resp" \
+    -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"county": "seminole", "polygon_geojson": '"$(cat /tmp/seminole_poly.json)"', "limit": 3}' | jq .
+    -d '{"county": "seminole", "polygon_geojson": '"$(cat /tmp/seminole_poly.json)"', "limit": 3}'
+  jq . "$search_resp"
+  rm -f "$search_resp"
 else
   echo "To test in UI: set county to 'seminole', draw a polygon anywhere, and Run."
 fi

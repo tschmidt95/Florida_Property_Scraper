@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source "/workspaces/Florida_Property_Scraper/scripts/_curl_json_helper.sh"
+
 # Show git sha
 GIT_SHA=$(git rev-parse --short HEAD)
 echo "GIT SHA: $GIT_SHA"
@@ -13,9 +16,13 @@ cat <<EOF > /tmp/demo_polygon.json
 {"type":"Polygon","coordinates":[[[-81.3700,28.6500],[-81.3680,28.6500],[-81.3680,28.6520],[-81.3700,28.6520],[-81.3700,28.6500]]]}
 EOF
 
-curl -sS -X POST http://127.0.0.1:8000/api/parcels/search \
+demo_resp="$(mktemp)"
+curl_json_or_fail "http://127.0.0.1:8000/api/parcels/search" "$demo_resp" \
+  -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/demo_polygon.json)'}' | tee /tmp/demo_parcel_search.json
+  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/demo_polygon.json)'}'
+cat "$demo_resp" > /tmp/demo_parcel_search.json
+rm -f "$demo_resp"
 
 COUNT1=$(jq '.candidate_count' /tmp/demo_parcel_search.json)
 echo "Demo area candidate_count: $COUNT1"
@@ -31,9 +38,13 @@ cat <<EOF > /tmp/pineapple_polygon.json
 {"type":"Polygon","coordinates":[[[-81.3205,28.7005],[-81.3205,28.6985],[-81.3185,28.6985],[-81.3185,28.7005],[-81.3205,28.7005]]]}
 EOF
 
-curl -sS -X POST http://127.0.0.1:8000/api/parcels/search \
+pineapple_resp="$(mktemp)"
+curl_json_or_fail "http://127.0.0.1:8000/api/parcels/search" "$pineapple_resp" \
+  -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/pineapple_polygon.json)'}' | tee /tmp/pineapple_parcel_search.json
+  -d '{"county": "seminole", "polygon_geojson": '$(cat /tmp/pineapple_polygon.json)'}'
+cat "$pineapple_resp" > /tmp/pineapple_parcel_search.json
+rm -f "$pineapple_resp"
 
 COUNT2=$(jq '.candidate_count' /tmp/pineapple_parcel_search.json)
 WARN2=$(jq -r '.warnings[]?' /tmp/pineapple_parcel_search.json)
