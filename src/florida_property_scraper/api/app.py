@@ -1075,8 +1075,74 @@ if app:
 
         return JSONResponse({"type": "FeatureCollection", "features": features_out})
 
+    def _search_payload_from_query(request: Request) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
 
+        def _get(name: str) -> str:
+            return str(request.query_params.get(name) or "").strip()
 
+        def _get_int(name: str) -> int | None:
+            raw = _get(name)
+            if not raw:
+                return None
+            try:
+                return int(raw)
+            except Exception:
+                return None
+
+        payload["county"] = _get("county")
+        if _get("include_geometry"):
+            payload["include_geometry"] = _get("include_geometry").lower() in {"1", "true", "yes"}
+
+        limit = _get_int("limit")
+        if limit is not None:
+            payload["limit"] = limit
+        offset = _get_int("offset")
+        if offset is not None:
+            payload["offset"] = offset
+
+        for key in ("cursor", "next_cursor", "sort"):
+            val = _get(key)
+            if val:
+                payload[key] = val
+
+        for json_key in ("geometry", "polygon_geojson", "radius", "center"):
+            raw = _get(json_key)
+            if not raw:
+                continue
+            try:
+                payload[json_key] = json.loads(raw)
+            except Exception:
+                continue
+
+        return payload
+
+    @app.get("/api/parcels/search")
+    def api_parcels_search_get(request: Request):
+        payload = _search_payload_from_query(request)
+        has_geometry = any(k in payload for k in ("geometry", "polygon_geojson", "radius", "center"))
+        if not has_geometry:
+            return JSONResponse(
+                _search_empty_payload(
+                    warnings=["missing_geometry"],
+                    details={"hint": "Provide geometry, polygon_geojson, radius, or center+radius_m."},
+                )
+            )
+        return _api_parcels_search_impl(request, payload)
+
+    @app.get("/api/parcels/search_normalized")
+    def api_parcels_search_normalized_get(request: Request):
+        payload = _search_payload_from_query(request)
+        has_geometry = any(k in payload for k in ("geometry", "polygon_geojson", "radius", "center"))
+        if not has_geometry:
+            return JSONResponse(
+                _search_empty_payload(
+                    warnings=["missing_geometry"],
+                    details={"hint": "Provide geometry, polygon_geojson, radius, or center+radius_m."},
+                )
+            )
+        payload["normalized"] = True
+        return _api_parcels_search_impl(request, payload)
 
     @app.post("/api/parcels/search")
     def api_parcels_search(request: Request, payload: dict = Body(default={})): 
@@ -1117,6 +1183,28 @@ if app:
                 },
             )
 
+    @app.post("/api/parcels/search_normalized")
+    def api_parcels_search_normalized(request: Request, payload: dict = Body(default={})): 
+        try:
+            payload = payload if isinstance(payload, dict) else {}
+            payload["normalized"] = True
+            return _api_parcels_search_impl(request, payload)
+        except BaseException as exc:
+            if isinstance(exc, KeyboardInterrupt):
+                raise
+            error_id = uuid.uuid4().hex[:12]
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "ok": False,
+                    "error": "server_error",
+                    "correlation_id": error_id,
+                    "detail": str(exc)[:500],
+                    "hint": "See .logs/backend_signals.log and server logs for the error_id.",
+                    "where": "api_parcels_search_normalized",
+                    "error_id": error_id,
+                },
+            )
 
     def _api_parcels_search_impl(request: Request, payload: dict = Body(default={})): 
         # WRITE_UI_REQ_JSON: debug dump last UI payload to /tmp/ui_req.json
@@ -1461,20 +1549,26 @@ if app:
         if requested_live:
             pre_warnings.append("live_disabled_local_only")
         include_geometry = bool(payload.get("include_geometry", False))
-        limit = int(payload.get("limit", 500))
-        if limit <= 0:
-            limit = 500
+        limit = None
+        try:
+            raw_limit = payload.get("limit")
+            if raw_limit is not None and str(raw_limit).strip() != "":
+                limit = int(raw_limit)
+        except Exception:
+            limit = None
+        if limit is not None and limit <= 0:
+            limit = None
 
         max_limit = int(os.getenv("FPS_SEARCH_MAX_LIMIT", "2000") or 2000)
         if max_limit <= 0:
             max_limit = 2000
 
         # Guardrail: never allow unbounded result sets.
-        if limit > max_limit:
+        if limit is not None and limit > max_limit:
             limit = max_limit
 
         # Guardrail: live mode can be expensive if/when implemented.
-        if live and limit > max_limit:
+        if live and limit is not None and limit > max_limit:
             limit = max_limit
 
         cursor = None
@@ -1499,7 +1593,7 @@ if app:
                 {
                     "county": county_label,
                     "live": bool(live),
-                    "limit": int(limit),
+                    "limit": int(limit) if limit is not None else int(max_limit),
                     "include_geometry": bool(include_geometry),
                     "has_filters": isinstance(payload.get("filters"), dict) and bool(payload.get("filters")),
                     "enrich": payload.get("enrich", None),
@@ -5199,7 +5293,8 @@ if app:
         elif offset is not None:
             start_index = max(0, int(offset))
 
-        end_index = start_index + int(limit)
+        effective_limit = int(limit) if limit is not None else int(len(records_all))
+        end_index = start_index + effective_limit
         records = records_all[start_index:end_index]
         results = results_all[start_index:end_index]
 
@@ -5328,7 +5423,7 @@ if app:
             debug_flags = {
                 "county": county_label,
                 "correlation_id": correlation_id,
-                "limit": int(limit),
+                "limit": int(effective_limit),
                 "include_geometry": bool(include_geometry),
                 "sort": str(payload.get("sort") or ""),
                 "enrich_enabled": bool(payload.get("enrich", False)) if payload.get("enrich", None) is not None else False,
@@ -8007,6 +8102,61 @@ if app:
 
         pa = rec.to_dict() if rec is not None else None
 
+        enrichment_snapshot = None
+        merged_fields: dict[str, Any] = {}
+        evidence_ids: list[int] = []
+        try:
+            from florida_property_scraper.storage import SQLiteStore
+
+            evidence_db = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            enrichment_pid = parcel_key
+            if isinstance(pa, dict):
+                pa_pid = str(pa.get("parcel_id") or "").strip()
+                if pa_pid:
+                    enrichment_pid = pa_pid
+            store = SQLiteStore(evidence_db)
+            try:
+                enrichment_snapshot = store.get_latest_parcel_enrichment_snapshot(
+                    county=county_key,
+                    parcel_id=enrichment_pid,
+                )
+            finally:
+                store.close()
+        except Exception:
+            enrichment_snapshot = None
+
+        if isinstance(enrichment_snapshot, dict):
+            merged_fields = enrichment_snapshot.get("merged_fields") or {}
+            evidence_ids = enrichment_snapshot.get("evidence_ids") or []
+
+        def _is_missing_value(field: str, value: object) -> bool:
+            if value is None:
+                return True
+            if isinstance(value, str):
+                return not value.strip()
+            if isinstance(value, bool):
+                return False
+            if isinstance(value, (int, float)):
+                try:
+                    return float(value) == 0.0
+                except Exception:
+                    return True
+            if isinstance(value, (list, tuple, set, dict)):
+                return len(value) == 0
+            return False
+
+        def _overlay_missing_fields(dst: dict[str, Any], src: dict[str, Any]) -> None:
+            for k, v in (src or {}).items():
+                key = str(k)
+                if _is_missing_value(key, dst.get(key)) and not _is_missing_value(key, v):
+                    dst[key] = v
+
+        if merged_fields:
+            if pa is None:
+                pa = {}
+            if isinstance(pa, dict):
+                _overlay_missing_fields(pa, merged_fields)
+
         user_db = os.getenv("USER_META_DB", db_path)
         meta_store = UserMetaSQLite(user_db)
         try:
@@ -8026,6 +8176,8 @@ if app:
             "user_meta": meta.to_dict()
             if meta is not None
             else empty_user_meta(county=county_key, parcel_id=parcel_key),
+            "merged_fields": merged_fields if isinstance(merged_fields, dict) else {},
+            "evidence_ids": [int(x) for x in (evidence_ids or []) if int(x) > 0],
         }
 
         if not include_fields:
@@ -8765,6 +8917,32 @@ if app:
 def api_parcel_detail_alias(county: str, parcel_id: str):
     hover = locals().get('hover') or locals().get('hover_fields') or locals().get('hover_data') or {}
     return RedirectResponse(url=f"/api/parcels/{parcel_id}?county={county}", status_code=307)
+
+
+# --- ensure parcel dynamic routes are last ---
+try:
+    routes = app.router.routes
+    dynamic_routes = []
+    for r in list(routes):
+        path = getattr(r, "path", "") or ""
+        if path.startswith("/api/parcels/") and "{" in path:
+            dynamic_routes.append(r)
+
+    if dynamic_routes:
+        for r in dynamic_routes:
+            try:
+                routes.remove(r)
+            except ValueError:
+                continue
+        insert_at = 0
+        for i, r in enumerate(list(routes)):
+            path = getattr(r, "path", "") or ""
+            if path.startswith("/api/parcels/"):
+                insert_at = i + 1
+        for idx, r in enumerate(dynamic_routes):
+            routes.insert(insert_at + idx, r)
+except Exception:
+    pass
 
 
 # --- ensure spa_fallback is last ---

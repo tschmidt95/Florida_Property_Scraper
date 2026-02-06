@@ -1781,6 +1781,47 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    def get_latest_parcel_enrichment_snapshot(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+    ) -> Dict[str, Any] | None:
+        county_key = str(county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        if not county_key or not pid:
+            return None
+
+        row = self.conn.execute(
+            """
+            SELECT merged_fields_json, evidence_ids_json, snapshot_at
+            FROM parcel_enrichment_snapshot
+            WHERE county=? AND parcel_id=?
+            ORDER BY snapshot_at DESC, id DESC
+            LIMIT 1
+            """,
+            (county_key, pid),
+        ).fetchone()
+        if not row:
+            return None
+
+        merged_fields = {}
+        evidence_ids = []
+        try:
+            merged_fields = json.loads(row["merged_fields_json"] or "{}")
+        except Exception:
+            merged_fields = {}
+        try:
+            evidence_ids = json.loads(row["evidence_ids_json"] or "[]")
+        except Exception:
+            evidence_ids = []
+
+        return {
+            "merged_fields": merged_fields if isinstance(merged_fields, dict) else {},
+            "evidence_ids": [int(x) for x in (evidence_ids or []) if int(x) > 0],
+            "snapshot_at": row["snapshot_at"],
+        }
+
     def create_watchlist(
         self,
         *,

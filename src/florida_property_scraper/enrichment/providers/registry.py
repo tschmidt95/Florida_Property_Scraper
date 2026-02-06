@@ -6,6 +6,10 @@ from typing import Optional
 from .base import OwnerEnrichmentProvider
 from .people_data_labs import PeopleDataLabsProvider
 from .model import PropertyProvider
+from .pa_snapshot_stub import PASnapshotStubProvider
+from .permits_stub import PermitsStubProvider
+from .tax_collector_stub import TaxCollectorStubProvider
+from .code_enforcement_stub import CodeEnforcementStubProvider
 from .seminole_official_records import SeminoleOfficialRecordsProvider
 
 
@@ -18,6 +22,10 @@ def get_owner_enrichment_provider() -> Optional[OwnerEnrichmentProvider]:
 
 _PROPERTY_PROVIDERS: list[PropertyProvider] = [
     SeminoleOfficialRecordsProvider(),
+    PASnapshotStubProvider(),
+    PermitsStubProvider(),
+    TaxCollectorStubProvider(),
+    CodeEnforcementStubProvider(),
 ]
 
 

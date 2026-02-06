@@ -40,6 +40,69 @@ def _recent_within_days(value: str | None, days: int) -> bool:
     return dt >= datetime.now(timezone.utc) - timedelta(days=days)
 
 
+def _to_float(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        s = str(value).strip().replace(",", "")
+        if not s:
+            return None
+        return float(s)
+    except Exception:
+        return None
+
+
+def _to_int(value: object) -> int | None:
+    try:
+        v = _to_float(value)
+        if v is None:
+            return None
+        return int(v)
+    except Exception:
+        return None
+
+
+def _norm_addr(value: object) -> str:
+    try:
+        s = str(value or "").strip().upper()
+    except Exception:
+        return ""
+    if not s:
+        return ""
+    return " ".join(s.split())
+
+
+def _extract_state(value: object) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    parts = [p.strip() for p in raw.replace("  ", " ").split(",") if p.strip()]
+    if parts:
+        tail = parts[-1].split()
+        if len(tail) >= 2 and len(tail[-2]) == 2:
+            return tail[-2]
+        if len(tail) >= 1 and len(tail[-1]) == 2:
+            return tail[-1]
+    return ""
+
+
+def _years_since(value: str | None) -> int | None:
+    dt = _parse_iso(value)
+    if not dt:
+        return None
+    try:
+        days = (datetime.now(timezone.utc) - dt).days
+        if days < 0:
+            return None
+        return int(days // 365.25)
+    except Exception:
+        return None
+
+
 def _best_evidence(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not rows:
         return None
@@ -77,6 +140,8 @@ def evaluate_triggers_from_evidence(
 
     for parcel_id in parcel_list:
         fields = by_parcel.get(parcel_id, {})
+        handled_keys: set[str] = set()
+
         def add_result(*, key: str, fired: bool, reason: str, evidence: list[dict[str, Any]], used_fields: list[str]) -> None:
             ids = []
             for ev in evidence:
@@ -97,12 +162,16 @@ def evaluate_triggers_from_evidence(
                     evaluated_at=now,
                 )
             )
+            handled_keys.add(str(key))
 
-        def add_missing(*, key: str, used_fields: list[str]) -> None:
+        def add_missing(*, key: str, used_fields: list[str], reason: str | None = None) -> None:
+            missing_reason = reason or (
+                "unavailable: missing_fields=" + ",".join([str(x) for x in (used_fields or []) if str(x)])
+            )
             add_result(
                 key=key,
                 fired=False,
-                reason="insufficient_evidence",
+                reason=missing_reason,
                 evidence=[],
                 used_fields=used_fields,
             )
@@ -122,7 +191,32 @@ def evaluate_triggers_from_evidence(
                 used_fields=["permit_last_major_date"],
             )
         else:
-            add_missing(key=TriggerKey.PERMIT_RECENT_MAJOR, used_fields=["permit_last_major_date"])
+            add_missing(
+                key=TriggerKey.PERMIT_RECENT_MAJOR,
+                used_fields=["permit_last_major_date"],
+                reason="unavailable: permit_last_major_date_missing",
+            )
+
+        # permit_recent_minor
+        permit_minor_ev = _best_evidence(fields.get("permit_last_minor_date") or [])
+        fired = False
+        reason = ""
+        if permit_minor_ev:
+            fired = _recent_within_days(str(permit_minor_ev.get("value") or ""), 365)
+            reason = f"permit_last_minor_date={permit_minor_ev.get('value')}"
+            add_result(
+                key=TriggerKey.PERMIT_RECENT_MINOR,
+                fired=fired,
+                reason=reason,
+                evidence=[permit_minor_ev],
+                used_fields=["permit_last_minor_date"],
+            )
+        else:
+            add_missing(
+                key=TriggerKey.PERMIT_RECENT_MINOR,
+                used_fields=["permit_last_minor_date"],
+                reason="unavailable: permit_last_minor_date_missing",
+            )
 
         # code_enforcement_open_case
         code_status_ev = _best_evidence(fields.get("code_enforcement_status") or [])
@@ -190,6 +284,7 @@ def evaluate_triggers_from_evidence(
             add_missing(
                 key=TriggerKey.TAX_DELINQUENT,
                 used_fields=["tax_status", "tax_delinquent_years"],
+                reason="unavailable: tax_fields_missing",
             )
 
         # deed_transfer_recent
@@ -283,6 +378,196 @@ def evaluate_triggers_from_evidence(
             add_missing(
                 key=TriggerKey.OWNER_MAILING_CHANGE,
                 used_fields=["owner_mailing_changed", "owner_mailing_change_date"],
+                reason="unavailable: mailing_change_history_missing",
+            )
+
+        # absentee_owner
+        mailing_ev = _best_evidence(fields.get("owner_mailing_address") or [])
+        situs_ev = _best_evidence(fields.get("situs_address") or [])
+        fired = False
+        reason = ""
+        evidence_used = []
+        used_fields = []
+        if mailing_ev and situs_ev:
+            mailing = _norm_addr(mailing_ev.get("value"))
+            situs = _norm_addr(situs_ev.get("value"))
+            fired = bool(mailing and situs and mailing != situs)
+            reason = f"mailing_vs_situs={mailing}!={situs}" if mailing and situs else "mailing_vs_situs=missing"
+            evidence_used = [mailing_ev, situs_ev]
+            used_fields = ["owner_mailing_address", "situs_address"]
+        if evidence_used:
+            add_result(
+                key=TriggerKey.ABSENTEE_OWNER,
+                fired=fired,
+                reason=reason,
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
+        else:
+            add_missing(
+                key=TriggerKey.ABSENTEE_OWNER,
+                used_fields=["owner_mailing_address", "situs_address"],
+                reason="unavailable: mailing_or_situs_missing",
+            )
+
+        # out_of_state_owner
+        mailing_state_ev = _best_evidence(fields.get("mailing_state") or [])
+        mailing_addr_ev = _best_evidence(fields.get("owner_mailing_address") or [])
+        fired = False
+        reason = ""
+        evidence_used = []
+        used_fields = []
+        state_val = ""
+        if mailing_state_ev:
+            state_val = str(mailing_state_ev.get("value") or "").strip().upper()
+            evidence_used.append(mailing_state_ev)
+            used_fields.append("mailing_state")
+        elif mailing_addr_ev:
+            state_val = _extract_state(mailing_addr_ev.get("value"))
+            evidence_used.append(mailing_addr_ev)
+            used_fields.append("owner_mailing_address")
+
+        if evidence_used:
+            fired = bool(state_val and state_val != "FL")
+            reason = f"mailing_state={state_val or 'UNKNOWN'}"
+            add_result(
+                key=TriggerKey.OUT_OF_STATE_OWNER,
+                fired=fired,
+                reason=reason,
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
+        else:
+            add_missing(
+                key=TriggerKey.OUT_OF_STATE_OWNER,
+                used_fields=["mailing_state", "owner_mailing_address"],
+                reason="unavailable: mailing_state_missing",
+            )
+
+        # mortgage_recent
+        mortgage_date_ev = _best_evidence(fields.get("mortgage_date") or [])
+        mortgage_amount_ev = _best_evidence(fields.get("mortgage_amount") or [])
+        fired = False
+        reason = ""
+        evidence_used = []
+        used_fields = []
+        if mortgage_date_ev:
+            evidence_used.append(mortgage_date_ev)
+            used_fields.append("mortgage_date")
+            fired = _recent_within_days(str(mortgage_date_ev.get("value") or ""), 365)
+            reason = f"mortgage_date={mortgage_date_ev.get('value')}"
+        if mortgage_amount_ev:
+            evidence_used.append(mortgage_amount_ev)
+            used_fields.append("mortgage_amount")
+        if evidence_used:
+            add_result(
+                key=TriggerKey.MORTGAGE_RECENT,
+                fired=fired,
+                reason=reason or "mortgage_date=missing",
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
+        else:
+            add_missing(
+                key=TriggerKey.MORTGAGE_RECENT,
+                used_fields=["mortgage_date", "mortgage_amount"],
+                reason="unavailable: mortgage_fields_missing",
+            )
+
+        # equity_high / equity_low
+        value_ev = (
+            _best_evidence(fields.get("total_value") or [])
+            or _best_evidence(fields.get("assessed_value") or [])
+            or _best_evidence(fields.get("last_sale_price") or [])
+        )
+        mortgage_ev = _best_evidence(fields.get("mortgage_amount") or [])
+        equity_ratio = None
+        evidence_used = []
+        used_fields = []
+        if value_ev and mortgage_ev:
+            value_amt = _to_float(value_ev.get("value"))
+            mortgage_amt = _to_float(mortgage_ev.get("value"))
+            if value_amt and value_amt > 0 and mortgage_amt is not None and mortgage_amt >= 0:
+                equity_ratio = max(0.0, (value_amt - mortgage_amt) / value_amt)
+            evidence_used = [value_ev, mortgage_ev]
+            used_fields = [str(value_ev.get("field") or "value"), "mortgage_amount"]
+
+        if equity_ratio is not None:
+            add_result(
+                key=TriggerKey.EQUITY_HIGH,
+                fired=equity_ratio >= 0.7,
+                reason=f"equity_ratio={equity_ratio:.2f}",
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
+            add_result(
+                key=TriggerKey.EQUITY_LOW,
+                fired=equity_ratio <= 0.2,
+                reason=f"equity_ratio={equity_ratio:.2f}",
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
+        else:
+            add_missing(
+                key=TriggerKey.EQUITY_HIGH,
+                used_fields=["total_value", "assessed_value", "last_sale_price", "mortgage_amount"],
+                reason="unavailable: equity_inputs_missing",
+            )
+            add_missing(
+                key=TriggerKey.EQUITY_LOW,
+                used_fields=["total_value", "assessed_value", "last_sale_price", "mortgage_amount"],
+                reason="unavailable: equity_inputs_missing",
+            )
+
+        # ownership_long_term / ownership_short_term
+        ownership_ev = _best_evidence(fields.get("last_sale_date") or [])
+        if ownership_ev:
+            years = _years_since(str(ownership_ev.get("value") or ""))
+            if years is None:
+                add_missing(
+                    key=TriggerKey.OWNERSHIP_LONG_TERM,
+                    used_fields=["last_sale_date"],
+                    reason="unavailable: last_sale_date_invalid",
+                )
+                add_missing(
+                    key=TriggerKey.OWNERSHIP_SHORT_TERM,
+                    used_fields=["last_sale_date"],
+                    reason="unavailable: last_sale_date_invalid",
+                )
+            else:
+                add_result(
+                    key=TriggerKey.OWNERSHIP_LONG_TERM,
+                    fired=years >= 10,
+                    reason=f"ownership_years={years}",
+                    evidence=[ownership_ev],
+                    used_fields=["last_sale_date"],
+                )
+                add_result(
+                    key=TriggerKey.OWNERSHIP_SHORT_TERM,
+                    fired=years <= 2,
+                    reason=f"ownership_years={years}",
+                    evidence=[ownership_ev],
+                    used_fields=["last_sale_date"],
+                )
+        else:
+            add_missing(
+                key=TriggerKey.OWNERSHIP_LONG_TERM,
+                used_fields=["last_sale_date"],
+                reason="unavailable: last_sale_date_missing",
+            )
+            add_missing(
+                key=TriggerKey.OWNERSHIP_SHORT_TERM,
+                used_fields=["last_sale_date"],
+                reason="unavailable: last_sale_date_missing",
+            )
+
+        for key in TriggerKey:
+            if str(key) in handled_keys:
+                continue
+            add_missing(
+                key=str(key),
+                used_fields=[],
+                reason="unavailable: no_evidence_rule",
             )
 
     return out

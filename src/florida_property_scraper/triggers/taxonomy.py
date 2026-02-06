@@ -82,12 +82,22 @@ class TriggerKey(StrEnum):
 
     # Evidence-based evaluation (pipeline v2)
     PERMIT_RECENT_MAJOR = "permit_recent_major"
+    PERMIT_RECENT_MINOR = "permit_recent_minor"
     CODE_ENFORCEMENT_OPEN_CASE = "code_enforcement_open_case"
     TAX_DELINQUENT = "tax_delinquent"
     DEED_TRANSFER_RECENT = "deed_transfer_recent"
     FORECLOSURE_OR_LIS_PENDENS = "foreclosure_or_lis_pendens"
     OWNER_MAILING_CHANGE = "owner_mailing_change"
     NEW_RECORDING = "new_recording"
+
+    # Ownership + finance signals (evidence-based)
+    ABSENTEE_OWNER = "absentee_owner"
+    OUT_OF_STATE_OWNER = "out_of_state_owner"
+    MORTGAGE_RECENT = "mortgage_recent"
+    EQUITY_HIGH = "equity_high"
+    EQUITY_LOW = "equity_low"
+    OWNERSHIP_LONG_TERM = "ownership_long_term"
+    OWNERSHIP_SHORT_TERM = "ownership_short_term"
 
     # Tax collector (distress / payment events)
     DELINQUENT_TAX = "delinquent_tax"
@@ -233,6 +243,7 @@ def default_severity_for_trigger(trigger_key: str) -> int:
         return 4
     if key in {
         TriggerKey.PERMIT_RECENT_MAJOR,
+        TriggerKey.PERMIT_RECENT_MINOR,
         TriggerKey.CODE_ENFORCEMENT_OPEN_CASE,
         TriggerKey.DEED_TRANSFER_RECENT,
     }:
@@ -271,5 +282,15 @@ def default_severity_for_trigger(trigger_key: str) -> int:
     if key == TriggerKey.OWNER_NAME_CHANGED:
         return 3
     if key == TriggerKey.OWNER_MAILING_CHANGE:
+        return 3
+    if key in {
+        TriggerKey.ABSENTEE_OWNER,
+        TriggerKey.OUT_OF_STATE_OWNER,
+        TriggerKey.MORTGAGE_RECENT,
+        TriggerKey.EQUITY_HIGH,
+        TriggerKey.EQUITY_LOW,
+        TriggerKey.OWNERSHIP_LONG_TERM,
+        TriggerKey.OWNERSHIP_SHORT_TERM,
+    }:
         return 3
     return 1

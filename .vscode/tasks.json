@@ -1344,6 +1344,204 @@ echo; git status --porcelain=v1 -b && echo && git status"
         "panel": "dedicated",
         "clear": true
       }
+    },
+    {
+      "label": "Proof: Backend Up",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/proof_backend_up.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Provider Evidence Persist",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/proof_provider_evidence_persist.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Enrich Seminole Fixture",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/proof_enrich_seminole_fixture.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Trigger Eval Seminole",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/proof_trigger_eval_seminole.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Search Seminole",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "bash scripts/proof_search_seminole.sh"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Curl parcels search",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS \"http://127.0.0.1:8000/api/parcels/search?county=seminole\" | python -m json.tool | head -n 80"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Curl parcels search_normalized",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS \"http://127.0.0.1:8000/api/parcels/search_normalized?county=seminole\" | python -m json.tool | head -n 80"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Curl parcel detail SEM-0001",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS \"http://127.0.0.1:8000/api/parcels/SEM-0001?county=seminole&include_fields=1\" | python -m json.tool | head -n 160"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Curl parcels search (geometry)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS -X POST \"http://127.0.0.1:8000/api/parcels/search\" -H \"Content-Type: application/json\" -d \"{\\\"county\\\":\\\"seminole\\\",\\\"geometry\\\":{\\\"type\\\":\\\"Polygon\\\",\\\"coordinates\\\":[[[-81.4,28.6],[-81.2,28.6],[-81.2,28.8],[-81.4,28.8],[-81.4,28.6]]]},\\\"limit\\\":5}\" | python -m json.tool | head -n 120"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Proof: Curl parcels search_normalized (geometry)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "curl -sS -X POST \"http://127.0.0.1:8000/api/parcels/search_normalized\" -H \"Content-Type: application/json\" -d \"{\\\"county\\\":\\\"seminole\\\",\\\"geometry\\\":{\\\"type\\\":\\\"Polygon\\\",\\\"coordinates\\\":[[[-81.4,28.6],[-81.2,28.6],[-81.2,28.8],[-81.4,28.8],[-81.4,28.6]]]},\\\"limit\\\":5}\" | python -m json.tool | head -n 120"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Git: Commit+Push (Parcel Search + Enrichment + Triggers)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; git add .vscode/tasks.json WORKING_STATE.md src/florida_property_scraper/api/app.py src/florida_property_scraper/storage.py src/florida_property_scraper/triggers/evidence_rules.py src/florida_property_scraper/triggers/taxonomy.py src/florida_property_scraper/enrichment/providers/registry.py src/florida_property_scraper/enrichment/providers/pa_snapshot_stub.py src/florida_property_scraper/enrichment/providers/permits_stub.py src/florida_property_scraper/enrichment/providers/tax_collector_stub.py src/florida_property_scraper/enrichment/providers/code_enforcement_stub.py; git commit -m 'fix: parcel search routes, enrichment merge, triggers'; git push; echo; git --no-pager log -1 --oneline; echo; git status --porcelain=v1 -b"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
   ]
 }

@@ -1,5 +1,10 @@
 # Working State
 
+## Recent fixes
+- Parcel detail merges latest enrichment snapshot (merged fields + evidence IDs) without overwriting valid PA data.
+- Added stub evidence providers (PA snapshot, permits, tax, code enforcement) to keep triggers functional.
+- Evidence-based triggers now return explicit unavailable reasons for missing data instead of silent gaps.
+
 ## UI to backend proxy
 - The UI always calls relative API paths like `/api/...`.
 - Vite proxies `/api` to the backend at `http://127.0.0.1:8000` in dev.
@@ -42,7 +47,7 @@
 ## Evidence-first enrichment + triggers
 - `/api/enrich` returns `mode=evidence_only` with evidence rows and does not populate fields without evidence.
 - Evidence persists in `leads.sqlite` tables: `provider_fetch_log`, `provider_raw`, `provider_evidence`, `parcel_enrichment_snapshot`.
-- `/api/triggers/evaluate` returns all trigger keys; missing evidence returns `fired=false` with `reason=insufficient_evidence`.
+- `/api/triggers/evaluate` returns all trigger keys; missing evidence returns `fired=false` with explicit `reason=unavailable:...`.
 - Provider catalog endpoints: `/api/providers/catalog` and `/api/providers/status` (Seminole).
 - Evidence-only UI banner shows: "Not enriched yet (evidence-only)."
 
@@ -67,7 +72,7 @@
 ## How triggers are evaluated from evidence
 - Evaluation lives in `src/florida_property_scraper/triggers/evidence_rules.py`.
 - Each trigger rule references evidence fields and emits `evidence_ids` + `fields_used`.
-- Current evidence-based triggers: `permit_recent_major`, `code_enforcement_open_case`, `tax_delinquent`, `deed_transfer_recent`, `foreclosure_or_lis_pendens`, `owner_mailing_change`.
+- Current evidence-based triggers include: `permit_recent_major`, `permit_recent_minor`, `code_enforcement_open_case`, `tax_delinquent`, `deed_transfer_recent`, `foreclosure_or_lis_pendens`, `owner_mailing_change`, `absentee_owner`, `out_of_state_owner`, `mortgage_recent`, `equity_high`, `equity_low`, `ownership_long_term`, `ownership_short_term`.
 
 ## Still stubbed / placeholders
 - Live provider fetches beyond SQLite (code enforcement, courts, liens, utilities) remain placeholders pending external auth.
