@@ -311,7 +311,12 @@ function MultiSelectFilter({
     });
   }, [options, query, render]);
 
-  const selectedSet = useMemo(() => new Set(selected), [selected]);
+  const selectedInOptions = useMemo(() => {
+    const optionSet = new Set(options);
+    return selected.filter((v) => optionSet.has(v));
+  }, [options, selected]);
+
+  const selectedSet = useMemo(() => new Set(selectedInOptions), [selectedInOptions]);
 
   const toggle = (v: string) => {
     if (selectedSet.has(v)) onSelected(selected.filter((x) => x !== v));
@@ -339,7 +344,7 @@ function MultiSelectFilter({
         <div>
           <div className="text-xs font-semibold text-cre-text">{title}</div>
           <div className="text-[11px] text-cre-muted">
-            {selected.length} selected · {options.length} options
+            {selectedInOptions.length} selected · {options.length} options
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -362,16 +367,16 @@ function MultiSelectFilter({
             type="button"
             className="rounded-lg border border-cre-border/40 bg-cre-surface px-2 py-1 text-[11px] text-cre-text"
             onClick={clear}
-            disabled={!selected.length}
+            disabled={!selectedInOptions.length}
           >
             Clear
           </button>
         </div>
       </div>
 
-      {selected.length ? (
+      {selectedInOptions.length ? (
         <div className="mt-2 flex flex-wrap gap-1">
-          {selected.slice(0, 40).map((v) => (
+          {selectedInOptions.slice(0, 40).map((v) => (
             <button
               key={`chip:${v}`}
               type="button"
@@ -383,8 +388,8 @@ function MultiSelectFilter({
               <span className="text-cre-muted">×</span>
             </button>
           ))}
-          {selected.length > 40 ? (
-            <div className="px-1 py-1 text-[11px] text-cre-muted">+{selected.length - 40} more</div>
+          {selectedInOptions.length > 40 ? (
+            <div className="px-1 py-1 text-[11px] text-cre-muted">+{selectedInOptions.length - 40} more</div>
           ) : null}
         </div>
       ) : (
@@ -720,6 +725,8 @@ export default function MapSearch({
       return false;
     }
   }, []);
+
+  const devLogEnabled = debugUiEnabled || Boolean((import.meta as any)?.env?.DEV);
 
   const [lastRequest, setLastRequest] = useState<any | null>(null);
   const [lastResponseSummary, setLastResponseSummary] = useState<any | null>(null);
@@ -1898,6 +1905,26 @@ export default function MapSearch({
     const minAcres = hasLotSize && lotSizeUnit === 'acres' ? minLotSize : null;
     const maxAcres = hasLotSize && lotSizeUnit === 'acres' ? maxLotSize : null;
 
+    const normalizeChoice = (v: string): string => v.trim().replace(/\s+/g, ' ');
+    const normalizeChoiceArray = (items: string[]): string[] => {
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const raw of items) {
+        const next = normalizeChoice(String(raw || ''));
+        if (!next || seen.has(next)) continue;
+        seen.add(next);
+        out.push(next);
+      }
+      return out;
+    };
+
+    const zoningOptionSet = new Set(normalizeChoiceArray(zoningOptions));
+    const futureLandUseOptionSet = new Set(normalizeChoiceArray(futureLandUseOptions));
+    const selectedZoningResolved = normalizeChoiceArray(selectedZoning).filter((v) => zoningOptionSet.has(v));
+    const selectedFutureLandUseResolved = normalizeChoiceArray(selectedFutureLandUse).filter((v) =>
+      futureLandUseOptionSet.has(v)
+    );
+
     const filters0: ParcelAttributeFilters & { min_ownership_years?: number | null } = {
       min_sqft: toFloatOrNull(filterForm.minSqft),
       max_sqft: toFloatOrNull(filterForm.maxSqft),
@@ -1912,8 +1939,8 @@ export default function MapSearch({
       max_year_built: toIntOrNull(filterForm.maxYearBuilt),
       property_type: filterForm.propertyType.trim() || null,
       zoning: filterForm.zoning.trim() || null,
-      zoning_in: selectedZoning.length ? selectedZoning : null,
-      future_land_use_in: selectedFutureLandUse.length ? selectedFutureLandUse : null,
+      zoning_in: selectedZoningResolved.length ? selectedZoningResolved : null,
+      future_land_use_in: selectedFutureLandUseResolved.length ? selectedFutureLandUseResolved : null,
       min_value: toIntOrNull(filterForm.minValue),
       max_value: toIntOrNull(filterForm.maxValue),
       min_land_value: toIntOrNull(filterForm.minLandValue),
@@ -1954,12 +1981,17 @@ export default function MapSearch({
     for (const [k, v] of Object.entries(filters0 as any)) {
       if (v === null || v === undefined) continue;
       if (typeof v === 'string' && !v.trim()) continue;
-      if (Array.isArray(v) && v.length === 0) continue;
+      if (Array.isArray(v)) {
+        const cleaned = normalizeChoiceArray(v.map((x) => String(x || '')));
+        if (!cleaned.length) continue;
+        filters[k] = cleaned;
+        continue;
+      }
       filters[k] = v;
     }
     const hasAnyFilters = Object.keys(filters).length > 0;
     if (hasAnyFilters) {
-      filters.missing_policy = 'lenient';
+      filters.missing_policy = 'strict';
     }
 
     const resolvedCounty = county.trim();
@@ -1978,7 +2010,7 @@ export default function MapSearch({
     // Filtering by signals is currently applied via the rollups prefilter (when enabled).
     // Always include trigger_keys as an array (never null)
     try {
-      const keys = (rollupsTriggerKeys || []).map((k) => String(k || '').trim()).filter((k) => k);
+      const keys = normalizeChoiceArray((rollupsTriggerKeys || []).map((k) => String(k || '')));
       payload.trigger_keys = keys;
     } catch {
       payload.trigger_keys = [];
@@ -2458,7 +2490,9 @@ payload.polygon_geojson = polyOut;
         setDebugEvidence({ requestJson: String(payload), responseMeta: { request_origin: requestOrigin } });
       }
     }
-    console.log('[Run] payload', payload);
+    if (devLogEnabled) {
+      console.log('[Run] payload', payload);
+    }
 
     try {
       const poly = (payload as any)?.polygon_geojson;
@@ -2512,14 +2546,17 @@ payload.polygon_geojson = polyOut;
         : null;
 
       // Keep polygon coords out of the console; only log summary.
-      console.log('[FILTERDBG] request', {
-        county: (payload as any)?.county,
-        polygonRingLen: ringLen,
-        bbox,
-        filters: filtersSummary,
-        enrich: (payload as any)?.enrich,
-        enrich_limit: (payload as any)?.enrich_limit,
-      });
+      if (devLogEnabled) {
+        console.log('[FILTERDBG] request', {
+          county: (payload as any)?.county,
+          polygonRingLen: ringLen,
+          bbox,
+          filters: filtersSummary,
+          enrich: (payload as any)?.enrich,
+          enrich_limit: (payload as any)?.enrich_limit,
+          resolved_filter_payload: (payload as any)?.filters || null,
+        });
+      }
     } catch {
       // ignore
     }
@@ -2692,7 +2729,10 @@ payload.polygon_geojson = polyOut;
 
       const rawZoningOptions = uniqSorted((resp as any).zoning_options).filter((s) => !isJunkZoningOption(s));
       setZoningOptions(rawZoningOptions);
-      setFutureLandUseOptions(uniqSorted((resp as any).future_land_use_options));
+      setSelectedZoning((prev) => prev.filter((v) => rawZoningOptions.includes(v)));
+      const rawFutureLandUseOptions = uniqSorted((resp as any).future_land_use_options);
+      setFutureLandUseOptions(rawFutureLandUseOptions);
+      setSelectedFutureLandUse((prev) => prev.filter((v) => rawFutureLandUseOptions.includes(v)));
 
       const recs = allRecords;
       const list = allParcels;
@@ -2704,24 +2744,29 @@ payload.polygon_geojson = polyOut;
         }
       }
 
-      console.log('[Run] response', { recordsLen: recs.length });
+      if (devLogEnabled) {
+        console.log('[Run] response', { recordsLen: recs.length });
+      }
 
       try {
         const searchId = (resp as any).search_id;
         const summary = (resp as any).summary || {};
-        console.log('[FILTERDBG] response', {
-          search_id: searchId,
-          candidate_count: summary.candidate_count,
-          filtered_count: summary.filtered_count,
-          zoning_options_len: Array.isArray((resp as any).zoning_options)
-            ? (resp as any).zoning_options.length
-            : 0,
-          future_land_use_options_len: Array.isArray((resp as any).future_land_use_options)
-            ? (resp as any).future_land_use_options.length
-            : 0,
-          warnings_len: Array.isArray((resp as any).warnings) ? (resp as any).warnings.length : 0,
-          field_stats: (resp as any).field_stats || null,
-        });
+        if (devLogEnabled) {
+          console.log('[FILTERDBG] response', {
+            search_id: searchId,
+            candidate_count: summary.candidate_count,
+            filtered_count: summary.filtered_count,
+            zoning_options_len: Array.isArray((resp as any).zoning_options)
+              ? (resp as any).zoning_options.length
+              : 0,
+            future_land_use_options_len: Array.isArray((resp as any).future_land_use_options)
+              ? (resp as any).future_land_use_options.length
+              : 0,
+            warnings_len: Array.isArray((resp as any).warnings) ? (resp as any).warnings.length : 0,
+            field_stats: (resp as any).field_stats || null,
+            applied_where_clauses: (resp as any).debug_flags?.applied_where_clauses || [],
+          });
+        }
       } catch {
         // ignore
       }
