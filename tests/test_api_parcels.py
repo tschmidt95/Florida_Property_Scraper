@@ -15,6 +15,8 @@ def test_api_parcels_zoom_gating(tmp_path, monkeypatch):
     # Isolate PA DB for the API (list endpoint batches hover fields).
     db_path = tmp_path / "leads.sqlite"
     monkeypatch.setenv("PA_DB", str(db_path))
+    monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
+    monkeypatch.setenv("PARCELS_DB_PATH", str(tmp_path / "missing-parcels.sqlite"))
 
     from florida_property_scraper.pa.normalize import apply_defaults
     from florida_property_scraper.pa.storage import PASQLite
@@ -100,6 +102,8 @@ def test_api_parcels_county_switch_and_default(tmp_path, monkeypatch):
     # Isolate PA DB for API.
     db_path = tmp_path / "leads.sqlite"
     monkeypatch.setenv("PA_DB", str(db_path))
+    monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
+    monkeypatch.setenv("PARCELS_DB_PATH", str(tmp_path / "missing-parcels.sqlite"))
 
     from fastapi.testclient import TestClient
 
@@ -463,6 +467,192 @@ def test_api_parcels_search_filters_object(tmp_path, monkeypatch):
 
     rec_ids = {row["parcel_id"] for row in data.get("records") or []}
     assert rec_ids == {"SEM-0001"}
+
+
+def test_api_parcels_search_options_complete_for_scope(tmp_path, monkeypatch):
+    if app is None:
+        return
+
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    fixtures_dir = os.path.join(repo_root, "tests", "fixtures", "parcels")
+    monkeypatch.setenv("PARCEL_GEOJSON_DIR", fixtures_dir)
+
+    db_path = tmp_path / "leads.sqlite"
+    monkeypatch.setenv("PA_DB", str(db_path))
+    monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
+    monkeypatch.setenv("PARCELS_DB_PATH", str(tmp_path / "missing-parcels.sqlite"))
+
+    from florida_property_scraper.pa.normalize import apply_defaults
+    from florida_property_scraper.pa.storage import PASQLite
+
+    store = PASQLite(str(db_path))
+    try:
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0001",
+                    "situs_address": "100 E SAMPLE ST",
+                    "owner_names": ["OWNER 1"],
+                    "zoning": "R-1",
+                    "future_land_use": "RESIDENTIAL",
+                    "living_sf": 2200,
+                }
+            )
+        )
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0002",
+                    "situs_address": "200 E SAMPLE ST",
+                    "owner_names": ["OWNER 2"],
+                    "zoning": "C-2",
+                    "future_land_use": "COMMERCIAL",
+                    "living_sf": 1300,
+                }
+            )
+        )
+    finally:
+        store.close()
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    poly = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-81.372, 28.647],
+                [-81.362, 28.647],
+                [-81.362, 28.653],
+                [-81.372, 28.653],
+                [-81.372, 28.647],
+            ]
+        ],
+    }
+
+    payload = {
+        "county": "seminole",
+        "geometry": poly,
+        "limit": 50,
+        "filters": {
+            "zoning_in": ["R-1"],
+            "missing_policy": "strict",
+        },
+    }
+    r = client.post("/api/parcels/search", json=payload)
+    assert r.status_code == 200
+    data = r.json()
+
+    # Options should represent the full geometry/county scope, not only the filtered subset.
+    zoning_options = set(data.get("zoning_options") or [])
+    flu_options = set(data.get("future_land_use_options") or [])
+    assert "R-1" in zoning_options
+    assert "C-2" in zoning_options
+    assert "RESIDENTIAL" in flu_options
+    assert "COMMERCIAL" in flu_options
+
+
+def test_api_parcels_search_filter_application_and_stable_counts(tmp_path, monkeypatch):
+    if app is None:
+        return
+
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    fixtures_dir = os.path.join(repo_root, "tests", "fixtures", "parcels")
+    monkeypatch.setenv("PARCEL_GEOJSON_DIR", fixtures_dir)
+
+    db_path = tmp_path / "leads.sqlite"
+    monkeypatch.setenv("PA_DB", str(db_path))
+    monkeypatch.setenv("LEADS_SQLITE_PATH", str(db_path))
+    monkeypatch.setenv("PARCELS_DB_PATH", str(tmp_path / "missing-parcels.sqlite"))
+
+    from florida_property_scraper.pa.normalize import apply_defaults
+    from florida_property_scraper.pa.storage import PASQLite
+
+    store = PASQLite(str(db_path))
+    try:
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0001",
+                    "situs_address": "100 E SAMPLE ST",
+                    "owner_names": ["OWNER 1"],
+                    "zoning": "R-1",
+                    "future_land_use": "RESIDENTIAL",
+                    "living_sf": 2400,
+                }
+            )
+        )
+        store.upsert(
+            apply_defaults(
+                {
+                    "county": "seminole",
+                    "parcel_id": "SEM-0002",
+                    "situs_address": "200 E SAMPLE ST",
+                    "owner_names": ["OWNER 2"],
+                    "zoning": "C-2",
+                    "future_land_use": "COMMERCIAL",
+                    "living_sf": 1200,
+                }
+            )
+        )
+    finally:
+        store.close()
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    poly = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-81.372, 28.647],
+                [-81.362, 28.647],
+                [-81.362, 28.653],
+                [-81.372, 28.653],
+                [-81.372, 28.647],
+            ]
+        ],
+    }
+
+    baseline = client.post(
+        "/api/parcels/search",
+        json={"county": "seminole", "geometry": poly, "limit": 50},
+    )
+    assert baseline.status_code == 200
+    baseline_data = baseline.json()
+    baseline_summary = baseline_data.get("summary") or {}
+    baseline_ids = {row.get("parcel_id") for row in (baseline_data.get("records") or [])}
+    assert {"SEM-0001", "SEM-0002"}.issubset(baseline_ids)
+    assert int(baseline_summary.get("candidate_count") or 0) >= 2
+    assert int(baseline_summary.get("filtered_count") or 0) >= 2
+
+    filtered = client.post(
+        "/api/parcels/search",
+        json={
+            "county": "seminole",
+            "geometry": poly,
+            "limit": 50,
+            "filters": {
+                "zoning_in": ["R-1"],
+                "missing_policy": "strict",
+            },
+        },
+    )
+    assert filtered.status_code == 200
+    filtered_data = filtered.json()
+    filtered_summary = filtered_data.get("summary") or {}
+    filtered_ids = {row.get("parcel_id") for row in (filtered_data.get("records") or [])}
+
+    assert filtered_ids == {"SEM-0001"}
+
+    # Candidate scope should stay stable (geometry scope); filtered totals should narrow.
+    assert int(filtered_summary.get("candidate_count") or 0) == int(baseline_summary.get("candidate_count") or 0)
+    assert int(filtered_summary.get("filtered_count") or 0) == 1
+    assert int(filtered_summary.get("total_count") or 0) == 1
+    assert int(filtered_data.get("total_count") or 0) == 1
 
 
 def test_api_parcel_meta_roundtrip(tmp_path, monkeypatch):

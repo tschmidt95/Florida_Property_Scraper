@@ -3605,6 +3605,45 @@ if app:
         # Compile filters (supports both list-form and object-form).
         raw_filters = payload.get("filters")
         filters = compile_filters(raw_filters)
+        applied_where_clauses: list[str] = []
+
+        try:
+            for f in (filters or []):
+                field_name = str(getattr(f, "field", "") or "").strip()
+                op_raw = str(getattr(f, "op", "") or "").strip().lower()
+                value = getattr(f, "value", None)
+                if not field_name or not op_raw:
+                    continue
+                if op_raw in {"in", "in_list"} and isinstance(value, (list, tuple, set)):
+                    n = len([x for x in value if x is not None])
+                    if n <= 0:
+                        continue
+                    applied_where_clauses.append(f"{field_name} IN ({', '.join(['?'] * n)})")
+                    continue
+                if op_raw == "contains":
+                    applied_where_clauses.append(f"LOWER({field_name}) LIKE ?")
+                    continue
+                if op_raw in {"=", "==", "equals"}:
+                    applied_where_clauses.append(f"{field_name} = ?")
+                    continue
+                if op_raw in {"!=", "not_equals"}:
+                    applied_where_clauses.append(f"{field_name} != ?")
+                    continue
+                if op_raw in {">", "gt", ">=", "gte", "<", "lt", "<=", "lte"}:
+                    op_norm = op_raw
+                    if op_raw == "gt":
+                        op_norm = ">"
+                    elif op_raw == "gte":
+                        op_norm = ">="
+                    elif op_raw == "lt":
+                        op_norm = "<"
+                    elif op_raw == "lte":
+                        op_norm = "<="
+                    applied_where_clauses.append(f"{field_name} {op_norm} ?")
+                    continue
+                applied_where_clauses.append(f"{field_name} {op_raw} ?")
+        except Exception:
+            applied_where_clauses = []
 
         filter_fields: list[str] = []
         try:
@@ -3642,6 +3681,7 @@ if app:
                         "raw_filter_keys": raw_filter_keys,
                         "raw_filters": raw_filters if isinstance(raw_filters, dict) else None,
                         "compiled_filters": compiled_summary,
+                        "applied_where_clauses": applied_where_clauses,
                     }
                 )
             except Exception:
@@ -5430,6 +5470,8 @@ if app:
                 "records_truncated": bool(records_truncated),
                 "explain": bool(explain_enabled),
                 "missing_policy": str(missing_policy),
+                "applied_where_clauses": applied_where_clauses,
+                "resolved_filter_payload": raw_filters if isinstance(raw_filters, dict) else None,
             }
 
         if debug_counts is not None:
