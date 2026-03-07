@@ -2170,6 +2170,24 @@ class SQLiteStore:
             except Exception:
                 filters = {}
 
+            trigger_keys = []
+            trigger_groups = []
+            trigger_tiers = []
+            trigger_min_score = None
+            if isinstance(filters, dict):
+                trigger_keys = [str(x or "").strip() for x in (filters.pop("trigger_keys", []) or [])]
+                trigger_keys = [x for x in trigger_keys if x]
+                trigger_groups = [str(x or "").strip() for x in (filters.pop("trigger_groups", []) or [])]
+                trigger_groups = [x for x in trigger_groups if x]
+                trigger_tiers = [str(x or "").strip() for x in (filters.pop("trigger_tiers", []) or [])]
+                trigger_tiers = [x for x in trigger_tiers if x]
+                raw_min_score = filters.pop("trigger_min_score", None)
+                if raw_min_score is not None:
+                    try:
+                        trigger_min_score = int(raw_min_score)
+                    except Exception:
+                        trigger_min_score = None
+
             enrich = bool(int(ss.get("enrich") or 0))
             sort = str(ss.get("sort") or "")
 
@@ -2181,6 +2199,10 @@ class SQLiteStore:
                     "county": county_key,
                     "geometry": polygon,
                     "filters": filters,
+                    "trigger_keys": trigger_keys,
+                    "trigger_groups": trigger_groups,
+                    "trigger_tiers": trigger_tiers,
+                    "trigger_min_score": trigger_min_score,
                     "enrich": bool(enrich),
                     "sort": sort,
                     "limit": int(limit),

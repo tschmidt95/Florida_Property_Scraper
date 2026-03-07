@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from florida_property_scraper.registry import get_county as get_registry_county
+
 ProviderKind = Literal["clerk", "permits", "tax", "pa"]
 
 
@@ -29,10 +31,47 @@ class ProviderTarget:
     notes: str | None = None
 
 
+def _county_display_or_slug(county: str) -> str:
+    key = (county or "").strip().lower()
+    rec = get_registry_county(key)
+    if rec is None:
+        return key
+    return rec.display_name
+
+
 def get_targets(county: str) -> list[ProviderTarget]:
     key = (county or "").strip().lower()
-    if key != "seminole":
+    if not key:
         return []
+
+    if key != "seminole":
+        display = _county_display_or_slug(key)
+        return [
+            ProviderTarget(
+                county=key,
+                kind="pa",
+                base_url="",
+                notes=f"{display} public property appraiser data source",
+            ),
+            ProviderTarget(
+                county=key,
+                kind="tax",
+                base_url="",
+                notes=f"{display} public tax collector data source",
+            ),
+            ProviderTarget(
+                county=key,
+                kind="clerk",
+                base_url="",
+                notes=f"{display} public clerk/official records data source",
+            ),
+            ProviderTarget(
+                county=key,
+                kind="permits",
+                base_url="",
+                notes=f"{display} public permits data source",
+            ),
+        ]
 
     return [
         ProviderTarget(
@@ -64,10 +103,169 @@ def get_targets(county: str) -> list[ProviderTarget]:
 
 def get_provider_catalog(county: str) -> list[ProviderCatalogEntry]:
     key = (county or "").strip().lower()
-    if key != "seminole":
+    if not key:
         return []
 
-    return [
+    supports = [key]
+    entries: list[ProviderCatalogEntry] = [
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="official_records_sqlite",
+            category="official_records",
+            method="sqlite",
+            supports_counties=supports,
+            target_ids=["clerk"],
+            base_url="",
+            supported_fields=[
+                "official_record_doc_type",
+                "official_record_rec_date",
+                "official_record_parties",
+                "last_sale_date",
+                "last_sale_price",
+            ],
+            rate_limit=None,
+            status="implemented",
+            notes="Public official-records evidence from ingested county records table",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="pa_snapshot_stub",
+            category="property_appraiser",
+            method="sqlite",
+            supports_counties=supports,
+            target_ids=["pa"],
+            base_url="",
+            supported_fields=[
+                "situs_address",
+                "owner_mailing_address",
+                "mailing_state",
+                "last_sale_date",
+                "last_sale_price",
+                "assessed_value",
+                "total_value",
+                "mortgage_amount",
+                "mortgage_date",
+                "mortgage_lender",
+            ],
+            rate_limit=None,
+            status="implemented",
+            notes="Public property appraiser snapshot evidence from local PA table",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="permits_stub",
+            category="permits",
+            method="sqlite",
+            supports_counties=supports,
+            target_ids=["permits"],
+            base_url="",
+            supported_fields=["permit_last_major_date", "permit_last_minor_date"],
+            rate_limit=None,
+            status="implemented",
+            notes="Public permit evidence from ingested permits table",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="tax_collector_stub",
+            category="tax",
+            method="sqlite",
+            supports_counties=supports,
+            target_ids=["tax"],
+            base_url="",
+            supported_fields=["tax_status", "tax_delinquent_years"],
+            rate_limit=None,
+            status="implemented",
+            notes="Public tax collector evidence from ingested tax events table",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="code_enforcement_stub",
+            category="code_enforcement",
+            method="sqlite",
+            supports_counties=supports,
+            target_ids=[],
+            base_url="",
+            supported_fields=["code_enforcement_status", "code_case_opened_date"],
+            rate_limit=None,
+            status="implemented",
+            notes="Public code enforcement evidence from ingested county events table",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id="manual_ingest",
+            category="manual",
+            method="manual",
+            supports_counties=supports,
+            target_ids=[],
+            base_url="",
+            supported_fields=[
+                "official_record_doc_type",
+                "official_record_rec_date",
+                "last_sale_date",
+                "last_sale_price",
+                "tax_status",
+                "tax_delinquent_years",
+                "code_enforcement_status",
+                "code_case_opened_date",
+                "permit_last_major_date",
+                "permit_last_minor_date",
+                "owner_mailing_address",
+                "situs_address",
+                "mailing_state",
+                "mortgage_amount",
+                "mortgage_date",
+                "assessed_value",
+                "total_value",
+            ],
+            rate_limit=None,
+            status="implemented",
+            notes="Manual public-record evidence fallback",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id=f"{key}_courts",
+            category="courts",
+            method="not_supported",
+            supports_counties=supports,
+            target_ids=["clerk"],
+            base_url="",
+            supported_fields=["case_type", "filed_date", "parties"],
+            rate_limit={"requests_per_min": 30},
+            status="not_implemented",
+            notes="Planned public courts connector",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id=f"{key}_liens",
+            category="liens",
+            method="not_supported",
+            supports_counties=supports,
+            target_ids=["clerk"],
+            base_url="",
+            supported_fields=["lien_type", "recorded_date", "amount"],
+            rate_limit={"requests_per_min": 30},
+            status="not_implemented",
+            notes="Planned public liens connector",
+        ),
+        ProviderCatalogEntry(
+            county=key,
+            provider_id=f"{key}_utilities",
+            category="utilities",
+            method="not_supported",
+            supports_counties=supports,
+            target_ids=[],
+            base_url="",
+            supported_fields=["account_status", "service_address"],
+            rate_limit={"requests_per_min": 30},
+            status="not_implemented",
+            notes="Planned public utilities connector",
+        ),
+    ]
+
+    if key != "seminole":
+        return entries
+
+    entries.extend([
         ProviderCatalogEntry(
             county="seminole",
             provider_id="seminole_clerk_official_records",
@@ -204,4 +402,5 @@ def get_provider_catalog(county: str) -> list[ProviderCatalogEntry]:
             status="not_implemented",
             notes="Utilities (placeholder)",
         ),
-    ]
+    ])
+    return entries

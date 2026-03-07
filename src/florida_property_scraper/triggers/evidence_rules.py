@@ -115,6 +115,16 @@ def _best_evidence(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return sorted(rows, key=rank, reverse=True)[0]
 
 
+def _doc_matches_any(doc_type: str, needles: list[str]) -> bool:
+    dt = str(doc_type or "").strip().lower()
+    if not dt:
+        return False
+    for n in needles:
+        if str(n or "").strip().lower() in dt:
+            return True
+    return False
+
+
 def evaluate_triggers_from_evidence(
     *,
     county: str,
@@ -280,9 +290,21 @@ def evaluate_triggers_from_evidence(
                 evidence=evidence_used,
                 used_fields=used_fields,
             )
+            add_result(
+                key=TriggerKey.DELINQUENT_TAX,
+                fired=fired,
+                reason=reason,
+                evidence=evidence_used,
+                used_fields=used_fields,
+            )
         else:
             add_missing(
                 key=TriggerKey.TAX_DELINQUENT,
+                used_fields=["tax_status", "tax_delinquent_years"],
+                reason="unavailable: tax_fields_missing",
+            )
+            add_missing(
+                key=TriggerKey.DELINQUENT_TAX,
                 used_fields=["tax_status", "tax_delinquent_years"],
                 reason="unavailable: tax_fields_missing",
             )
@@ -305,6 +327,7 @@ def evaluate_triggers_from_evidence(
         # foreclosure_or_lis_pendens
         doc_ev = _best_evidence(fields.get("official_record_doc_type") or [])
         if doc_ev:
+            doc_evidence: dict[str, Any] = doc_ev
             doc_type = str(doc_ev.get("value") or "").strip().lower()
             fired = "lis pendens" in doc_type or "foreclosure" in doc_type
             reason = f"official_record_doc_type={doc_type}"
@@ -320,6 +343,77 @@ def evaluate_triggers_from_evidence(
                 key=TriggerKey.FORECLOSURE_OR_LIS_PENDENS,
                 used_fields=["official_record_doc_type"],
             )
+
+        # Official-record document-type taxonomy (distinguishes all record/court-style triggers)
+        doc_ev = _best_evidence(fields.get("official_record_doc_type") or [])
+        if doc_ev:
+            doc_type = str(doc_ev.get("value") or "").strip().lower()
+
+            def doc_rule(key: str, needles: list[str]) -> None:
+                fired_local = _doc_matches_any(doc_type, needles)
+                add_result(
+                    key=key,
+                    fired=fired_local,
+                    reason=f"official_record_doc_type={doc_type}",
+                    evidence=[doc_evidence],
+                    used_fields=["official_record_doc_type"],
+                )
+
+            doc_rule(TriggerKey.LIS_PENDENS, ["lis pendens"])
+            doc_rule(TriggerKey.FORECLOSURE_FILING, ["foreclosure", "notice of default"])
+            doc_rule(TriggerKey.FORECLOSURE_JUDGMENT, ["foreclosure judgment", "final judgment"])
+            doc_rule(TriggerKey.FORECLOSURE, ["foreclosure", "lis pendens"])
+            doc_rule(TriggerKey.TAX_DEED_APPLICATION, ["tax deed application", "tax deed"])
+            doc_rule(TriggerKey.PROBATE_OPENED, ["probate"])
+            doc_rule(TriggerKey.DIVORCE_FILED, ["divorce", "dissolution of marriage"])
+            doc_rule(TriggerKey.EVICTION_FILING, ["eviction", "unlawful detainer"])
+
+            doc_rule(TriggerKey.DEED_RECORDED, ["deed"])
+            doc_rule(TriggerKey.DEED_WARRANTY, ["warranty deed"])
+            doc_rule(TriggerKey.DEED_QUITCLAIM, ["quitclaim", "quit claim"])
+            doc_rule(TriggerKey.MORTGAGE_RECORDED, ["mortgage"])
+            doc_rule(TriggerKey.MORTGAGE_SATISFACTION, ["satisfaction"])
+            doc_rule(TriggerKey.MORTGAGE_ASSIGNMENT, ["assignment of mortgage", "mortgage assignment"])
+
+            doc_rule(TriggerKey.MECHANICS_LIEN, ["mechanic", "construction lien"])
+            doc_rule(TriggerKey.HOA_LIEN, ["hoa lien", "homeowners association lien"])
+            doc_rule(TriggerKey.IRS_TAX_LIEN, ["irs tax lien", "federal tax lien"])
+            doc_rule(TriggerKey.STATE_TAX_LIEN, ["state tax lien"])
+            doc_rule(TriggerKey.CODE_ENFORCEMENT_LIEN, ["code enforcement lien"])
+            doc_rule(TriggerKey.JUDGMENT_LIEN, ["judgment lien"])
+            doc_rule(TriggerKey.UTILITY_LIEN, ["utility lien"])
+            doc_rule(TriggerKey.LIEN_RECORDED, ["lien"])
+        else:
+            missing_doc_keys = [
+                TriggerKey.LIS_PENDENS,
+                TriggerKey.FORECLOSURE_FILING,
+                TriggerKey.FORECLOSURE_JUDGMENT,
+                TriggerKey.FORECLOSURE,
+                TriggerKey.TAX_DEED_APPLICATION,
+                TriggerKey.PROBATE_OPENED,
+                TriggerKey.DIVORCE_FILED,
+                TriggerKey.EVICTION_FILING,
+                TriggerKey.DEED_RECORDED,
+                TriggerKey.DEED_WARRANTY,
+                TriggerKey.DEED_QUITCLAIM,
+                TriggerKey.MORTGAGE_RECORDED,
+                TriggerKey.MORTGAGE_SATISFACTION,
+                TriggerKey.MORTGAGE_ASSIGNMENT,
+                TriggerKey.MECHANICS_LIEN,
+                TriggerKey.HOA_LIEN,
+                TriggerKey.IRS_TAX_LIEN,
+                TriggerKey.STATE_TAX_LIEN,
+                TriggerKey.CODE_ENFORCEMENT_LIEN,
+                TriggerKey.JUDGMENT_LIEN,
+                TriggerKey.UTILITY_LIEN,
+                TriggerKey.LIEN_RECORDED,
+            ]
+            for mk in missing_doc_keys:
+                add_missing(
+                    key=mk,
+                    used_fields=["official_record_doc_type"],
+                    reason="unavailable: official_record_doc_type_missing",
+                )
 
         # new_recording
         rec_ev = _best_evidence(fields.get("official_record_rec_date") or [])

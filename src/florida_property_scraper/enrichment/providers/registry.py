@@ -10,6 +10,7 @@ from .pa_snapshot_stub import PASnapshotStubProvider
 from .permits_stub import PermitsStubProvider
 from .tax_collector_stub import TaxCollectorStubProvider
 from .code_enforcement_stub import CodeEnforcementStubProvider
+from .official_records_sqlite import OfficialRecordsSQLiteProvider
 from .seminole_official_records import SeminoleOfficialRecordsProvider
 
 
@@ -21,6 +22,7 @@ def get_owner_enrichment_provider() -> Optional[OwnerEnrichmentProvider]:
 
 
 _PROPERTY_PROVIDERS: list[PropertyProvider] = [
+    OfficialRecordsSQLiteProvider(),
     SeminoleOfficialRecordsProvider(),
     PASnapshotStubProvider(),
     PermitsStubProvider(),

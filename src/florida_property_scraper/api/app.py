@@ -6407,7 +6407,7 @@ if app:
             {"key": "tax_certificate_redeemed", "label": "Tax certificate redeemed", "group": "Tax Collector", "tier": "strong", "implemented": True},
             {"key": "payment_plan_started", "label": "Payment plan started", "group": "Tax Collector", "tier": "strong", "implemented": True},
             {"key": "payment_plan_defaulted", "label": "Payment plan defaulted", "group": "Tax Collector", "tier": "strong", "implemented": True},
-            {"key": "tax_deed_application", "label": "Tax deed application", "group": "Tax Collector", "tier": "critical", "implemented": False, "coming_soon": True},
+            {"key": "tax_deed_application", "label": "Tax deed application", "group": "Tax Collector", "tier": "critical", "implemented": True},
             {"key": "code_case_opened", "label": "Code case opened", "group": "Code Enforcement", "tier": "strong", "implemented": True},
             {"key": "unsafe_structure", "label": "Unsafe structure", "group": "Code Enforcement", "tier": "critical", "implemented": True},
             {"key": "condemnation", "label": "Condemnation", "group": "Code Enforcement", "tier": "critical", "implemented": True},
@@ -6417,9 +6417,9 @@ if app:
             {"key": "fines_imposed", "label": "Fines imposed", "group": "Code Enforcement", "tier": "strong", "implemented": True},
             {"key": "reinspection_failed", "label": "Reinspection failed", "group": "Code Enforcement", "tier": "strong", "implemented": True},
             {"key": "repeat_violation", "label": "Repeat violation", "group": "Code Enforcement", "tier": "strong", "implemented": True},
-            {"key": "probate_opened", "label": "Probate opened", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
-            {"key": "divorce_filed", "label": "Divorce filed", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
-            {"key": "eviction_filing", "label": "Eviction filing", "group": "Courts", "tier": "critical", "implemented": False, "coming_soon": True},
+            {"key": "probate_opened", "label": "Probate opened", "group": "Courts", "tier": "critical", "implemented": True},
+            {"key": "divorce_filed", "label": "Divorce filed", "group": "Courts", "tier": "critical", "implemented": True},
+            {"key": "eviction_filing", "label": "Eviction filing", "group": "Courts", "tier": "critical", "implemented": True},
         ]
         return {"ok": True, "signals": signals}
 
@@ -6814,6 +6814,9 @@ if app:
                 deduped[e.provider_id] = ProviderCatalogEntryOut(
                     provider_id=e.provider_id,
                     category=e.category,
+                    method=e.method,
+                    supports_counties=list(e.supports_counties or []),
+                    target_ids=list(e.target_ids or []),
                     base_url=e.base_url,
                     supported_fields=list(e.supported_fields),
                     rate_limit=e.rate_limit,
@@ -7521,7 +7524,7 @@ if app:
             store = SQLiteStore(db_path)
             merged_fields: dict[str, dict[str, Any]] = {}
             try:
-                min_conf_label = str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "high")).strip().lower() or "high"
+                min_conf_label = str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "low")).strip().lower() or "low"
                 rows = store.list_provider_evidence_for_parcels(county=county_key, parcel_ids=parcel_ids)
                 by_parcel: dict[str, list[dict[str, Any]]] = {}
                 for row in rows:
@@ -8844,6 +8847,7 @@ if app:
         # Demo seeding disabled: production must use real data sources only.
 
     _watchlists_scheduler_task: dict[str, Any] = {"task": None}
+    _statewide_refresh_scheduler_task: dict[str, Any] = {"task": None}
 
     @app.on_event("startup")
     async def _start_watchlists_scheduler():
@@ -8940,6 +8944,73 @@ if app:
         import asyncio
 
         t = _watchlists_scheduler_task.get("task")
+        if t is not None:
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+
+    @app.on_event("startup")
+    async def _start_statewide_refresh_scheduler():
+        import asyncio
+
+        enabled = os.getenv("FPS_STATEWIDE_REFRESH_SCHEDULER", "0").strip() == "1"
+        if not enabled:
+            return
+
+        interval_s = int(float(os.getenv("FPS_STATEWIDE_REFRESH_INTERVAL_S", "900") or 900))
+        interval_s = max(30, interval_s)
+        batch_size = int(float(os.getenv("FPS_STATEWIDE_REFRESH_BATCH_SIZE", "100") or 100))
+        max_parcels = int(float(os.getenv("FPS_STATEWIDE_REFRESH_MAX_PARCELS_PER_COUNTY", "1000") or 1000))
+        counties_raw = str(os.getenv("FPS_STATEWIDE_REFRESH_COUNTIES", "")).strip()
+        county_filter = [c.strip().lower() for c in counties_raw.split(",") if c.strip()] if counties_raw else None
+
+        logger = logging.getLogger("fps.statewide_refresh")
+        logger.warning(
+            "statewide refresh scheduler enabled: interval_s=%s batch_size=%s max_parcels_per_county=%s counties=%s",
+            interval_s,
+            batch_size,
+            max_parcels,
+            county_filter or "all",
+        )
+
+        async def _loop():
+            from florida_property_scraper.scheduler.statewide_refresh import run_statewide_refresh_tick
+
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            while True:
+                try:
+                    result = run_statewide_refresh_tick(
+                        db_path=db_path,
+                        counties=county_filter,
+                        batch_size=batch_size,
+                        max_parcels_per_county=max_parcels,
+                        min_confidence_label=str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "low") or "low"),
+                    )
+                    stats = result.get("stats") if isinstance(result, dict) else {}
+                    logger.warning(
+                        "statewide refresh tick: counties=%s parcels=%s evidence=%s triggers=%s",
+                        (stats or {}).get("counties_processed", 0),
+                        (stats or {}).get("parcels_considered", 0),
+                        (stats or {}).get("evidence_rows_written", 0),
+                        (stats or {}).get("trigger_results_written", 0),
+                    )
+                except Exception as e:
+                    logger.warning("statewide refresh tick failed: %s", e)
+
+                await asyncio.sleep(interval_s)
+
+        try:
+            _statewide_refresh_scheduler_task["task"] = asyncio.create_task(_loop())
+        except Exception as e:
+            logger.warning("statewide refresh scheduler failed to start: %s", e)
+
+    @app.on_event("shutdown")
+    async def _stop_statewide_refresh_scheduler():
+        import asyncio
+
+        t = _statewide_refresh_scheduler_task.get("task")
         if t is not None:
             t.cancel()
             try:

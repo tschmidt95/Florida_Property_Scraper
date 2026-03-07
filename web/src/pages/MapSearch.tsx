@@ -441,7 +441,6 @@ type SignalCatalogItem = {
   label: string;
   group: string;
   tier: 'critical' | 'strong' | 'support' | 'info';
-  comingSoon?: boolean;
 };
 
 // NOTE: This is a frontend mirror of the backend trigger taxonomy
@@ -500,7 +499,7 @@ const SIGNALS_CATALOG: SignalCatalogItem[] = [
   { key: 'tax_certificate_redeemed', label: 'Tax certificate redeemed', group: 'Tax Collector', tier: 'strong' },
   { key: 'payment_plan_started', label: 'Payment plan started', group: 'Tax Collector', tier: 'strong' },
   { key: 'payment_plan_defaulted', label: 'Payment plan defaulted', group: 'Tax Collector', tier: 'strong' },
-  { key: 'tax_deed_application', label: 'Tax deed application', group: 'Tax Collector', tier: 'critical', comingSoon: true },
+  { key: 'tax_deed_application', label: 'Tax deed application', group: 'Tax Collector', tier: 'critical' },
 
   // Code enforcement
   { key: 'code_case_opened', label: 'Code case opened', group: 'Code Enforcement', tier: 'strong' },
@@ -513,13 +512,11 @@ const SIGNALS_CATALOG: SignalCatalogItem[] = [
   { key: 'reinspection_failed', label: 'Reinspection failed', group: 'Code Enforcement', tier: 'strong' },
   { key: 'repeat_violation', label: 'Repeat violation', group: 'Code Enforcement', tier: 'strong' },
 
-  // Courts (placeholders)
-  { key: 'probate_opened', label: 'Probate opened', group: 'Courts', tier: 'critical', comingSoon: true },
-  { key: 'divorce_filed', label: 'Divorce filed', group: 'Courts', tier: 'critical', comingSoon: true },
-  { key: 'eviction_filing', label: 'Eviction filing', group: 'Courts', tier: 'critical', comingSoon: true },
+  // Courts
+  { key: 'probate_opened', label: 'Probate opened', group: 'Courts', tier: 'critical' },
+  { key: 'divorce_filed', label: 'Divorce filed', group: 'Courts', tier: 'critical' },
+  { key: 'eviction_filing', label: 'Eviction filing', group: 'Courts', tier: 'critical' },
 ];
-
-const ENABLED_SIGNAL_KEYS_DEFAULT = new Set(SIGNALS_CATALOG.filter((x) => !x.comingSoon).map((x) => x.key));
 
 export default function MapSearch({
   onMapStatus,
@@ -630,6 +627,10 @@ export default function MapSearch({
   const [records, setRecords] = useState<ParcelRecord[]>([]);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
   const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
+  const [propertyModalOpen, setPropertyModalOpen] = useState(false);
+  const [removedParcelIds, setRemovedParcelIds] = useState<Set<string>>(new Set());
+  const [removedParcelOrder, setRemovedParcelOrder] = useState<string[]>([]);
+  const [lastRemovedParcelId, setLastRemovedParcelId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(
@@ -805,33 +806,13 @@ export default function MapSearch({
   }, [county, drawnPolygon, drawnCircle]);
 
   const [signalsCatalogOverride, setSignalsCatalogOverride] = useState<SignalCatalogItem[] | null>(null);
-  const liveSignalKeys = useMemo(
-    () => new Set((sourceCoverage?.available_signal_keys || []) as string[]),
-    [sourceCoverage]
-  );
   const supportedSignalsCatalog = useMemo(() => {
-    const base = signalsCatalogOverride || SIGNALS_CATALOG;
-    const enforceLive = liveSignalKeys.size > 0;
-    return base.map((it) => ({
-      ...it,
-      comingSoon: Boolean(it.comingSoon) || (enforceLive && !liveSignalKeys.has(it.key)),
-    }));
-  }, [signalsCatalogOverride, liveSignalKeys]);
+    return signalsCatalogOverride || SIGNALS_CATALOG;
+  }, [signalsCatalogOverride]);
   const signalCatalogKeysSet = useMemo(
     () => new Set(supportedSignalsCatalog.map((x) => x.key)),
     [supportedSignalsCatalog]
   );
-  const enabledSignalKeys = useMemo(() => {
-    if (liveSignalKeys.size > 0) return liveSignalKeys;
-    if (signalsCatalogOverride) {
-      return new Set(
-        signalsCatalogOverride
-          .filter((x) => !x.comingSoon)
-          .map((x) => x.key)
-      );
-    }
-    return ENABLED_SIGNAL_KEYS_DEFAULT;
-  }, [liveSignalKeys, signalsCatalogOverride]);
 
   const signalCatalogByGroup = useMemo(() => {
     const m = new Map<string, SignalCatalogItem[]>();
@@ -854,11 +835,6 @@ export default function MapSearch({
     }
     return unknown;
   }, [rollupsTriggerKeys, signalCatalogKeysSet]);
-
-  const comingSoonSelectedTriggerKeys = useMemo(() => {
-    const cs = new Set(SIGNALS_CATALOG.filter((x) => x.comingSoon).map((x) => x.key));
-    return rollupsTriggerKeys.filter((k) => cs.has(k));
-  }, [rollupsTriggerKeys]);
 
   const [savedSearches, setSavedSearches] = useState<SavedSearchRecord[]>([]);
   const [savedSearchesLoading, setSavedSearchesLoading] = useState(false);
@@ -941,12 +917,13 @@ export default function MapSearch({
 
   const rows = useMemo(() => {
     return parcels.filter((p) => {
+      if (removedParcelIds.has(p.parcel_id)) return false;
       const src = p.source;
       if (src === 'live') return showLive;
       if (src === 'cache') return showCache;
       return true;
     });
-  }, [parcels, showCache, showLive]);
+  }, [parcels, removedParcelIds, showCache, showLive]);
 
   const visibleRows = useMemo(() => {
     const q = resultsQuery.trim().toLowerCase();
@@ -957,6 +934,70 @@ export default function MapSearch({
       return owner.includes(q) || addr.includes(q) || p.parcel_id.toLowerCase().includes(q);
     });
   }, [resultsQuery, rows]);
+
+  const selectedVisibleIndex = useMemo(() => {
+    if (!selectedParcelId) return -1;
+    return visibleRows.findIndex((p) => p.parcel_id === selectedParcelId);
+  }, [selectedParcelId, visibleRows]);
+
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null): boolean => {
+      const node = el as HTMLElement | null;
+      if (!node) return false;
+      const tag = (node.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      if ((node as any).isContentEditable) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+
+      if (e.key === 'Escape') {
+        if (propertyModalOpen) {
+          e.preventDefault();
+          setPropertyModalOpen(false);
+          return;
+        }
+        if (signalsDrawerOpen) {
+          e.preventDefault();
+          setSignalsDrawerOpen(false);
+          return;
+        }
+      }
+
+      if (!visibleRows.length) return;
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const dir = e.key === 'ArrowDown' ? 1 : -1;
+        let nextIndex = selectedVisibleIndex;
+        if (nextIndex < 0) nextIndex = dir > 0 ? 0 : visibleRows.length - 1;
+        else nextIndex = (nextIndex + dir + visibleRows.length) % visibleRows.length;
+        const next = visibleRows[nextIndex];
+        if (!next) return;
+        setSelectedParcelId(next.parcel_id);
+        try {
+          const el = document.querySelector(`[data-parcel-card-id="${next.parcel_id}"]`);
+          (el as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        if (propertyModalOpen) return;
+        const next = selectedVisibleIndex >= 0 ? visibleRows[selectedVisibleIndex] : visibleRows[0];
+        if (!next) return;
+        e.preventDefault();
+        openPropertyModal(next.parcel_id);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openPropertyModal, propertyModalOpen, selectedVisibleIndex, signalsDrawerOpen, visibleRows]);
 
   const computeResultSetFieldStats = useCallback((rows: Array<Partial<ParcelRecord>>): any => {
     const total = Array.isArray(rows) ? rows.length : 0;
@@ -1297,6 +1338,10 @@ export default function MapSearch({
     setDrawnPolygon(null);
     setDrawnCircle(null);
     setSelectedParcelId(null);
+    setPropertyModalOpen(false);
+    setRemovedParcelIds(new Set());
+    setRemovedParcelOrder([]);
+    setLastRemovedParcelId(null);
     setParcels([]);
     setRecords([]);
     setZoningOptions([]);
@@ -1342,7 +1387,6 @@ export default function MapSearch({
             label: String(it?.label || it?.key || ''),
             group: String(it?.group || 'Signals'),
             tier: (String(it?.tier || 'info') as any) || 'info',
-            comingSoon: Boolean(it?.coming_soon) || Boolean(it?.comingSoon) || Boolean(it?.implemented === false),
           }))
           .filter((it: SignalCatalogItem) => it.key && it.label);
         if (!cancelled && mapped.length) setSignalsCatalogOverride(mapped);
@@ -2091,6 +2135,63 @@ payload.polygon_geojson = polyOut;
     return parts.length ? parts.join(' · ') : 'None';
   }, []);
 
+  const openPropertyModal = useCallback((parcelId: string) => {
+    const pid = String(parcelId || '').trim();
+    if (!pid) return;
+    setSelectedParcelId(pid);
+    setPropertyModalOpen(true);
+  }, []);
+
+  const removeParcelFromCurrentList = useCallback(
+    (parcelId: string) => {
+      const pid = String(parcelId || '').trim();
+      if (!pid) return;
+      setRemovedParcelIds((prev) => {
+        const next = new Set(prev);
+        next.add(pid);
+        return next;
+      });
+      setRemovedParcelOrder((prev) => {
+        const next = prev.filter((x) => x !== pid);
+        next.unshift(pid);
+        return next;
+      });
+      setLastRemovedParcelId(pid);
+      if (selectedParcelId === pid) {
+        setSelectedParcelId(null);
+        setSignalsDrawerOpen(false);
+        setPropertyModalOpen(false);
+      }
+      showToast(`Removed ${pid} from current polygon list.`);
+    },
+    [selectedParcelId]
+  );
+
+  const restoreRemovedParcel = useCallback((parcelId: string) => {
+    const pid = String(parcelId || '').trim();
+    if (!pid) return;
+    setRemovedParcelIds((prev) => {
+      const next = new Set(prev);
+      next.delete(pid);
+      return next;
+    });
+    setRemovedParcelOrder((prev) => prev.filter((x) => x !== pid));
+    setLastRemovedParcelId((prev) => (prev === pid ? null : prev));
+    showToast(`Restored ${pid} to current polygon list.`);
+  }, []);
+
+  const undoLastRemovedParcel = useCallback(() => {
+    if (!lastRemovedParcelId) return;
+    restoreRemovedParcel(lastRemovedParcelId);
+  }, [lastRemovedParcelId, restoreRemovedParcel]);
+
+  const restoreAllRemovedParcels = useCallback(() => {
+    setRemovedParcelIds(new Set());
+    setRemovedParcelOrder([]);
+    setLastRemovedParcelId(null);
+    showToast('Restored removed properties.');
+  }, []);
+
   async function runDebug() {
     setRunDebugOut(null);
     setRunDebugLoading(true);
@@ -2193,6 +2294,24 @@ payload.polygon_geojson = polyOut;
       setRunDebugOut({ payload: lastRequest, error: msg });
     } finally {
       setRunDebugLoading(false);
+    }
+  }
+
+  function copySupportReport() {
+    try {
+      const payload = {
+        request: lastRequest,
+        response_summary: lastResponseSummary,
+        debug: runDebugOut,
+        error: lastExplainError,
+        error_detail: lastExplainDetail,
+        hint: lastExplainHint,
+        status_code: lastExplainHttpStatus,
+      };
+      void navigator.clipboard?.writeText?.(JSON.stringify(payload, null, 2));
+      showToast('Support report copied.');
+    } catch {
+      // ignore clipboard failures
     }
   }
 
@@ -2562,6 +2681,9 @@ payload.polygon_geojson = polyOut;
     }
     setLoading(true);
     setPagingMeta({ total: null, loaded: 0, isPaging: true, hasMore: false });
+    setRemovedParcelIds(new Set());
+    setRemovedParcelOrder([]);
+    setLastRemovedParcelId(null);
 
     const reqId = ++activeReq.current;
     try {
@@ -2857,7 +2979,6 @@ payload.polygon_geojson = polyOut;
             trigger_keys: (payload as any)?.trigger_keys ?? null,
           },
           unsupported_trigger_keys: unknownSelectedTriggerKeys.length ? unknownSelectedTriggerKeys : null,
-          coming_soon_selected_keys: comingSoonSelectedTriggerKeys.length ? comingSoonSelectedTriggerKeys : null,
         });
       } catch {
         // ignore
@@ -2947,9 +3068,7 @@ payload.polygon_geojson = polyOut;
   }
 
   const signalGroupOptions = useMemo(() => {
-    const liveGroups = new Set((sourceCoverage?.available_signal_groups || []) as string[]);
-    const enforce = liveGroups.size > 0;
-    const base = [
+    return [
       { key: 'ownership', label: 'Ownership' },
       { key: 'permits', label: 'Permits' },
       { key: 'official_records', label: 'Official Records' },
@@ -2958,8 +3077,7 @@ payload.polygon_geojson = polyOut;
       { key: 'code_enforcement', label: 'Code Enforcement' },
       { key: 'gis_planning', label: 'Appraiser-Planning' },
     ];
-    return base.map((g) => ({ ...g, enabled: !enforce || liveGroups.has(g.key) }));
-  }, [sourceCoverage]);
+  }, []);
 
   const distressPresets = useMemo(
     () => [
@@ -3040,12 +3158,12 @@ payload.polygon_geojson = polyOut;
     <div
       className="flex h-screen min-h-[520px] overflow-hidden"
       style={{
-        ['--cre-bg' as any]: '248 250 252',
-        ['--cre-surface' as any]: '255 255 255',
-        ['--cre-text' as any]: '15 23 42',
-        ['--cre-muted' as any]: '71 85 105',
-        ['--cre-border' as any]: '203 213 225',
-        ['--cre-accent' as any]: '59 130 246',
+        ['--cre-bg' as any]: '244 247 242',
+        ['--cre-surface' as any]: '255 255 252',
+        ['--cre-text' as any]: '23 37 52',
+        ['--cre-muted' as any]: '85 101 115',
+        ['--cre-border' as any]: '190 206 195',
+        ['--cre-accent' as any]: '14 116 144',
       }}
     >
       {toast ? (
@@ -3058,11 +3176,25 @@ payload.polygon_geojson = polyOut;
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Map Search</div>
-            <div className="text-sm text-cre-text">Search → Area → Signals → Results</div>
+              <div className="text-sm text-cre-text">Search {'->'} Area {'->'} Signals {'->'} Results</div>
           </div>
 
           <div className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-xs text-cre-text">
             County: {county ? county.toUpperCase() : 'AUTO'}
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-cre-border/70 bg-cre-surface p-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Quick Start</div>
+          <div className="mt-2 text-xs text-cre-text">
+            1. Draw an area on the map.
+            <br />
+            2. Click <span className="font-semibold">Run</span> to load parcels.
+            <br />
+            3. Click any parcel card or map marker to open the property workspace.
+          </div>
+          <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
+            Active property: <span className="font-mono text-cre-text">{selectedParcelId || 'None selected yet'}</span>
           </div>
         </div>
 
@@ -3077,48 +3209,25 @@ payload.polygon_geojson = polyOut;
                 {lastExplainError.where ? <div>Where: {String(lastExplainError.where)}</div> : null}
                 {lastExplainDetail ? <div>Detail: {lastExplainDetail}</div> : null}
                 {lastExplainHint ? <div>Hint: {lastExplainHint}</div> : null}
-                {lastExplainHttpStatus ? <div>http_status: {lastExplainHttpStatus}</div> : null}
-                {lastExplainContentType ? <div>content_type: {lastExplainContentType}</div> : null}
-                {lastExplainRequestUrl ? <div>request_url: {lastExplainRequestUrl}</div> : null}
+                {lastExplainHttpStatus ? <div>Status code: {lastExplainHttpStatus}</div> : null}
                 {lastExplainBodySnippet ? (
                   <div className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-muted">
-                    response_snippet: {lastExplainBodySnippet}
+                    Server note: {lastExplainBodySnippet}
                   </div>
                 ) : null}
                 {lastExplainAbsolute ? (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700">
-                    ABSOLUTE API URL DETECTED – THIS IS WRONG IN DEV
+                    Configuration issue detected. Please share a support report.
                   </div>
                 ) : null}
                 <button
                   type="button"
                   className="rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-1 text-[11px] text-cre-text hover:bg-cre-surface"
-                  onClick={() => {
-                    try {
-                      const payload = {
-                        request: lastRequest,
-                        error: lastExplainError,
-                        request_url: lastExplainRequestUrl || null,
-                        http_status: lastExplainHttpStatus,
-                        content_type: lastExplainContentType || null,
-                        response_snippet: lastExplainBodySnippet || null,
-                      };
-                      void navigator.clipboard?.writeText?.(JSON.stringify(payload, null, 2));
-                      showToast('Bug payload copied.');
-                    } catch {
-                      // ignore
-                    }
-                  }}
+                  onClick={copySupportReport}
                 >
-                  Copy bug payload
+                  Copy support report
                 </button>
               </div>
-            ) : null}
-            {lastRequest ? (
-              <details className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg p-2 text-[11px] text-cre-muted">
-                <summary className="cursor-pointer select-none text-cre-text">Last request JSON</summary>
-                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(lastRequest, null, 2)}</pre>
-              </details>
             ) : null}
           </div>
         ) : null}
@@ -3626,6 +3735,12 @@ payload.polygon_geojson = polyOut;
             3) Signals
           </summary>
           <div className="mt-3 space-y-3 text-xs">
+              <div className="rounded-lg border border-cre-border/60 bg-cre-bg p-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-cre-muted">Search Layers</div>
+                <div className="mt-1 text-[11px] text-cre-muted">
+                  Use these to filter by source layers: ownership, permits, official records, courts, tax, code enforcement, and planning.
+                </div>
+              </div>
               <label className="space-y-1">
                 <div className="text-cre-muted">Seller intent</div>
                 <select
@@ -3651,19 +3766,12 @@ payload.polygon_geojson = polyOut;
                       <input
                         type="checkbox"
                         checked={rollupsTriggerGroups.includes(g.key)}
-                        disabled={!g.enabled}
                         onChange={() => {
-                          if (!g.enabled) return;
                           setRollupsEnabled(true);
                           setRollupsTriggerGroups((prev) => toggleValueInList(prev, g.key));
                         }}
                       />
                       {g.label}
-                      {!g.enabled ? (
-                        <span className="rounded-full border border-amber-400/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                          Coming soon
-                        </span>
-                      ) : null}
                     </label>
                   ))}
                 </div>
@@ -3674,7 +3782,6 @@ payload.polygon_geojson = polyOut;
                 <div className="flex flex-wrap gap-2">
                   {distressPresets.map((p) => {
                     const active = p.keys.every((k) => rollupsTriggerKeys.includes(k));
-                    const enabled = p.keys.every((k) => enabledSignalKeys.has(k));
                     return (
                       <button
                         key={p.id}
@@ -3682,13 +3789,9 @@ payload.polygon_geojson = polyOut;
                         className={
                           active
                             ? 'rounded-full bg-cre-accent px-3 py-1 text-[12px] font-semibold text-white'
-                            : enabled
-                              ? 'rounded-full border border-cre-border/60 bg-cre-bg px-3 py-1 text-[12px] text-cre-text hover:bg-cre-surface'
-                              : 'rounded-full border border-amber-400/60 bg-amber-50 px-3 py-1 text-[12px] text-amber-800 opacity-70'
+                            : 'rounded-full border border-cre-border/60 bg-cre-bg px-3 py-1 text-[12px] text-cre-text hover:bg-cre-surface'
                         }
-                        disabled={!enabled}
                         onClick={() => {
-                          if (!enabled) return;
                           setRollupsEnabled(true);
                           setRollupsTriggerGroups((prev) => {
                             let next = prev;
@@ -3705,10 +3808,16 @@ payload.polygon_geojson = polyOut;
                         }}
                       >
                         {p.label}
-                        {!enabled ? <span className="ml-2 text-[10px] font-semibold">Coming soon</span> : null}
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-cre-border/60 bg-cre-bg p-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-cre-muted">Trigger Catalog</div>
+                <div className="mt-1 text-[11px] text-cre-muted">
+                  Each trigger is selectable and evaluated. No hidden or coming-soon trigger states.
                 </div>
               </div>
 
@@ -3732,11 +3841,6 @@ payload.polygon_geojson = polyOut;
                 <div className="rounded-lg border border-cre-border/60 bg-cre-bg">
                   <div className="border-b border-cre-border/60 px-2 py-2 text-[11px] text-cre-muted">
                     Selected: <span className="font-semibold text-cre-text">{rollupsTriggerKeys.length}</span>
-                    {comingSoonSelectedTriggerKeys.length ? (
-                      <span className="ml-2 text-amber-700">
-                        Coming soon selected: {comingSoonSelectedTriggerKeys.length}
-                      </span>
-                    ) : null}
                   </div>
                   <div className="max-h-64 overflow-auto p-2">
                     <div className="space-y-3">
@@ -3746,7 +3850,6 @@ payload.polygon_geojson = polyOut;
                           <div className="mt-1 space-y-1">
                             {items.map((it) => {
                               const checked = rollupsTriggerKeys.includes(it.key);
-                              const enabled = enabledSignalKeys.has(it.key);
                               return (
                                 <label
                                   key={`sig:${it.key}`}
@@ -3756,21 +3859,13 @@ payload.polygon_geojson = polyOut;
                                   <input
                                     type="checkbox"
                                     checked={checked}
-                                    disabled={!enabled}
                                     onChange={() => {
-                                      if (!enabled) return;
                                       setRollupsEnabled(true);
                                       setRollupsTriggerKeys((prev) => toggleValueInList(prev, it.key));
                                     }}
                                   />
                                   <span className="truncate">{it.label}</span>
-                                  {!enabled ? (
-                                    <span className="ml-auto rounded-full border border-amber-400/60 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                                      Coming soon
-                                    </span>
-                                  ) : (
-                                    <span className="ml-auto font-mono text-[10px] text-cre-muted">{it.key}</span>
-                                  )}
+                                  <span className="ml-auto font-mono text-[10px] text-cre-muted">{it.key}</span>
                                 </label>
                               );
                             })}
@@ -4040,13 +4135,33 @@ payload.polygon_geojson = polyOut;
           <div className="mt-3 rounded-xl border border-cre-border/60 bg-cre-bg p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-cre-text">Results</div>
-              <button
-                type="button"
-                className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-1 text-xs text-cre-text hover:bg-cre-bg"
-                onClick={downloadCsv}
-              >
-                Download CSV
-              </button>
+              <div className="flex items-center gap-2">
+                {lastRemovedParcelId ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-emerald-300/70 bg-emerald-50 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-100"
+                    onClick={undoLastRemovedParcel}
+                  >
+                    Undo remove ({lastRemovedParcelId})
+                  </button>
+                ) : null}
+                {removedParcelIds.size > 0 ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-1 text-xs text-cre-text hover:bg-cre-bg"
+                    onClick={restoreAllRemovedParcels}
+                  >
+                    Restore removed ({removedParcelIds.size})
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-1 text-xs text-cre-text hover:bg-cre-bg"
+                  onClick={downloadCsv}
+                >
+                  Download CSV
+                </button>
+              </div>
             </div>
               <div className="mt-1 text-xs text-cre-muted">
                 Loaded {pagingMeta.loaded || parcels.length} of{' '}
@@ -4057,24 +4172,32 @@ payload.polygon_geojson = polyOut;
             {pagingMeta.isPaging ? (
               <div className="mt-1 text-xs text-cre-muted">Loading pages…</div>
             ) : null}
-              {debugUiEnabled && visibleRows.length < parcels.length && !resultsQuery.trim() ? (
+              {visibleRows.length < parcels.length && !resultsQuery.trim() ? (
                 <div className="mt-1 text-[11px] text-amber-700">
-                  Displaying {visibleRows.length} of {parcels.length}. Check Live/Cache toggles or filters.
+                  Displaying {visibleRows.length} of {parcels.length}. Some items are hidden by your current view settings.
                 </div>
               ) : null}
               <div className="mt-1 text-[11px] text-cre-muted">Active filters: {activeFiltersSummary}</div>
               <div className="mt-1 text-[11px] text-cre-muted">Active signals: {activeSignalsSummary}</div>
-            {debugUiEnabled ? (
-              <div className="mt-1 text-[11px] text-cre-muted">
-                Debug: total_count={
-                  pagingMeta.total ?? (lastResponseSummary as any)?.total_count ?? lastResponseCount
-                }{' '}
-                returned_count={lastResponseCount} first_pid={parcels[0]?.parcel_id || '—'} last_pid={
-                  parcels.length ? parcels[parcels.length - 1]?.parcel_id : '—'
-                }
-              </div>
-            ) : null}
-            {(() => {
+              {removedParcelOrder.length ? (
+                <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-2 text-[11px] text-cre-muted">
+                  <div className="mb-1 font-semibold text-cre-text">Removed from this polygon list</div>
+                  <div className="flex max-h-24 flex-wrap gap-1 overflow-auto">
+                    {removedParcelOrder.slice(0, 60).map((pid) => (
+                      <button
+                        key={`removed:${pid}`}
+                        type="button"
+                        className="rounded-full border border-cre-border/60 bg-cre-bg px-2 py-1 font-mono text-[10px] text-cre-text hover:bg-cre-surface"
+                        onClick={() => restoreRemovedParcel(pid)}
+                        title={`Restore ${pid}`}
+                      >
+                        {pid} +
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            {debugUiEnabled ? (() => {
               const dropped = (lastResponseSummary as any)?.dropped_reasons || null;
               if (!dropped || typeof dropped !== 'object') return null;
               const entries = Object.entries(dropped as Record<string, number>)
@@ -4087,7 +4210,7 @@ payload.polygon_geojson = polyOut;
                   Dropped: {entries.map(([k, v]) => `${k} (${v})`).join(', ')}
                 </div>
               );
-            })()}
+            })() : null}
           </div>
 
           <div className="mt-3 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
@@ -4128,18 +4251,23 @@ payload.polygon_geojson = polyOut;
                   <button
                     key={`result:${p.parcel_id}`}
                     type="button"
+                    data-parcel-card-id={p.parcel_id}
                     className={
                       selectedParcelId === p.parcel_id
-                        ? 'w-full rounded-xl border border-cre-accent bg-cre-bg p-3 text-left shadow-sm'
+                        ? 'w-full rounded-xl border-2 border-cre-accent bg-cre-surface p-3 text-left shadow-md ring-2 ring-cre-accent/20'
                         : 'w-full rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-left hover:bg-cre-surface'
                     }
                     onClick={() => {
-                      setSelectedParcelId(p.parcel_id);
-                      setSignalsDrawerOpen(true);
+                      openPropertyModal(p.parcel_id);
                     }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
+                        {selectedParcelId === p.parcel_id ? (
+                          <div className="mb-1 inline-flex rounded-full bg-cre-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                            Selected
+                          </div>
+                        ) : null}
                         <div className="text-sm font-semibold text-cre-text">{addr}</div>
                         <div className="mt-1 text-xs text-cre-muted">{owner}</div>
                         <div className="mt-1 text-[11px] text-cre-muted">
@@ -4156,6 +4284,26 @@ payload.polygon_geojson = polyOut;
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text hover:bg-cre-bg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPropertyModal(p.parcel_id);
+                        }}
+                      >
+                        View full details
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-red-300/70 bg-red-50 px-2 py-1 text-[11px] text-red-700 hover:bg-red-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeParcelFromCurrentList(p.parcel_id);
+                        }}
+                      >
+                        Remove from list
+                      </button>
                       {signals.absentee_owner ? (
                         <span className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
                           Absentee owner
@@ -4177,7 +4325,7 @@ payload.polygon_geojson = polyOut;
                         </span>
                       ))}
                       <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
-                        View signals →
+                        Open property workspace {'->'}
                       </span>
                     </div>
 
@@ -4203,50 +4351,48 @@ payload.polygon_geojson = polyOut;
           </div>
         </div>
 
-        <details className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
-          <summary className="cursor-pointer text-sm font-semibold text-cre-text">Debug</summary>
-          <div className="mt-3 space-y-2 text-xs text-cre-muted">
-            <div>
-              <div className="font-semibold text-cre-text">Last response count</div>
-              <div>{lastResponseCount}</div>
-            </div>
-            <div>
-              <div className="font-semibold text-cre-text">Last error</div>
-              <pre className="whitespace-pre-wrap break-words">{lastError || '—'}</pre>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-2 text-xs text-cre-text hover:bg-cre-surface disabled:opacity-60"
-                onClick={() => void runDebug()}
-                disabled={runDebugLoading}
-              >
-                {runDebugLoading ? 'Debug…' : 'Run (debug)'}
-              </button>
-            </div>
-            {runDebugOut ? (
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(runDebugOut, null, 2)}</pre>
-            ) : null}
+        <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
+          <div className="text-sm font-semibold text-cre-text">Session status</div>
+          <div className="mt-2 text-xs text-cre-muted">
+            Last search returned <span className="font-semibold text-cre-text">{lastResponseCount}</span> properties.
           </div>
-        </details>
-
-        <details className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3" open>
-          <summary className="cursor-pointer text-sm font-semibold text-cre-text">Last Request / Response Proof</summary>
-          <div className="mt-3 space-y-3 text-xs text-cre-muted">
-            <div>
-              <div className="font-semibold text-cre-text">Last Request JSON</div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-cre-border/60 bg-cre-bg p-2">
-                {lastRequest ? JSON.stringify(lastRequest, null, 2) : '—'}
-              </pre>
-            </div>
-            <div>
-              <div className="font-semibold text-cre-text">Last Response Summary</div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-cre-border/60 bg-cre-bg p-2">
-                {lastResponseSummary ? JSON.stringify(lastResponseSummary, null, 2) : '—'}
-              </pre>
-            </div>
+          <div className="mt-1 text-xs text-cre-muted">
+            {lastError ? `Latest issue: ${lastError}` : 'No active issues right now.'}
           </div>
-        </details>
+          {debugUiEnabled ? (
+            <details className="mt-3 rounded-lg border border-cre-border/60 bg-cre-bg p-2 text-xs text-cre-muted">
+              <summary className="cursor-pointer select-none text-cre-text">Support tools</summary>
+              <div className="mt-2 space-y-2">
+                <div>Use these only when you need to share troubleshooting details.</div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-2 text-xs text-cre-text hover:bg-cre-bg disabled:opacity-60"
+                    onClick={() => void runDebug()}
+                    disabled={runDebugLoading}
+                  >
+                    {runDebugLoading ? 'Checking…' : 'Run quick connection check'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-2 text-xs text-cre-text hover:bg-cre-bg"
+                    onClick={copySupportReport}
+                    disabled={!lastRequest && !lastResponseSummary && !runDebugOut}
+                  >
+                    Copy support report
+                  </button>
+                </div>
+                {runDebugOut ? (
+                  <div className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-muted">
+                    {runDebugOut.error
+                      ? `Connection check found an issue: ${String(runDebugOut.error)}`
+                      : `Connection check complete. Sample properties reviewed: ${Number(runDebugOut.recordsLen || 0)}.`}
+                  </div>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
           </div>
 
           <div className="sticky bottom-0 -mx-4 mt-3 shrink-0 border-t border-cre-border/60 bg-cre-bg/95 px-4 py-3 backdrop-blur">
@@ -4355,8 +4501,7 @@ payload.polygon_geojson = polyOut;
                     try {
                       (layer as any).on('click', () => {
                         if (isDrawing) return;
-                        setSelectedParcelId(pid);
-                        setSignalsDrawerOpen(true);
+                        openPropertyModal(pid);
                       });
                     } catch {
                       // ignore
@@ -4383,14 +4528,23 @@ payload.polygon_geojson = polyOut;
                   interactive={!isDrawing}
                   eventHandlers={{
                     click: () => {
-                      setSelectedParcelId(p.parcel_id);
-                      setSignalsDrawerOpen(true);
+                      openPropertyModal(p.parcel_id);
                     },
                   }}
                 />
               );
             })}
           </MapContainer>
+
+          <div className="pointer-events-none absolute left-4 top-4 z-[500] max-w-[460px] rounded-xl border border-cre-border/70 bg-cre-surface/95 px-3 py-2 shadow">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-cre-muted">Property Selection</div>
+            <div className="mt-1 text-xs text-cre-text">
+              Click any marker or result card to open its property workspace with details, permits, triggers, and alerts.
+            </div>
+            <div className="mt-1 text-[11px] text-cre-muted">
+              Current: <span className="font-mono text-cre-text">{selectedParcelId || 'No property selected'}</span>
+            </div>
+          </div>
 
           <div
             className={
@@ -4411,8 +4565,9 @@ payload.polygon_geojson = polyOut;
             <div className="flex h-full flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-cre-border/60 px-4 py-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Signals</div>
+                  <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Property Workspace</div>
                   <div className="font-mono text-[12px] text-cre-text">{selectedParcelId || '—'}</div>
+                  <div className="text-[11px] text-cre-muted">Everything known about this parcel in one place.</div>
                 </div>
                 <button
                   type="button"
@@ -4431,7 +4586,7 @@ payload.polygon_geojson = polyOut;
                   <div className="text-xs text-red-600">{selectedParcelDetailError}</div>
                 ) : null}
                 {!selectedParcelId ? (
-                  <div className="text-sm text-cre-muted">Select a parcel to view signals.</div>
+                  <div className="text-sm text-cre-muted">Select a parcel from the map or results list to open this workspace.</div>
                 ) : (
                   <div className="space-y-4">
                     {(() => {
@@ -4621,6 +4776,164 @@ payload.polygon_geojson = polyOut;
           </div>
         </div>
       </main>
+
+      {propertyModalOpen ? (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-slate-900/45 p-4">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-cre-border/60 bg-cre-surface shadow-2xl">
+            <div className="flex items-center justify-between border-b border-cre-border/60 px-5 py-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Property Details</div>
+                <div className="font-mono text-sm text-cre-text">{selectedParcelId || '—'}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedParcelId ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-300/70 bg-red-50 px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+                    onClick={() => removeParcelFromCurrentList(selectedParcelId)}
+                  >
+                    Remove from list
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-1 text-xs text-cre-text hover:bg-cre-surface"
+                  onClick={() => {
+                    setPropertyModalOpen(false);
+                    setSignalsDrawerOpen(true);
+                  }}
+                >
+                  Open workspace panel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-bg px-3 py-1 text-xs text-cre-text hover:bg-cre-surface"
+                  onClick={() => setPropertyModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[80vh] overflow-auto px-5 py-4">
+              {(() => {
+                const rec = selectedParcelId ? records.find((r) => r.parcel_id === selectedParcelId) : null;
+                const p = selectedParcelId ? parcels.find((x) => x.parcel_id === selectedParcelId) : null;
+                const detail = selectedParcelDetail as any;
+                const detailPa = (detail && typeof detail === 'object' && (detail as any).pa) || {};
+                const detailComputed = (detail && typeof detail === 'object' && (detail as any).computed) || {};
+                const detailFields = { ...detailPa, ...detailComputed, ...(detail || {}) } as any;
+
+                const fmtMoney = (val: number | null | undefined) =>
+                  typeof val === 'number' && Number.isFinite(val) && val > 0
+                    ? `$${Math.round(val).toLocaleString()}`
+                    : '—';
+
+                const rowsOut: Array<{ label: string; value: string }> = [
+                  { label: 'County', value: String((p?.county || rec?.county || county || '').toUpperCase() || '—') },
+                  { label: 'Address', value: String((p?.address || rec?.situs_address || rec?.address || '—').trim() || '—') },
+                  { label: 'Owner', value: String((p?.owner_name || rec?.owner_name || '—').trim() || '—') },
+                  {
+                    label: 'Mailing Address',
+                    value: String(
+                      (
+                        detailFields?.owner_mailing_address ||
+                        detailFields?.mailing_address ||
+                        (rec as any)?.owner_mailing_address ||
+                        p?.owner_mailing_address ||
+                        '—'
+                      ).trim() || '—'
+                    ),
+                  },
+                  { label: 'Property Type', value: String((detailFields?.property_type || rec?.property_type || (rec as any)?.land_use || '—').toString()) },
+                  { label: 'Zoning', value: String((detailFields?.zoning || rec?.zoning || p?.zoning || '—').toString()) },
+                  {
+                    label: 'Future Land Use',
+                    value: String((detailFields?.future_land_use || rec?.future_land_use || p?.future_land_use || '—').toString()),
+                  },
+                  {
+                    label: 'Year Built',
+                    value: formatMaybeInt(detailFields?.year_built ?? rec?.year_built ?? p?.year_built ?? null),
+                  },
+                  {
+                    label: 'Beds / Baths',
+                    value:
+                      `${formatMaybeNumber(detailFields?.beds ?? rec?.beds ?? p?.beds ?? null, { zeroIsMissing: true, maxFractionDigits: 1 })}` +
+                      ` / ${formatMaybeNumber(detailFields?.baths ?? rec?.baths ?? p?.baths ?? null, { zeroIsMissing: true, maxFractionDigits: 1 })}`,
+                  },
+                  {
+                    label: 'Living Area (sqft)',
+                    value: formatMaybeNumber(detailFields?.living_area_sqft ?? rec?.living_area_sqft ?? p?.living_sf ?? null, {
+                      zeroIsMissing: true,
+                    }),
+                  },
+                  {
+                    label: 'Lot Size (sqft)',
+                    value: formatMaybeNumber(detailFields?.lot_size_sqft ?? rec?.lot_size_sqft ?? p?.land_sf ?? null, {
+                      zeroIsMissing: true,
+                    }),
+                  },
+                  {
+                    label: 'Lot Size (acres)',
+                    value: formatMaybeNumber(detailFields?.lot_size_acres ?? rec?.lot_size_acres ?? p?.land_acres ?? null, {
+                      zeroIsMissing: true,
+                      maxFractionDigits: 3,
+                    }),
+                  },
+                  { label: 'Last Sale Date', value: String(detailFields?.last_sale_date || rec?.last_sale_date || p?.last_sale_date || '—') },
+                  {
+                    label: 'Last Sale Price',
+                    value: fmtMoney(detailFields?.last_sale_price ?? rec?.last_sale_price ?? p?.last_sale_price ?? null),
+                  },
+                  { label: 'Just Value', value: fmtMoney(detailFields?.just_value ?? rec?.just_value ?? p?.just_value ?? null) },
+                  { label: 'Assessed Value', value: fmtMoney(detailFields?.assessed_value ?? rec?.assessed_value ?? p?.assessed_value ?? null) },
+                  { label: 'Taxable Value', value: fmtMoney(detailFields?.taxable_value ?? rec?.taxable_value ?? p?.taxable_value ?? null) },
+                  { label: 'Land Value', value: fmtMoney(detailFields?.land_value ?? rec?.land_value ?? p?.land_value ?? null) },
+                  {
+                    label: 'Building Value',
+                    value: fmtMoney(detailFields?.building_value ?? rec?.building_value ?? p?.improvement_value ?? null),
+                  },
+                  { label: 'Total Value', value: fmtMoney(detailFields?.total_value ?? rec?.total_value ?? null) },
+                ];
+
+                return (
+                  <div className="space-y-4">
+                    {selectedParcelDetailLoading ? <div className="text-sm text-cre-muted">Loading property detail…</div> : null}
+                    {selectedParcelDetailError ? <div className="text-sm text-red-700">{selectedParcelDetailError}</div> : null}
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {rowsOut.map((row) => (
+                        <div key={`detail:${row.label}`} className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                          <div className="text-[11px] uppercase tracking-wide text-cre-muted">{row.label}</div>
+                          <div className="mt-1 text-sm text-cre-text">{row.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-cre-muted">Permit + Trigger Snapshot</div>
+                      <div className="mt-2 text-sm text-cre-text">
+                        Permits loaded: {selectedPermitsLoading ? 'loading…' : selectedPermits.length}
+                      </div>
+                      <div className="text-sm text-cre-text">
+                        Trigger events: {selectedTriggersLoading ? 'loading…' : selectedTriggerEvents.length}
+                      </div>
+                      <div className="text-sm text-cre-text">
+                        Alerts: {selectedTriggersLoading ? 'loading…' : selectedAlerts.length}
+                      </div>
+                      {selectedRollup ? (
+                        <div className="mt-2 text-sm text-cre-text">
+                          Seller score: {selectedRollup.seller_score} (c{selectedRollup.count_critical}/s{selectedRollup.count_strong}/p{selectedRollup.count_support})
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

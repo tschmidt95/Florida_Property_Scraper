@@ -33,6 +33,10 @@ class CreateSavedSearchBody(BaseModel):
     county: str
     geometry: Dict[str, Any]
     filters: Dict[str, Any] = Field(default_factory=dict)
+    trigger_keys: List[str] = Field(default_factory=list)
+    trigger_groups: List[str] = Field(default_factory=list)
+    trigger_tiers: List[str] = Field(default_factory=list)
+    trigger_min_score: int | None = None
     enrich: bool = False
     sort: Optional[str] = None
     watchlist_id: Optional[str] = None
@@ -112,11 +116,31 @@ def list_saved_searches(county: Optional[str] = None) -> Dict[str, Any]:
 def create_saved_search(body: CreateSavedSearchBody) -> Dict[str, Any]:
     store = SQLiteStore(_get_db_path())
     try:
+        filters = dict(body.filters or {})
+        trigger_keys = [str(x or "").strip() for x in (body.trigger_keys or [])]
+        trigger_keys = [x for x in trigger_keys if x]
+        trigger_groups = [str(x or "").strip() for x in (body.trigger_groups or [])]
+        trigger_groups = [x for x in trigger_groups if x]
+        trigger_tiers = [str(x or "").strip() for x in (body.trigger_tiers or [])]
+        trigger_tiers = [x for x in trigger_tiers if x]
+
+        if trigger_keys:
+            filters["trigger_keys"] = trigger_keys
+        if trigger_groups:
+            filters["trigger_groups"] = trigger_groups
+        if trigger_tiers:
+            filters["trigger_tiers"] = trigger_tiers
+        if body.trigger_min_score is not None:
+            try:
+                filters["trigger_min_score"] = int(body.trigger_min_score)
+            except Exception:
+                pass
+
         ss = store.create_saved_search(
             name=body.name,
             county=body.county,
             polygon_geojson=body.geometry,
-            filters=body.filters,
+            filters=filters,
             enrich=body.enrich,
             sort=body.sort,
             watchlist_id=body.watchlist_id,

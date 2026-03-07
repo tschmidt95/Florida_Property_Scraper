@@ -47,10 +47,10 @@ class MapErrorBoundary extends Component<
         <div className="m-4 space-y-3">
           <div className="rounded-xl border border-cre-accent/40 bg-cre-surface p-4">
             <div className="text-sm font-semibold text-cre-accent">
-              MapSearch disabled — check console + web/BUILD_ERRORS.txt
+              Map view is temporarily unavailable
             </div>
             <div className="mt-1 text-xs text-cre-muted">
-              SAFE MODE active: showing a minimal base map.
+              Showing a simplified map so you can continue working.
             </div>
           </div>
           <Suspense fallback={<div className="p-4 text-sm text-cre-text">Loading safe map…</div>}>
@@ -810,9 +810,24 @@ export default function App() {
               <div className="mt-2 text-xs text-red-700">{lookupError}</div>
             ) : null}
             {lookupResult ? (
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-cre-border/30 bg-cre-surface p-2 text-xs">
-                {JSON.stringify(lookupResult, null, 2)}
-              </pre>
+              <div className="mt-2 rounded-lg border border-cre-border/40 bg-cre-surface p-3 text-xs text-cre-text">
+                <div className="font-semibold">Address lookup complete</div>
+                <div className="mt-1 text-cre-muted">
+                  {String(
+                    lookupResult?.normalized_address ||
+                    lookupResult?.address ||
+                    lookupResult?.situs_address ||
+                    query ||
+                    'Address found'
+                  )}
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-1 text-cre-muted">
+                  {lookupResult?.parcel_id ? <div>Parcel ID: {String(lookupResult.parcel_id)}</div> : null}
+                  {lookupResult?.owner_name ? <div>Owner: {String(lookupResult.owner_name)}</div> : null}
+                  {lookupResult?.county ? <div>County: {String(lookupResult.county)}</div> : null}
+                  {lookupResult?.source ? <div>Source: {String(lookupResult.source)}</div> : null}
+                </div>
+              </div>
             ) : null}
           </div>
         </aside>
