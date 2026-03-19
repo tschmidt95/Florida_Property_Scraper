@@ -1,5 +1,5 @@
 requests
-scrapy==2.14.0
+scrapy==2.14.2
 fastapi
 httpx>=0.27
 uvicorn
