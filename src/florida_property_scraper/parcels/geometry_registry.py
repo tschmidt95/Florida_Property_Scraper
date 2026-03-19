@@ -38,10 +38,9 @@ def get_provider(county: str) -> ParcelGeometryProvider:
     # Optional live geometry provider (network-backed). Kept behind an env flag
     # so tests and offline deployments remain deterministic.
     if os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1", "true", "True"}:
-        if county_key in {"seminole", "orange"}:
-            provider = FDORCentroidsProvider(county=county_key)
-            provider.load()
-            return provider
+        provider = FDORCentroidsProvider(county=county_key or "statewide")
+        provider.load()
+        return provider
 
     providers: Dict[str, ParcelGeometryProvider] = {
         "seminole": SeminoleProvider(

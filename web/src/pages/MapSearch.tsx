@@ -8,7 +8,10 @@ import {
   apiFetch,
   evaluateTriggers,
   fetchProviderStatus,
+  fetchRuntimeAudit,
+  runRuntimeRepair,
   createSavedSearch,
+  deleteSavedSearch,
   listAlerts,
   listSavedSearches,
   markAlertRead,
@@ -19,6 +22,7 @@ import {
   fetchSourceCoverage,
   permitsByParcel,
   runSavedSearch,
+  updateSavedSearch,
   resolveCountyAuto,
   type SourceCoverage,
   triggersByParcel,
@@ -27,6 +31,7 @@ import {
   type AlertsInboxRecord,
   type EnrichmentResponse,
   type ProviderStatusResponse,
+  type RuntimeAuditResponse,
   type TriggerEvaluateResponse,
   type TriggerEvaluateItem,
   type ParcelAttributeFilters,
@@ -626,6 +631,7 @@ export default function MapSearch({
   const [parcels, setParcels] = useState<ParcelSearchListItem[]>([]);
   const [records, setRecords] = useState<ParcelRecord[]>([]);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
+  const [selectedParcelHistory, setSelectedParcelHistory] = useState<string[]>([]);
   const [selectedPermits, setSelectedPermits] = useState<PermitRecord[]>([]);
   const [propertyModalOpen, setPropertyModalOpen] = useState(false);
   const [removedParcelIds, setRemovedParcelIds] = useState<Set<string>>(new Set());
@@ -754,6 +760,7 @@ export default function MapSearch({
   const [lastResponseCount, setLastResponseCount] = useState<number>(0);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastExplainError, setLastExplainError] = useState<any | null>(null);
+  const [completenessGate, setCompletenessGate] = useState<any | null>(null);
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
   const [activeFiltersSummary, setActiveFiltersSummary] = useState<string>('None');
   const [activeSignalsSummary, setActiveSignalsSummary] = useState<string>('None');
@@ -772,12 +779,18 @@ export default function MapSearch({
   const [toast, setToast] = useState<string | null>(null);
 
   const backendUnavailable = backendOk === false;
+  const [backendCheckLoading, setBackendCheckLoading] = useState(false);
+  const [pendingRunOnReconnect, setPendingRunOnReconnect] = useState(false);
   const [sourceCoverage, setSourceCoverage] = useState<SourceCoverage | null>(null);
   const [sourceCoverageLoading, setSourceCoverageLoading] = useState(false);
   const [sourceCoverageError, setSourceCoverageError] = useState<string | null>(null);
   const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
   const [providerStatusLoading, setProviderStatusLoading] = useState(false);
   const [providerStatusError, setProviderStatusError] = useState<string | null>(null);
+  const [runtimeAudit, setRuntimeAudit] = useState<RuntimeAuditResponse | null>(null);
+  const [runtimeAuditLoading, setRuntimeAuditLoading] = useState(false);
+  const [runtimeAuditRepairLoading, setRuntimeAuditRepairLoading] = useState(false);
+  const [runtimeAuditError, setRuntimeAuditError] = useState<string | null>(null);
 
   const resolveCountyFromGeometry = useCallback(async (): Promise<string> => {
     const existing = county.trim();
@@ -840,11 +853,18 @@ export default function MapSearch({
   const [savedSearchesLoading, setSavedSearchesLoading] = useState(false);
   const [savedSearchesError, setSavedSearchesError] = useState<string | null>(null);
   const [selectedSavedSearchId, setSelectedSavedSearchId] = useState<string>('');
+  const [savedSearchDraftName, setSavedSearchDraftName] = useState<string>('');
 
   const [alertsStatus, setAlertsStatus] = useState<string>('new');
   const [alertsInbox, setAlertsInbox] = useState<AlertsInboxRecord[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertsError, setAlertsError] = useState<string | null>(null);
+
+  const selectedSavedSearch = useMemo(() => {
+    const sid = selectedSavedSearchId.trim();
+    if (!sid) return null;
+    return savedSearches.find((s) => String(s.id || '').trim() === sid) || null;
+  }, [savedSearches, selectedSavedSearchId]);
 
   const [parcelLinesEnabled, setParcelLinesEnabled] = useState(false);
   const [parcelLinesLoading, setParcelLinesLoading] = useState(false);
@@ -861,6 +881,12 @@ export default function MapSearch({
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const activeReq = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
+  const pendingRunOnReconnectRef = useRef(false);
+  const previousBackendStatusRef = useRef<'checking' | 'ok' | 'down'>('checking');
+  const realtimeRunTimerRef = useRef<number | null>(null);
+  const realtimeRunSignatureRef = useRef<string>('');
+  const realtimeTriggerTimerRef = useRef<number | null>(null);
+  const realtimeTriggerSignatureRef = useRef<string>('');
 
   const recordById = useMemo(() => {
     const m = new Map<string, ParcelRecord>();
@@ -929,16 +955,60 @@ export default function MapSearch({
     const q = resultsQuery.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((p) => {
-      const owner = (p.owner_name || '').toLowerCase();
-      const addr = (p.address || '').toLowerCase();
-      return owner.includes(q) || addr.includes(q) || p.parcel_id.toLowerCase().includes(q);
+      const rec = recordById.get(p.parcel_id);
+      const parts = [
+        p.parcel_id,
+        p.owner_name,
+        p.address,
+        (rec as any)?.county,
+        (rec as any)?.owner_name,
+        (rec as any)?.situs_address,
+        (rec as any)?.owner_mailing_address,
+        (rec as any)?.property_type,
+        (rec as any)?.property_type_raw,
+        (rec as any)?.land_use,
+        (rec as any)?.zoning,
+        (rec as any)?.future_land_use,
+        String((rec as any)?.beds ?? ''),
+        String((rec as any)?.baths ?? ''),
+        String((rec as any)?.year_built ?? ''),
+        String((rec as any)?.living_area_sqft ?? ''),
+        String((rec as any)?.lot_size_sqft ?? ''),
+        String((rec as any)?.lot_size_acres ?? ''),
+        String((rec as any)?.total_value ?? ''),
+        String((rec as any)?.land_value ?? ''),
+        String((rec as any)?.building_value ?? ''),
+        String((rec as any)?.assessed_value ?? ''),
+        String((rec as any)?.taxable_value ?? ''),
+        String((rec as any)?.last_sale_date ?? ''),
+      ];
+      const hay = parts
+        .map((v) => String(v || '').trim().toLowerCase())
+        .filter(Boolean)
+        .join(' | ');
+      return hay.includes(q);
     });
-  }, [resultsQuery, rows]);
+  }, [recordById, resultsQuery, rows]);
 
   const selectedVisibleIndex = useMemo(() => {
     if (!selectedParcelId) return -1;
     return visibleRows.findIndex((p) => p.parcel_id === selectedParcelId);
   }, [selectedParcelId, visibleRows]);
+
+  useEffect(() => {
+    if (!selectedParcelId) return;
+    setSelectedParcelHistory((prev) => {
+      const next = [selectedParcelId, ...prev.filter((id) => id !== selectedParcelId)];
+      return next.slice(0, 200);
+    });
+  }, [selectedParcelId]);
+
+  const openPropertyModal = useCallback((parcelId: string) => {
+    const pid = String(parcelId || '').trim();
+    if (!pid) return;
+    setSelectedParcelId(pid);
+    setPropertyModalOpen(true);
+  }, []);
 
   useEffect(() => {
     const isTypingTarget = (el: EventTarget | null): boolean => {
@@ -1198,12 +1268,99 @@ export default function MapSearch({
     [fieldStats, filtersActive, resultSetCount]
   );
 
-  const downloadCsv = useCallback(() => {
+  const downloadCsv = useCallback(async () => {
     const data = resultsQuery.trim() ? visibleRows || [] : rows || [];
     if (!data.length) {
       setToast('No results to download yet.');
       return;
     }
+
+    let exportRecordById = recordById;
+    const gateFailed = String(completenessGate?.status || '') === 'fail';
+    const failedFields = new Set<string>(
+      Array.isArray(completenessGate?.failed_checks)
+        ? completenessGate.failed_checks
+            .map((x: any) => String(x?.field || '').trim())
+            .filter(Boolean)
+        : []
+    );
+    const enrichRelevantFields = new Set<string>([
+      'owner_name',
+      'owner_mailing_address',
+      'total_value',
+      'land_value',
+      'building_value',
+      'assessed_value',
+      'taxable_value',
+      'last_sale_date',
+      'last_sale_price',
+    ]);
+    const shouldAutoEnrich = gateFailed && Array.from(failedFields).some((f) => enrichRelevantFields.has(f));
+
+    if (shouldAutoEnrich) {
+      let countyForEnrich = county.trim();
+      if (!countyForEnrich) {
+        const uniqueCounties = Array.from(
+          new Set(
+            data
+              .map((p) => {
+                const rec = recordById.get(p.parcel_id);
+                return String(p.county || rec?.county || '').trim().toLowerCase();
+              })
+              .filter(Boolean)
+          )
+        );
+        if (uniqueCounties.length === 1) countyForEnrich = uniqueCounties[0];
+      }
+
+      if (countyForEnrich) {
+        const ids = data
+          .map((p) => String(p.parcel_id || '').trim())
+          .filter(Boolean)
+          .slice(0, 150);
+
+        if (ids.length) {
+          setToast('Completeness low. Running enrichment before export...');
+          try {
+            setLoading(true);
+            const resp = await runEnrichment({ county: countyForEnrich, parcel_ids: ids });
+            setLastEnrichment(resp);
+            applyEnrichmentToLoadedResults(resp);
+
+            const merged =
+              resp && resp.merged_fields && typeof resp.merged_fields === 'object'
+                ? (resp.merged_fields as Record<string, Record<string, unknown>>)
+                : null;
+            if (merged) {
+              const nextMap = new Map(recordById);
+              for (const [pidRaw, fields] of Object.entries(merged)) {
+                const pid = String(pidRaw || '').trim();
+                if (!pid || !fields || typeof fields !== 'object') continue;
+                const existing = nextMap.get(pid);
+                if (!existing) continue;
+                const mailing =
+                  (fields as any).owner_mailing_address ??
+                  (fields as any).mailing_address ??
+                  (existing as any).owner_mailing_address;
+                nextMap.set(pid, {
+                  ...existing,
+                  ...fields,
+                  owner_mailing_address:
+                    typeof mailing === 'string' ? mailing : (mailing as string | null | undefined),
+                } as ParcelRecord);
+              }
+              exportRecordById = nextMap;
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast(`Auto-enrich before export failed: ${msg}. Exporting current data.`);
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    }
+
     const header = [
       'parcel_id',
       'county',
@@ -1239,7 +1396,7 @@ export default function MapSearch({
     };
     const lines = [header.join(',')];
     for (const p of data) {
-      const rec = recordById.get(p.parcel_id);
+      const rec = exportRecordById.get(p.parcel_id);
       const rollup = (rec as any)?.rollup || null;
       const signalKeys = Array.isArray((rec as any)?.signal_keys) ? (rec as any)?.signal_keys : [];
       const rollupKeys = Array.isArray(rollup?.trigger_keys) ? rollup.trigger_keys : [];
@@ -1278,7 +1435,15 @@ export default function MapSearch({
     a.download = `parcels_${label}_${Date.now()}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 500);
-  }, [visibleRows, rows, resultsQuery, county, recordById]);
+  }, [
+    visibleRows,
+    rows,
+    resultsQuery,
+    county,
+    recordById,
+    completenessGate,
+    showToast,
+  ]);
 
   const geometryStatus = useMemo(() => {
     if (drawnPolygon) return 'Polygon selected';
@@ -1482,6 +1647,50 @@ export default function MapSearch({
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId: number | null = null;
+
+    async function loadRuntimeAudit() {
+      let c = county.trim();
+      if (!c) {
+        c = await resolveCountyFromGeometry();
+      }
+      if (!c) {
+        if (!cancelled) {
+          setRuntimeAudit(null);
+          setRuntimeAuditError('County auto-detection required to load runtime audit.');
+        }
+        return;
+      }
+      if (!cancelled) setRuntimeAuditLoading(true);
+      try {
+        const data = await fetchRuntimeAudit(c);
+        if (!cancelled) {
+          setRuntimeAudit(data);
+          setRuntimeAuditError(null);
+        }
+      } catch (_e) {
+        if (!cancelled) {
+          setRuntimeAudit(null);
+          setRuntimeAuditError('Failed to load runtime audit.');
+        }
+      } finally {
+        if (!cancelled) setRuntimeAuditLoading(false);
+      }
+    }
+
+    void loadRuntimeAudit();
+    intervalId = window.setInterval(() => {
+      void loadRuntimeAudit();
+    }, 60000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) window.clearInterval(intervalId);
+    };
+  }, [county, resolveCountyFromGeometry]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadProviderStatus() {
       let c = county.trim();
       if (!c) {
@@ -1602,6 +1811,17 @@ export default function MapSearch({
     void refreshAlerts(selectedSavedSearchId, alertsStatus);
   }, [alertsStatus, county, refreshAlerts, selectedSavedSearchId]);
 
+  useEffect(() => {
+    if (selectedSavedSearch) {
+      setSavedSearchDraftName(String(selectedSavedSearch.name || '').trim());
+      return;
+    }
+    if (!selectedSavedSearchId.trim()) {
+      const c = county.trim();
+      setSavedSearchDraftName(c ? `${c.toUpperCase()} Saved Search` : '');
+    }
+  }, [county, selectedSavedSearch, selectedSavedSearchId]);
+
   async function runSelectedSavedSearch() {
     let c = county.trim();
     if (!c) {
@@ -1653,7 +1873,7 @@ export default function MapSearch({
     }
 
     const defaultName = `${c.toUpperCase()} Saved Search`;
-    const name = (typeof window !== 'undefined' ? window.prompt('Saved Search name', defaultName) : defaultName) || defaultName;
+    const name = savedSearchDraftName.trim() || defaultName;
 
     try {
       const payload = built.payload as any;
@@ -1670,9 +1890,56 @@ export default function MapSearch({
       showToast('Saved search created.');
       await refreshSavedSearches(c);
       setSelectedSavedSearchId(String(ss.id || '').trim());
+      setSavedSearchDraftName(String(ss.name || '').trim() || name);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       showToast(`Save failed: ${msg}`);
+    }
+  }
+
+  async function renameSelectedSavedSearch() {
+    const sid = selectedSavedSearchId.trim();
+    if (!sid) {
+      showToast('Select a saved search first.');
+      return;
+    }
+    const nextName = savedSearchDraftName.trim();
+    if (!nextName) {
+      showToast('Enter a name before saving.');
+      return;
+    }
+    try {
+      const updated = await updateSavedSearch({ saved_search_id: sid, name: nextName });
+      setSavedSearchDraftName(String(updated.name || '').trim() || nextName);
+      showToast('Saved search name updated.');
+      await refreshSavedSearches(county);
+      setSelectedSavedSearchId(String(updated.id || sid).trim());
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`Rename failed: ${msg}`);
+    }
+  }
+
+  async function deleteSelectedSavedSearch() {
+    const sid = selectedSavedSearchId.trim();
+    if (!sid) {
+      showToast('Select a saved search first.');
+      return;
+    }
+    const currentName = String(selectedSavedSearch?.name || sid).trim();
+    if (typeof window !== 'undefined') {
+      const ok = window.confirm(`Delete saved search "${currentName}"? This cannot be undone.`);
+      if (!ok) return;
+    }
+    try {
+      await deleteSavedSearch(sid);
+      showToast('Saved search deleted.');
+      setSelectedSavedSearchId('');
+      setSavedSearchDraftName('');
+      await refreshSavedSearches(county);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(`Delete failed: ${msg}`);
     }
   }
 
@@ -1914,8 +2181,9 @@ export default function MapSearch({
   function buildSearchPayloadForMap(): { payload: any } | { error: string } {
     let poly = drawnPolygonRef.current ?? drawnPolygon;
     const circle = drawnCircleRef.current ?? drawnCircle;
+    const textQuery = resultsQuery.trim();
 
-    if (!poly && !circle) {
+    if (!poly && !circle && !textQuery) {
       return { error: 'Draw polygon or radius first' };
     }
 
@@ -2033,9 +2301,15 @@ export default function MapSearch({
       }
       filters[k] = v;
     }
+    if (textQuery) {
+      filters.search_text = textQuery;
+    }
     const hasAnyFilters = Object.keys(filters).length > 0;
+    const hasAttributeFilters = Object.keys(filters).some((k) => k !== 'search_text');
     if (hasAnyFilters) {
-      filters.missing_policy = 'strict';
+      // Attribute filters must be strict; otherwise missing fields can silently pass.
+      // Keep search-text-only queries lenient so broad keyword scans remain usable.
+      filters.missing_policy = hasAttributeFilters ? 'strict' : 'lenient';
     }
 
     const resolvedCounty = county.trim();
@@ -2133,13 +2407,6 @@ payload.polygon_geojson = polyOut;
     push('last_sale_date_start', filters.last_sale_date_start);
     push('last_sale_date_end', filters.last_sale_date_end);
     return parts.length ? parts.join(' · ') : 'None';
-  }, []);
-
-  const openPropertyModal = useCallback((parcelId: string) => {
-    const pid = String(parcelId || '').trim();
-    if (!pid) return;
-    setSelectedParcelId(pid);
-    setPropertyModalOpen(true);
   }, []);
 
   const removeParcelFromCurrentList = useCallback(
@@ -2297,6 +2564,62 @@ payload.polygon_geojson = polyOut;
     }
   }
 
+  const applyEnrichmentToLoadedResults = useCallback((resp: EnrichmentResponse): number => {
+    const merged =
+      resp && resp.merged_fields && typeof resp.merged_fields === 'object'
+        ? (resp.merged_fields as Record<string, Record<string, unknown>>)
+        : null;
+    if (!merged) return 0;
+
+    const updates = new Map<string, Record<string, unknown>>();
+    for (const [parcelIdRaw, fields] of Object.entries(merged)) {
+      const parcelId = String(parcelIdRaw || '').trim();
+      if (!parcelId || !fields || typeof fields !== 'object') continue;
+      updates.set(parcelId, fields);
+    }
+    if (!updates.size) return 0;
+
+    setRecords((prev) =>
+      prev.map((rec) => {
+        const f = updates.get(String(rec?.parcel_id || '').trim());
+        if (!f) return rec;
+        const mailing =
+          f.owner_mailing_address ?? f.mailing_address ?? (rec as any).owner_mailing_address ?? null;
+        return {
+          ...rec,
+          ...f,
+          owner_mailing_address:
+            typeof mailing === 'string' ? mailing : (mailing as string | null | undefined),
+        } as ParcelRecord;
+      })
+    );
+
+    setParcels((prev) =>
+      prev.map((p) => {
+        const f = updates.get(String(p?.parcel_id || '').trim());
+        if (!f) return p;
+
+        const nextAddress = String(
+          f.situs_address || f.address || p.address || ''
+        ).trim();
+        const nextOwner = String(
+          f.owner_name || p.owner_name || ''
+        ).trim();
+        const nextMailingRaw = f.owner_mailing_address ?? f.mailing_address ?? p.owner_mailing_address;
+        const nextMailing = typeof nextMailingRaw === 'string' ? nextMailingRaw.trim() : '';
+
+        return {
+          ...p,
+          address: nextAddress || p.address,
+          owner_name: nextOwner || p.owner_name,
+          owner_mailing_address: nextMailing || p.owner_mailing_address,
+        };
+      })
+    );
+
+    return updates.size;
+  }, []);
+
   function copySupportReport() {
     try {
       const payload = {
@@ -2345,18 +2668,18 @@ payload.polygon_geojson = polyOut;
     setLoading(true);
     const reqId = ++activeReq.current;
     try {
-      const isSeminole = countyForEnrich.trim().toLowerCase() === 'seminole';
       const resp = await runEnrichment({
         county: countyForEnrich,
         parcel_ids: ids,
-        provider_keys: isSeminole ? ['seminole_official_records'] : undefined,
-        fixture_mode: isSeminole,
       });
       if (reqId !== activeReq.current) return;
       setLastEnrichment(resp);
+      const mergedCount = applyEnrichmentToLoadedResults(resp);
       const evidenceCount = Array.isArray(resp.evidence) ? resp.evidence.length : 0;
       const enrichedCount = Array.isArray(resp.enriched) ? resp.enriched.length : 0;
-      setErrorBanner(`Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}).`);
+      setErrorBanner(
+        `Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}, merged=${mergedCount}).`
+      );
     } catch (e) {
       if (reqId !== activeReq.current) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -2391,17 +2714,17 @@ payload.polygon_geojson = polyOut;
 
     setLoading(true);
     try {
-      const isSeminole = countyForEnrich.trim().toLowerCase() === 'seminole';
       const resp = await runEnrichment({
         county: countyForEnrich,
         parcel_ids: ids,
-        provider_keys: isSeminole ? ['seminole_official_records'] : undefined,
-        fixture_mode: isSeminole,
       });
       setLastEnrichment(resp);
+      const mergedCount = applyEnrichmentToLoadedResults(resp);
       const evidenceCount = Array.isArray(resp.evidence) ? resp.evidence.length : 0;
       const enrichedCount = Array.isArray(resp.enriched) ? resp.enriched.length : 0;
-      setErrorBanner(`Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}).`);
+      setErrorBanner(
+        `Enrichment complete (evidence=${evidenceCount}, parcels=${enrichedCount}, merged=${mergedCount}).`
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/HTTP\s+404|HTTP\s+501|Not Found/i.test(msg)) {
@@ -2455,9 +2778,22 @@ payload.polygon_geojson = polyOut;
     setLastError(null);
     setLastExplainError(null);
     setSoftWarnings([]);
+    setCompletenessGate(null);
     setErrorBanner(null);
     setRollupsError(null);
     setRollupsLastSummary(null);
+
+    if (backendStatus === 'down') {
+      pendingRunOnReconnectRef.current = true;
+      setPendingRunOnReconnect(true);
+      setErrorBanner('Backend is down. Search queued and will auto-run when backend reconnects.');
+      return;
+    }
+
+    if (pendingRunOnReconnectRef.current || pendingRunOnReconnect) {
+      pendingRunOnReconnectRef.current = false;
+      setPendingRunOnReconnect(false);
+    }
 
     const hasGeometry = Boolean(
       drawnPolygonRef.current || drawnCircleRef.current || drawnPolygon || drawnCircle,
@@ -2893,6 +3229,8 @@ payload.polygon_geojson = polyOut;
         // ignore
       }
       const warningsAll = (resp as any).warnings as string[] | undefined;
+      const backendCompletenessGate = (resp as any)?.data_quality?.completeness_gate || null;
+      setCompletenessGate(backendCompletenessGate);
       const coverageRows: Array<Partial<ParcelRecord>> = recs.length
         ? recs
         : (list as Array<Partial<ParcelRecord>>);
@@ -2912,6 +3250,8 @@ payload.polygon_geojson = polyOut;
 
       const soft = Array.isArray(warningsAll) ? warningsAll.filter(isSoftWarning) : [];
       const otherWarnings = Array.isArray(warningsAll) ? warningsAll.filter((w) => !isSoftWarning(w)) : [];
+      const completenessWarnings = otherWarnings.filter((w) => String(w || '').startsWith('completeness_low:'));
+      const nonCompletenessWarnings = otherWarnings.filter((w) => !String(w || '').startsWith('completeness_low:'));
       const sqftMin = (payload as any)?.filters?.min_sqft;
       const sqftMax = (payload as any)?.filters?.max_sqft;
       const needsSqft = sqftMin !== null && sqftMin !== undefined || sqftMax !== null && sqftMax !== undefined;
@@ -2972,6 +3312,7 @@ payload.polygon_geojson = polyOut;
             cache: Number(rawCounts.cache || 0),
           },
           warnings,
+          completeness_gate: backendCompletenessGate,
           error_reason: (resp as any).error_reason ?? null,
           request: {
             has_polygon: Boolean((payload as any)?.polygon_geojson),
@@ -3006,8 +3347,10 @@ payload.polygon_geojson = polyOut;
 
       if (hadFilters && candidateCount && candidateCount > 0 && filteredCount === 0) {
         setErrorBanner('0 matches your filters. Try widening ranges or clearing filters.');
-      } else if (otherWarnings.length) {
-        setErrorBanner(`Warnings: ${otherWarnings.join(' / ')}`);
+      } else if (backendCompletenessGate?.status === 'fail' && completenessWarnings.length) {
+        setErrorBanner(`Data completeness warning: ${completenessWarnings.join(' / ')}`);
+      } else if (nonCompletenessWarnings.length) {
+        setErrorBanner(`Warnings: ${nonCompletenessWarnings.join(' / ')}`);
       }
 
       setParcels(list);
@@ -3057,6 +3400,7 @@ payload.polygon_geojson = polyOut;
       setRecords([]);
       setFieldStats(null);
       setResultSetCount(0);
+      setCompletenessGate(null);
       setParcelLinesFC(null);
       setParcelLinesEnabled(false);
       setParcelLinesError(null);
@@ -3066,6 +3410,186 @@ payload.polygon_geojson = polyOut;
       setPagingMeta((prev) => ({ ...prev, isPaging: false, hasMore: false }));
     }
   }
+
+  useEffect(() => {
+    const hasGeometry = Boolean(
+      drawnPolygonRef.current || drawnCircleRef.current || drawnPolygon || drawnCircle,
+    );
+    if (!hasGeometry) {
+      realtimeRunSignatureRef.current = '';
+      if (realtimeRunTimerRef.current) {
+        window.clearTimeout(realtimeRunTimerRef.current);
+        realtimeRunTimerRef.current = null;
+      }
+      return;
+    }
+    if (loading || isDrawing) {
+      return;
+    }
+
+    const polygonRing = drawnPolygon?.coordinates?.[0] || [];
+    const geometrySignature = drawnPolygon
+      ? {
+          type: 'polygon',
+          ring_len: Array.isArray(polygonRing) ? polygonRing.length : 0,
+          first: Array.isArray(polygonRing) && polygonRing.length ? polygonRing[0] : null,
+          last:
+            Array.isArray(polygonRing) && polygonRing.length
+              ? polygonRing[polygonRing.length - 1]
+              : null,
+          match_mode: polygonMatchMode,
+        }
+      : drawnCircle
+        ? {
+            type: 'circle',
+            lat: Number(drawnCircle.center?.lat || 0),
+            lng: Number(drawnCircle.center?.lng || 0),
+            radius_m: Number(drawnCircle.radius_m || 0),
+          }
+        : { type: 'none' };
+
+    const nextSignature = JSON.stringify({
+      county,
+      sortKey,
+      filterForm,
+      selectedZoning: [...selectedZoning].sort(),
+      selectedFutureLandUse: [...selectedFutureLandUse].sort(),
+      rollupsEnabled,
+      rollupsMinScore,
+      rollupsGroupOfficialRecords,
+      rollupsGroupPermits,
+      rollupsTriggerGroups: [...rollupsTriggerGroups].sort(),
+      rollupsTriggerKeys: [...rollupsTriggerKeys].sort(),
+      rollupsTierCritical,
+      rollupsTierStrong,
+      rollupsTierSupport,
+      geometrySignature,
+    });
+
+    if (nextSignature === realtimeRunSignatureRef.current) {
+      return;
+    }
+
+    if (realtimeRunTimerRef.current) {
+      window.clearTimeout(realtimeRunTimerRef.current);
+      realtimeRunTimerRef.current = null;
+    }
+
+    realtimeRunTimerRef.current = window.setTimeout(() => {
+      realtimeRunSignatureRef.current = nextSignature;
+      void run();
+    }, 650);
+
+    return () => {
+      if (realtimeRunTimerRef.current) {
+        window.clearTimeout(realtimeRunTimerRef.current);
+        realtimeRunTimerRef.current = null;
+      }
+    };
+  }, [
+    county,
+    drawnCircle,
+    drawnPolygon,
+    filterForm,
+    isDrawing,
+    loading,
+    polygonMatchMode,
+    rollupsEnabled,
+    rollupsGroupOfficialRecords,
+    rollupsGroupPermits,
+    rollupsMinScore,
+    rollupsTierCritical,
+    rollupsTierStrong,
+    rollupsTierSupport,
+    rollupsTriggerGroups,
+    rollupsTriggerKeys,
+    selectedFutureLandUse,
+    selectedZoning,
+    sortKey,
+  ]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const hasGeometry = Boolean(
+        drawnPolygonRef.current || drawnCircleRef.current || drawnPolygon || drawnCircle,
+      );
+      if (hasGeometry) {
+        void run();
+      }
+      if (selectedSavedSearchId.trim()) {
+        void runSelectedSavedSearch();
+      } else {
+        void refreshAlerts(selectedSavedSearchId, alertsStatus);
+      }
+    }, 60 * 60 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [alertsStatus, drawnCircle, drawnPolygon, refreshAlerts, selectedSavedSearchId]);
+
+  useEffect(() => {
+    const triggerRealtimeActive =
+      rollupsEnabled || rollupsTriggerKeys.length > 0 || rollupsTriggerGroups.length > 0;
+    if (!triggerRealtimeActive) {
+      realtimeTriggerSignatureRef.current = '';
+      if (realtimeTriggerTimerRef.current) {
+        window.clearTimeout(realtimeTriggerTimerRef.current);
+        realtimeTriggerTimerRef.current = null;
+      }
+      return;
+    }
+    if (loading) return;
+
+    const ids = selectedParcelId
+      ? [selectedParcelId]
+      : visibleRows.map((p) => p.parcel_id).slice(0, 50);
+    if (!ids.length) return;
+
+    const nextSignature = JSON.stringify({
+      county,
+      selectedParcelId,
+      ids,
+      rollupsEnabled,
+      rollupsTriggerKeys: [...rollupsTriggerKeys].sort(),
+      rollupsTriggerGroups: [...rollupsTriggerGroups].sort(),
+      rollupsTierCritical,
+      rollupsTierStrong,
+      rollupsTierSupport,
+      rollupsMinScore,
+    });
+
+    if (nextSignature === realtimeTriggerSignatureRef.current) return;
+
+    if (realtimeTriggerTimerRef.current) {
+      window.clearTimeout(realtimeTriggerTimerRef.current);
+      realtimeTriggerTimerRef.current = null;
+    }
+
+    realtimeTriggerTimerRef.current = window.setTimeout(() => {
+      realtimeTriggerSignatureRef.current = nextSignature;
+      void runTriggersForSelected();
+    }, 850);
+
+    return () => {
+      if (realtimeTriggerTimerRef.current) {
+        window.clearTimeout(realtimeTriggerTimerRef.current);
+        realtimeTriggerTimerRef.current = null;
+      }
+    };
+  }, [
+    county,
+    loading,
+    rollupsEnabled,
+    rollupsMinScore,
+    rollupsTierCritical,
+    rollupsTierStrong,
+    rollupsTierSupport,
+    rollupsTriggerGroups,
+    rollupsTriggerKeys,
+    selectedParcelId,
+    visibleRows,
+  ]);
 
   const signalGroupOptions = useMemo(() => {
     return [
@@ -3094,31 +3618,58 @@ payload.polygon_geojson = polyOut;
     return exists ? prev.filter((x) => x !== v) : [...prev, v];
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function checkBackend() {
-      try {
-        const health = await apiFetch('/api/health');
-        if (!health.ok) throw new Error(`health ${health.status}`);
-        const ping = await apiFetch('/api/debug/ping');
-        if (!ping.ok) throw new Error(`ping ${ping.status}`);
-        if (!cancelled) {
-          setBackendStatus('ok');
-          setBackendStatusDetail('Backend OK');
-        }
-      } catch (e) {
-        if (!cancelled) {
-          const msg = e instanceof Error ? e.message : String(e);
-          setBackendStatus('down');
-          setBackendStatusDetail(`Backend down: ${msg}`);
-        }
-      }
+  const checkBackendNow = useCallback(async () => {
+    setBackendCheckLoading(true);
+    setBackendStatus('checking');
+    setBackendStatusDetail('Checking backend...');
+    try {
+      const health = await apiFetch('/api/health');
+      if (!health.ok) throw new Error(`health ${health.status}`);
+      const ping = await apiFetch('/api/debug/ping');
+      if (!ping.ok) throw new Error(`ping ${ping.status}`);
+      setBackendStatus('ok');
+      setBackendStatusDetail('Backend OK');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBackendStatus('down');
+      setBackendStatusDetail(`Backend down: ${msg}`);
+    } finally {
+      setBackendCheckLoading(false);
     }
-    checkBackend();
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    void checkBackendNow();
+    const id = window.setInterval(() => {
+      void checkBackendNow();
+    }, 15000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [checkBackendNow]);
+
+  useEffect(() => {
+    if (backendOk === true) {
+      setBackendStatus('ok');
+      setBackendStatusDetail('Backend OK');
+      return;
+    }
+    if (backendOk === false) {
+      setBackendStatus('down');
+      setBackendStatusDetail(backendError ? `Backend down: ${backendError}` : 'Backend down');
+    }
+  }, [backendOk, backendError]);
+
+  useEffect(() => {
+    const prev = previousBackendStatusRef.current;
+    if (prev === 'down' && backendStatus === 'ok' && pendingRunOnReconnectRef.current) {
+      pendingRunOnReconnectRef.current = false;
+      setPendingRunOnReconnect(false);
+      showToast('Backend reconnected. Running queued search.');
+      void run();
+    }
+    previousBackendStatusRef.current = backendStatus;
+  }, [backendStatus, showToast]);
 
   const lastExplainRequestUrl =
     typeof (lastExplainError as any)?.url === 'string'
@@ -3147,6 +3698,14 @@ payload.polygon_geojson = polyOut;
         : typeof (lastExplainError as any)?.responseText === 'string'
           ? String((lastExplainError as any).responseText)
           : '';
+
+    const formatAgeLabel = useCallback((ageSeconds: unknown): string => {
+      const n = Number(ageSeconds);
+      if (!Number.isFinite(n) || n < 0) return 'unknown';
+      if (n < 60) return `${Math.round(n)}s ago`;
+      if (n < 3600) return `${Math.round(n / 60)}m ago`;
+      return `${(n / 3600).toFixed(1)}h ago`;
+    }, []);
   const lastExplainDetail = typeof (lastExplainError as any)?.detail === 'string'
     ? String((lastExplainError as any).detail)
     : '';
@@ -3172,7 +3731,7 @@ payload.polygon_geojson = polyOut;
         </div>
       ) : null}
 
-      <aside className="flex h-screen w-[420px] shrink-0 flex-col border-r border-cre-border/60 bg-cre-bg p-4 min-h-0 overflow-hidden">
+      <aside className="flex h-screen w-[440px] shrink-0 flex-col border-r border-cre-border/60 bg-cre-bg p-4 min-h-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-cre-muted">Map Search</div>
@@ -3240,7 +3799,7 @@ payload.polygon_geojson = polyOut;
           <div className="mt-2 grid gap-2">
             <input
               className="w-full rounded-lg border border-cre-border/60 bg-cre-bg px-2 py-2 text-sm text-cre-text"
-              placeholder="Filter results by owner, address, or parcel id"
+                placeholder="Search any property field (owner, address, parcel, zoning, value, beds, baths, etc.)"
               value={resultsQuery}
               onChange={(e) => setResultsQuery(e.target.value)}
             />
@@ -3946,6 +4505,23 @@ payload.polygon_geojson = polyOut;
               Not enriched yet (evidence-only).
             </div>
           ) : null}
+          {completenessGate?.status === 'fail' ? (
+            <div className="mt-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+              <div className="font-semibold">Completeness gate failed</div>
+              <div className="mt-1">
+                {Array.isArray(completenessGate?.failed_checks) && completenessGate.failed_checks.length
+                  ? completenessGate.failed_checks
+                      .map((x: any) => {
+                        const field = String(x?.field || 'field');
+                        const cov = Number(x?.coverage || 0);
+                        const th = Number(x?.threshold || 0);
+                        return `${field} ${Math.round(cov * 100)}% < ${Math.round(th * 100)}%`;
+                      })
+                      .join(' / ')
+                  : 'Critical owner/value fields are below minimum coverage thresholds.'}
+              </div>
+            </div>
+          ) : null}
           {lastCounts && lastCounts.candidateCount !== null && lastCounts.filteredCount !== null ? (
             <div className="mt-1 text-[11px] text-cre-muted">
               Candidates: {lastCounts.candidateCount} • Returned: {lastResponseCount} • Filtered:{' '}
@@ -4064,6 +4640,33 @@ payload.polygon_geojson = polyOut;
                   </option>
                 ))}
               </select>
+
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <input
+                  className="w-full rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-2 text-sm text-cre-text"
+                  value={savedSearchDraftName}
+                  onChange={(e) => setSavedSearchDraftName(e.target.value)}
+                  placeholder="Saved search name"
+                />
+                <button
+                  type="button"
+                  className="rounded-lg border border-cre-border/60 bg-cre-surface px-3 py-2 text-xs text-cre-text hover:bg-cre-bg disabled:opacity-60"
+                  disabled={!selectedSavedSearchId || !savedSearchDraftName.trim()}
+                  onClick={() => void renameSelectedSavedSearch()}
+                  title="Rename selected saved search"
+                >
+                  Save name
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-300/70 bg-red-50 px-3 py-2 text-xs text-red-700 hover:bg-red-100 disabled:opacity-60"
+                  disabled={!selectedSavedSearchId}
+                  onClick={() => void deleteSelectedSavedSearch()}
+                  title="Delete selected saved search"
+                >
+                  Delete
+                </button>
+              </div>
 
               <div className="flex flex-wrap gap-2">
                 <button
@@ -4213,148 +4816,130 @@ payload.polygon_geojson = polyOut;
             })() : null}
           </div>
 
-          <div className="mt-3 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
-            {visibleRows.length ? (
-              visibleRows.map((p) => {
-                const rec = recordById.get(p.parcel_id);
-                const rollup = (rec as any)?.rollup || rollupsMap[p.parcel_id] || null;
-                const addr = (p.address || rec?.situs_address || rec?.address || '').trim() || '—';
-                const owner = (p.owner_name || rec?.owner_name || '').trim() || '—';
-                const countyLabel = (p.county || rec?.county || county || '').toUpperCase() || '—';
-                const beds = rec?.beds ?? (p as any)?.beds ?? null;
-                const baths = rec?.baths ?? (p as any)?.baths ?? null;
-                const sqft = rec?.living_area_sqft ?? (p as any)?.living_sf ?? null;
-                const yearBuilt = rec?.year_built ?? (p as any)?.year_built ?? null;
-                const zoning = (rec?.zoning ?? (p as any)?.zoning ?? '').trim();
-                const propertyType = (rec?.property_type ?? (rec as any)?.property_type_raw ?? (rec as any)?.land_use ?? '').toString().trim();
-                const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
-                const triggerItems = triggerResultsByParcel.get(p.parcel_id) || [];
-
-                const groupsBadges: Array<{ k: string; label: string }> = [];
-                if (rollup && Number(rollup.has_official_records || 0) > 0) groupsBadges.push({ k: 'or', label: 'Records' });
-                if (rollup && Number(rollup.has_permits || 0) > 0) groupsBadges.push({ k: 'p', label: 'Permits' });
-                if (rollup && Number(rollup.has_tax || 0) > 0) groupsBadges.push({ k: 't', label: 'Tax' });
-                if (rollup && Number(rollup.has_code_enforcement || 0) > 0) groupsBadges.push({ k: 'ce', label: 'Code' });
-                if (rollup && Number(rollup.has_courts || 0) > 0) groupsBadges.push({ k: 'ct', label: 'Courts' });
-                if (rollup && Number(rollup.has_gis_planning || 0) > 0) groupsBadges.push({ k: 'gp', label: 'Appraiser' });
-                const signals = (rec as any)?.signals || {};
-                if (!rollup) {
-                  if (signals.has_official_records) groupsBadges.push({ k: 'or', label: 'Records' });
-                  if (signals.has_permits) groupsBadges.push({ k: 'p', label: 'Permits' });
-                  if (signals.has_tax_events) groupsBadges.push({ k: 't', label: 'Tax' });
-                  if (signals.has_code_enforcement) groupsBadges.push({ k: 'ce', label: 'Code' });
-                  if (signals.has_courts) groupsBadges.push({ k: 'ct', label: 'Courts' });
-                  if (signals.has_gis_planning) groupsBadges.push({ k: 'gp', label: 'Appraiser' });
-                }
-
-                return (
-                  <button
-                    key={`result:${p.parcel_id}`}
-                    type="button"
-                    data-parcel-card-id={p.parcel_id}
-                    className={
-                      selectedParcelId === p.parcel_id
-                        ? 'w-full rounded-xl border-2 border-cre-accent bg-cre-surface p-3 text-left shadow-md ring-2 ring-cre-accent/20'
-                        : 'w-full rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-left hover:bg-cre-surface'
-                    }
-                    onClick={() => {
-                      openPropertyModal(p.parcel_id);
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        {selectedParcelId === p.parcel_id ? (
-                          <div className="mb-1 inline-flex rounded-full bg-cre-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                            Selected
-                          </div>
-                        ) : null}
-                        <div className="text-sm font-semibold text-cre-text">{addr}</div>
-                        <div className="mt-1 text-xs text-cre-muted">{owner}</div>
-                        <div className="mt-1 text-[11px] text-cre-muted">
-                          {countyLabel} · Beds {formatMaybeNumber(beds, { zeroIsMissing: true, maxFractionDigits: 1 })} · Baths{' '}
-                          {formatMaybeNumber(baths, { zeroIsMissing: true, maxFractionDigits: 1 })} · Living{' '}
-                          {formatMaybeNumber(sqft, { zeroIsMissing: true })} sqft · Year {formatMaybeInt(yearBuilt)}
-                        </div>
-                        <div className="mt-1 text-[11px] text-cre-muted">
-                          Zoning {zoning || '—'} · Type {propertyType || '—'}
-                        </div>
-                        <div className="mt-1 font-mono text-[11px] text-cre-muted">{p.parcel_id}</div>
-                      </div>
-                      <div className="text-[11px] text-cre-muted">{srcLabel}</div>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text hover:bg-cre-bg"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPropertyModal(p.parcel_id);
-                        }}
-                      >
-                        View full details
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-full border border-red-300/70 bg-red-50 px-2 py-1 text-[11px] text-red-700 hover:bg-red-100"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeParcelFromCurrentList(p.parcel_id);
-                        }}
-                      >
-                        Remove from list
-                      </button>
-                      {signals.absentee_owner ? (
-                        <span className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
-                          Absentee owner
-                        </span>
-                      ) : null}
-                      {signals.homestead ? (
-                        <span className="rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-1 text-[11px] text-emerald-900">
-                          Homestead
-                        </span>
-                      ) : null}
-                      {rollup ? (
-                        <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
-                          Score {rollup.seller_score} · c{rollup.count_critical} / s{rollup.count_strong} / p{rollup.count_support}
-                        </span>
-                      ) : null}
-                      {groupsBadges.map((g) => (
-                        <span key={`${p.parcel_id}:${g.k}`} className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
-                          {g.label}
-                        </span>
-                      ))}
-                      <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-text">
-                        Open property workspace {'->'}
-                      </span>
-                    </div>
-
-                    {triggerItems.length ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {triggerItems.map((t, idx) => (
-                          <span
-                            key={`${p.parcel_id}:trigger:${idx}`}
-                            title={t.reason ? `Reason: ${t.reason}` : undefined}
-                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700"
-                          >
-                            {triggerLabel(t.trigger_id)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-sm text-cre-muted">No results yet. Draw an area and Run.</div>
-            )}
-          </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-cre-border/60 bg-cre-surface p-3">
           <div className="text-sm font-semibold text-cre-text">Session status</div>
           <div className="mt-2 text-xs text-cre-muted">
             Last search returned <span className="font-semibold text-cre-text">{lastResponseCount}</span> properties.
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-cre-muted">
+            <span>
+              Backend:{' '}
+              <span
+                className={
+                  backendStatus === 'ok'
+                    ? 'font-semibold text-emerald-700'
+                    : backendStatus === 'down'
+                      ? 'font-semibold text-red-700'
+                      : 'font-semibold text-cre-text'
+                }
+              >
+                {backendStatus === 'ok' ? 'Connected' : backendStatus === 'down' ? 'Down' : 'Checking...'}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="rounded-md border border-cre-border/60 bg-cre-bg px-2 py-0.5 text-[11px] text-cre-text hover:bg-cre-surface disabled:opacity-60"
+              onClick={() => void checkBackendNow()}
+              disabled={backendCheckLoading}
+            >
+              {backendCheckLoading ? 'Checking...' : 'Recheck'}
+            </button>
+          </div>
+          {pendingRunOnReconnect ? (
+            <div className="mt-1 text-[11px] font-semibold text-amber-700">Queued run will start automatically after reconnect.</div>
+          ) : null}
+          {backendStatusDetail ? (
+            <div className="mt-1 text-[11px] text-cre-muted">{backendStatusDetail}</div>
+          ) : null}
+          <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg p-2 text-[11px] text-cre-muted">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-cre-text">Hourly sync health:</span>
+              <span
+                className={
+                  runtimeAudit?.ready
+                    ? 'rounded-full border border-emerald-300/60 bg-emerald-50 px-2 py-0.5 text-emerald-800'
+                    : 'rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-amber-900'
+                }
+              >
+                {runtimeAuditLoading
+                  ? 'Checking'
+                  : runtimeAudit?.ready
+                    ? 'Ready'
+                    : runtimeAudit
+                      ? 'Needs attention'
+                      : 'Unknown'}
+              </span>
+              <button
+                type="button"
+                className="rounded-md border border-cre-border/60 bg-cre-surface px-2 py-0.5 text-[11px] text-cre-text hover:bg-cre-bg disabled:opacity-60"
+                onClick={() => {
+                  const c = county.trim();
+                  if (!c) return;
+                  setRuntimeAuditLoading(true);
+                  void fetchRuntimeAudit(c)
+                    .then((data) => {
+                      setRuntimeAudit(data);
+                      setRuntimeAuditError(null);
+                    })
+                    .catch(() => {
+                      setRuntimeAuditError('Failed to refresh runtime audit.');
+                    })
+                    .finally(() => {
+                      setRuntimeAuditLoading(false);
+                    });
+                }}
+                disabled={runtimeAuditLoading || runtimeAuditRepairLoading || !county.trim()}
+              >
+                {runtimeAuditLoading ? 'Refreshing...' : 'Refresh audit'}
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-300/70 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+                onClick={() => {
+                  const c = county.trim();
+                  if (!c) return;
+                  setRuntimeAuditRepairLoading(true);
+                  setRuntimeAuditError(null);
+                  void runRuntimeRepair(c)
+                    .then((res) => {
+                      if (res.audit) {
+                        setRuntimeAudit(res.audit);
+                      }
+                      showToast('Runtime repair complete.');
+                    })
+                    .catch((e) => {
+                      const msg = e instanceof Error ? e.message : String(e);
+                      setRuntimeAuditError(`Runtime repair failed: ${msg}`);
+                    })
+                    .finally(() => {
+                      setRuntimeAuditRepairLoading(false);
+                    });
+                }}
+                disabled={runtimeAuditLoading || runtimeAuditRepairLoading || !county.trim()}
+              >
+                {runtimeAuditRepairLoading ? 'Repairing...' : 'Run repair now'}
+              </button>
+            </div>
+            <div className="mt-1">
+              Watchlists: {runtimeAudit?.schedulers?.watchlists?.fresh ? 'fresh' : 'stale'} ({formatAgeLabel(runtimeAudit?.schedulers?.watchlists?.last_age_s)})
+              {' · '}
+              Preload: {runtimeAudit?.schedulers?.statewide_refresh?.preloaded_once ? 'done' : 'pending'}
+              {' · '}
+              Statewide refresh: {runtimeAudit?.schedulers?.statewide_refresh?.fresh ? 'fresh' : 'stale'} ({formatAgeLabel(runtimeAudit?.schedulers?.statewide_refresh?.last_age_s)})
+            </div>
+            <div className="mt-1">
+              Evidence rows: {Number(runtimeAudit?.preload?.provider_evidence_count || 0).toLocaleString()}
+              {' · '}
+              Snapshots: {Number(runtimeAudit?.preload?.enrichment_snapshot_count || 0).toLocaleString()}
+              {' · '}
+              Trigger results: {Number(runtimeAudit?.preload?.trigger_results_count || 0).toLocaleString()}
+            </div>
+            {Array.isArray(runtimeAudit?.warnings) && runtimeAudit!.warnings.length ? (
+              <div className="mt-1 text-amber-800">Warnings: {runtimeAudit!.warnings.join(' / ')}</div>
+            ) : null}
+            {runtimeAuditError ? <div className="mt-1 text-red-700">{runtimeAuditError}</div> : null}
           </div>
           <div className="mt-1 text-xs text-cre-muted">
             {lastError ? `Latest issue: ${lastError}` : 'No active issues right now.'}
@@ -4384,7 +4969,7 @@ payload.polygon_geojson = polyOut;
                 </div>
                 {runDebugOut ? (
                   <div className="rounded-lg border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-muted">
-                    {runDebugOut.error
+                    {'error' in runDebugOut
                       ? `Connection check found an issue: ${String(runDebugOut.error)}`
                       : `Connection check complete. Sample properties reviewed: ${Number(runDebugOut.recordsLen || 0)}.`}
                   </div>
@@ -4401,7 +4986,11 @@ payload.polygon_geojson = polyOut;
                 type="button"
                 className="flex-1 rounded-xl bg-cre-accent px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-60"
                 onClick={() => void run()}
-                disabled={loading || (!drawnPolygon && !drawnCircle && !resultsQuery.trim())}
+                disabled={
+                  loading ||
+                  backendStatus === 'down' ||
+                  (!drawnPolygon && !drawnCircle && !resultsQuery.trim())
+                }
               >
                 {loading ? 'Running…' : 'Run'}
               </button>
@@ -4425,14 +5014,21 @@ payload.polygon_geojson = polyOut;
               </button>
             </div>
             <div className="mt-2 text-[11px] text-cre-muted">
-              {drawnPolygon || drawnCircle ? 'Geometry selected' : resultsQuery.trim() ? 'Text filter active' : 'Draw an area or type a text filter to enable Run.'}
+              {backendStatus === 'down'
+                ? 'Backend is down. Recheck connection before running search.'
+                : drawnPolygon || drawnCircle
+                  ? 'Geometry selected'
+                  : resultsQuery.trim()
+                    ? 'Text filter active'
+                    : 'Draw an area or type a text filter to enable Run.'}
             </div>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 min-h-0 bg-cre-bg p-4">
-        <div className="relative h-full overflow-hidden rounded-2xl border border-cre-border/60 bg-cre-surface shadow-panel">
+      <main className="flex-1 min-h-0 overflow-hidden bg-cre-bg p-4">
+        <div className="mx-auto grid h-[calc(100vh-2.5rem)] min-h-[520px] max-h-[960px] max-w-[1400px] grid-rows-[minmax(320px,62vh)_minmax(220px,1fr)] gap-4">
+          <div className="relative min-h-0 overflow-hidden rounded-2xl border border-cre-border/60 bg-cre-surface shadow-panel">
           <MapContainer center={[28.5383, -81.3792]} zoom={12} doubleClickZoom={false} style={{ height: '100%', width: '100%' }}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -4596,6 +5192,7 @@ payload.polygon_geojson = polyOut;
                       const detailPa = (detail && typeof detail === 'object' && (detail as any).pa) || {};
                       const detailComputed = (detail && typeof detail === 'object' && (detail as any).computed) || {};
                       const detailFields = { ...detailPa, ...detailComputed, ...(detail || {}) } as any;
+                      const photoUrl = String(detailFields?.photo_url || rec?.photo_url || '').trim();
                       const fmtMoney = (val: number | null | undefined) =>
                         typeof val === 'number' && Number.isFinite(val) && val > 0
                           ? `$${Math.round(val).toLocaleString()}`
@@ -4628,6 +5225,17 @@ payload.polygon_geojson = polyOut;
                       const totalValue = detailFields?.total_value ?? rec?.total_value ?? null;
                       return (
                         <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                          {photoUrl ? (
+                            <img
+                              src={photoUrl}
+                              alt="Property appraiser photo"
+                              className="mb-3 h-40 w-full rounded-lg border border-cre-border/60 bg-cre-surface object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : null}
                           <div className="text-sm font-semibold text-cre-text">{addr || '—'}</div>
                           <div className="mt-1 text-xs text-cre-muted">{owner || '—'}</div>
                           {mailing ? (
@@ -4775,6 +5383,106 @@ payload.polygon_geojson = polyOut;
             </div>
           </div>
         </div>
+
+        <section
+          id="map-properties-panel"
+          className="min-h-0 rounded-2xl border border-cre-border/60 bg-cre-surface p-3 shadow-panel"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-cre-text">Properties</div>
+            <div className="flex items-center gap-2 text-xs text-cre-muted">
+              <span>{visibleRows.length} shown</span>
+              <button
+                type="button"
+                className="rounded-md border border-cre-border/60 bg-cre-bg px-2 py-0.5 text-[11px] text-cre-text hover:bg-cre-surface"
+                onClick={() => {
+                  const el = typeof document !== 'undefined' ? document.getElementById('map-properties-panel') : null;
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+              >
+                Focus panel
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-2 rounded-lg border border-cre-border/60 bg-cre-bg p-2">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-cre-muted">Selected properties</div>
+            {selectedParcelHistory.length ? (
+              <div className="flex max-h-20 flex-wrap gap-1 overflow-auto">
+                {selectedParcelHistory.map((pid) => {
+                  const rec = recordById.get(pid);
+                  const list = parcels.find((x) => x.parcel_id === pid);
+                  const addr = String(list?.address || rec?.situs_address || rec?.address || '').trim() || '—';
+                  return (
+                    <button
+                      key={`history-chip:${pid}`}
+                      type="button"
+                      className={
+                        selectedParcelId === pid
+                          ? 'rounded-full border border-cre-accent bg-cre-surface px-2 py-1 font-mono text-[10px] text-cre-text'
+                          : 'rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 font-mono text-[10px] text-cre-text hover:bg-cre-bg'
+                      }
+                      onClick={() => openPropertyModal(pid)}
+                      title={addr}
+                    >
+                      {pid}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-cre-muted">Select a property from the list to pin quick-access chips here.</div>
+            )}
+          </div>
+
+          <div className="mt-3 h-[calc(100%-5.8rem)] min-h-0 space-y-2 overflow-y-auto pr-1">
+            {visibleRows.length ? (
+              visibleRows.map((p) => {
+                const rec = recordById.get(p.parcel_id);
+                const addr = (p.address || rec?.situs_address || rec?.address || '').trim() || '—';
+                const owner = (p.owner_name || rec?.owner_name || '').trim() || '—';
+                const countyLabel = (p.county || rec?.county || county || '').toUpperCase() || '—';
+                const srcLabel = (p.source || (rec as any)?.source || '—').toString().toUpperCase();
+                return (
+                  <button
+                    key={`map-panel:${p.parcel_id}`}
+                    type="button"
+                    className={
+                      selectedParcelId === p.parcel_id
+                        ? 'w-full rounded-xl border-2 border-cre-accent bg-cre-bg p-3 text-left shadow-sm'
+                        : 'w-full rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-left hover:bg-cre-surface'
+                    }
+                    onClick={() => openPropertyModal(p.parcel_id)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-cre-text">{addr}</div>
+                        <div className="truncate text-xs text-cre-muted">{owner}</div>
+                        <div className="mt-1 font-mono text-[11px] text-cre-muted">{countyLabel} · {p.parcel_id}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full border border-cre-border/60 bg-cre-surface px-2 py-1 text-[11px] text-cre-muted">{srcLabel}</span>
+                        <button
+                          type="button"
+                          className="rounded-full border border-red-300/70 bg-red-50 px-2 py-1 text-[11px] text-red-700 hover:bg-red-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeParcelFromCurrentList(p.parcel_id);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3 text-sm text-cre-muted">No results yet. Draw an area and Run.</div>
+            )}
+          </div>
+        </section>
+        </div>
       </main>
 
       {propertyModalOpen ? (
@@ -4823,6 +5531,7 @@ payload.polygon_geojson = polyOut;
                 const detailPa = (detail && typeof detail === 'object' && (detail as any).pa) || {};
                 const detailComputed = (detail && typeof detail === 'object' && (detail as any).computed) || {};
                 const detailFields = { ...detailPa, ...detailComputed, ...(detail || {}) } as any;
+                const photoUrl = String(detailFields?.photo_url || rec?.photo_url || '').trim();
 
                 const fmtMoney = (val: number | null | undefined) =>
                   typeof val === 'number' && Number.isFinite(val) && val > 0
@@ -4880,10 +5589,10 @@ payload.polygon_geojson = polyOut;
                       maxFractionDigits: 3,
                     }),
                   },
-                  { label: 'Last Sale Date', value: String(detailFields?.last_sale_date || rec?.last_sale_date || p?.last_sale_date || '—') },
+                  { label: 'Last Sale Date', value: String(detailFields?.last_sale_date || (rec as any)?.last_sale_date || (p as any)?.last_sale_date || '—') },
                   {
                     label: 'Last Sale Price',
-                    value: fmtMoney(detailFields?.last_sale_price ?? rec?.last_sale_price ?? p?.last_sale_price ?? null),
+                    value: fmtMoney(detailFields?.last_sale_price ?? (rec as any)?.last_sale_price ?? (p as any)?.last_sale_price ?? null),
                   },
                   { label: 'Just Value', value: fmtMoney(detailFields?.just_value ?? rec?.just_value ?? p?.just_value ?? null) },
                   { label: 'Assessed Value', value: fmtMoney(detailFields?.assessed_value ?? rec?.assessed_value ?? p?.assessed_value ?? null) },
@@ -4900,6 +5609,21 @@ payload.polygon_geojson = polyOut;
                   <div className="space-y-4">
                     {selectedParcelDetailLoading ? <div className="text-sm text-cre-muted">Loading property detail…</div> : null}
                     {selectedParcelDetailError ? <div className="text-sm text-red-700">{selectedParcelDetailError}</div> : null}
+
+                    {photoUrl ? (
+                      <div className="rounded-xl border border-cre-border/60 bg-cre-bg p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-cre-muted">Property Photo</div>
+                        <img
+                          src={photoUrl}
+                          alt="Property appraiser photo"
+                          className="mt-2 h-56 w-full rounded-lg border border-cre-border/60 bg-cre-surface object-cover"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       {rowsOut.map((row) => (

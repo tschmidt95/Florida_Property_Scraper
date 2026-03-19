@@ -119,6 +119,7 @@ class PASnapshotStubProvider:
         _add("last_sale_price", rec.last_sale_price)
         _add("assessed_value", rec.assessed_value)
         _add("total_value", rec.just_value)
+        _add("photo_url", rec.photo_url)
         _add("mortgage_amount", rec.mortgage_amount)
         _add("mortgage_date", rec.mortgage_date)
         _add("mortgage_lender", rec.mortgage_lender)

@@ -42,6 +42,10 @@ class CreateSavedSearchBody(BaseModel):
     watchlist_id: Optional[str] = None
 
 
+class UpdateSavedSearchBody(BaseModel):
+    name: str
+
+
 class AddMemberBody(BaseModel):
     county: str
     parcel_id: str
@@ -146,6 +150,30 @@ def create_saved_search(body: CreateSavedSearchBody) -> Dict[str, Any]:
             watchlist_id=body.watchlist_id,
         )
         return {"ok": True, "saved_search": ss}
+    finally:
+        store.close()
+
+
+@router.patch("/saved-searches/{saved_search_id}")
+def update_saved_search(saved_search_id: str, body: UpdateSavedSearchBody) -> Dict[str, Any]:
+    store = SQLiteStore(_get_db_path())
+    try:
+        updated = store.update_saved_search_name(saved_search_id=saved_search_id, name=body.name)
+        if not updated:
+            raise HTTPException(status_code=404, detail="saved_search not found")
+        return {"ok": True, "saved_search": updated}
+    finally:
+        store.close()
+
+
+@router.delete("/saved-searches/{saved_search_id}")
+def delete_saved_search(saved_search_id: str) -> Dict[str, Any]:
+    store = SQLiteStore(_get_db_path())
+    try:
+        deleted = store.delete_saved_search(saved_search_id=saved_search_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="saved_search not found")
+        return {"ok": True, "deleted": True}
     finally:
         store.close()
 

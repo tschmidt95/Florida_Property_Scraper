@@ -125,6 +125,15 @@ def _doc_matches_any(doc_type: str, needles: list[str]) -> bool:
     return False
 
 
+def _doc_type_values(rows: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    for row in rows:
+        value = str((row or {}).get("value") or "").strip().lower()
+        if value:
+            out.append(value)
+    return out
+
+
 def evaluate_triggers_from_evidence(
     *,
     county: str,
@@ -325,12 +334,14 @@ def evaluate_triggers_from_evidence(
             add_missing(key=TriggerKey.DEED_TRANSFER_RECENT, used_fields=["last_sale_date"])
 
         # foreclosure_or_lis_pendens
-        doc_ev = _best_evidence(fields.get("official_record_doc_type") or [])
+        doc_rows = fields.get("official_record_doc_type") or []
+        doc_ev = _best_evidence(doc_rows)
         if doc_ev:
             doc_evidence: dict[str, Any] = doc_ev
-            doc_type = str(doc_ev.get("value") or "").strip().lower()
-            fired = "lis pendens" in doc_type or "foreclosure" in doc_type
-            reason = f"official_record_doc_type={doc_type}"
+            doc_types = _doc_type_values(doc_rows)
+            fired = any(("lis pendens" in dt) or ("foreclosure" in dt) for dt in doc_types)
+            best_doc = str(doc_ev.get("value") or "").strip().lower()
+            reason = f"official_record_doc_type={best_doc}"
             add_result(
                 key=TriggerKey.FORECLOSURE_OR_LIS_PENDENS,
                 fired=fired,
@@ -345,16 +356,17 @@ def evaluate_triggers_from_evidence(
             )
 
         # Official-record document-type taxonomy (distinguishes all record/court-style triggers)
-        doc_ev = _best_evidence(fields.get("official_record_doc_type") or [])
+        doc_ev = _best_evidence(doc_rows)
         if doc_ev:
-            doc_type = str(doc_ev.get("value") or "").strip().lower()
+            doc_types = _doc_type_values(doc_rows)
+            best_doc = str(doc_ev.get("value") or "").strip().lower()
 
             def doc_rule(key: str, needles: list[str]) -> None:
-                fired_local = _doc_matches_any(doc_type, needles)
+                fired_local = any(_doc_matches_any(dt, needles) for dt in doc_types)
                 add_result(
                     key=key,
                     fired=fired_local,
-                    reason=f"official_record_doc_type={doc_type}",
+                    reason=f"official_record_doc_type={best_doc}",
                     evidence=[doc_evidence],
                     used_fields=["official_record_doc_type"],
                 )

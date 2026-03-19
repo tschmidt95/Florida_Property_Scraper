@@ -325,7 +325,11 @@ class PASQLite:
                   "assessed_value": float(rec.assessed_value or 0),
                   "taxable_value": float(rec.taxable_value or 0),
                   "just_value": float(rec.just_value or 0),
-                  "mortgage_amount": float(rec.mortgage_amount or 0) if rec.mortgage_amount is not None else None,
+                  "mortgage_amount": (
+                      float(rec.mortgage_amount)
+                      if rec.mortgage_amount is not None and float(rec.mortgage_amount or 0) > 0
+                      else None
+                  ),
                   "mortgage_date": rec.mortgage_date or "",
                   "mortgage_lender": rec.mortgage_lender or "",
                   "longitude": float(rec.longitude) if rec.longitude is not None else None,

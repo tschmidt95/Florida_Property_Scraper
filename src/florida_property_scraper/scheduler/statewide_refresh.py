@@ -89,14 +89,14 @@ def _collect_parcel_ids_for_county(*, store: SQLiteStore, county: str, max_parce
             add(r[0])
 
     # Pull additional IDs from public-source tables.
-    table_specs: list[tuple[str, str, str]] = [
-        ("official_records", "county", "parcel_id"),
-        ("permits", "county", "parcel_id"),
-        ("tax_collector_events", "county", "parcel_id"),
-        ("code_enforcement_events", "county", "parcel_id"),
+    table_specs: list[tuple[str, str, str, tuple[str, ...]]] = [
+        ("official_records", "county", "parcel_id", ("observed_at", "rec_date", "id")),
+        ("permits", "county", "parcel_id", ("observed_at", "issue_date", "id")),
+        ("tax_collector_events", "county", "parcel_id", ("observed_at", "event_date", "id")),
+        ("code_enforcement_events", "county", "parcel_id", ("observed_at", "event_date", "id")),
     ]
 
-    for table, county_col, parcel_col in table_specs:
+    for table, county_col, parcel_col, order_candidates in table_specs:
         if len(ids) >= int(max_parcels):
             break
         if not _table_exists(conn, table):
@@ -104,13 +104,22 @@ def _collect_parcel_ids_for_county(*, store: SQLiteStore, county: str, max_parce
         cols = _table_columns(conn, table)
         if county_col not in cols or parcel_col not in cols:
             continue
+
+        usable_order_cols = [c for c in order_candidates if c in cols]
+        if not usable_order_cols:
+            order_expr = "id"
+        elif len(usable_order_cols) == 1:
+            order_expr = usable_order_cols[0]
+        else:
+            order_expr = f"COALESCE({', '.join(usable_order_cols)})"
+
         rows = conn.execute(
             f"""
             SELECT {parcel_col}
             FROM {table}
             WHERE lower(trim({county_col}))=? AND nullif(trim({parcel_col}), '') IS NOT NULL
             GROUP BY {parcel_col}
-            ORDER BY MAX(COALESCE(observed_at, rec_date, issue_date, event_date, id)) DESC
+            ORDER BY MAX({order_expr}) DESC
             LIMIT ?
             """,
             (county_key, max(1, int(max_parcels))),

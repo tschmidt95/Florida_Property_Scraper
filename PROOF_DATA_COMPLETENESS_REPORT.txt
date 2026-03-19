@@ -1,0 +1,44 @@
+Data Completeness Report (seminole)
+Started: 2026-03-12T17:10:33.301252+00:00
+Ended:   2026-03-12T17:12:03.969172+00:00
+
+Provider Configuration
+- OWNER_ENRICH_PROVIDER: not_set
+- PDL_API_KEY configured: False
+- /api/debug/provider_status HTTP: 200
+
+Bulk Enrichment
+- Parcel IDs loaded: 300
+- Batches: 6 (ok 6)
+- Total evidence rows: 0
+- Total enriched parcels reported: 0
+- Errors: none
+
+Owner Contact Enrichment
+- Checked parcels: 200
+- API OK: 200 / Fail: 0
+- With phones: 0 (0.0%)
+- With emails: 0 (0.0%)
+
+Search Field Coverage (returned records)
+- Search records evaluated: 500
+- owner_name: 100.0% (500/500)
+- situs_address: 94.0% (470/500)
+- owner_mailing_address: 100.0% (500/500)
+- living_area_sqft: 92.6% (463/500)
+- lot_size_sqft: 0.0% (0/500)
+- beds: 0.0% (0/500)
+- baths: 0.0% (0/500)
+- year_built: 93.4% (467/500)
+- zoning: 0.0% (0/500)
+- future_land_use: 0.0% (0/500)
+- last_sale_date: 0.0% (0/500)
+- last_sale_price: 0.0% (0/500)
+- land_value: 94.2% (471/500)
+- building_value: 93.2% (466/500)
+- total_value: 94.2% (471/500)
+- assessed_value: 0.0% (0/500)
+- taxable_value: 0.0% (0/500)
+- photo_url: 0.0% (0/500)
+
+Raw JSON report: /workspaces/Florida_Property_Scraper/data/data_completeness_report.json

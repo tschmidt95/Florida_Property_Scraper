@@ -44,3 +44,32 @@ count = len(obj.get("evidence") or [])
 assert count >= 2, f"evidence_count={count}"
 print({"ok": True, "enrich_seminole_fixture": "PASS"})
 PY
+
+echo
+echo "== bulk data fill + completeness report =="
+/workspaces/Florida_Property_Scraper/.venv/bin/python - <<'PY'
+import os
+import pathlib
+
+os.environ["COUNTY"] = "seminole"
+os.environ["MAX_PARCELS"] = "300"
+os.environ["OWNER_ENRICH_LIMIT"] = "200"
+os.environ["ENRICH_BATCH_SIZE"] = "50"
+
+from scripts.complete_data_fill_and_report import main
+import scripts.complete_data_fill_and_report as _m
+
+print({"completeness_module": getattr(_m, "__file__", None)})
+
+rc = int(main())
+if rc != 0:
+  raise SystemExit(rc)
+
+txt = pathlib.Path("/workspaces/Florida_Property_Scraper/PROOF_DATA_COMPLETENESS_REPORT.txt")
+js = pathlib.Path("/workspaces/Florida_Property_Scraper/data/data_completeness_report.json")
+print({"report_txt_exists": txt.exists(), "report_json_exists": js.exists()})
+PY
+
+echo
+echo "== report preview =="
+head -n 80 /workspaces/Florida_Property_Scraper/PROOF_DATA_COMPLETENESS_REPORT.txt || true

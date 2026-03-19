@@ -524,6 +524,12 @@ def compile_filters(raw: Any) -> List[Condition]:
         if isinstance(future_land_use, str) and future_land_use.strip():
             _add("future_land_use", "contains", future_land_use.strip())
 
+        search_text = raw.get("search_text")
+        if not (isinstance(search_text, str) and search_text.strip()):
+            search_text = raw.get("q")
+        if isinstance(search_text, str) and search_text.strip():
+            _add("search_text_blob", "contains", search_text.strip())
+
         d0 = _date(raw.get("last_sale_date_start"))
         d1 = _date(raw.get("last_sale_date_end"))
         if d0 is not None and d1 is not None and d0 > d1:

@@ -378,7 +378,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && echo \"==== Proofs (fast) ====\" && bash scripts/prove_watchlists_alerts.sh && bash scripts/prove_saved_searches_alerts_e2e.sh"
+        "set -euo pipefail && export PATH=\"${workspaceFolder}/.venv/bin:$PATH\" && echo \"==== Proofs (fast) ====\" && bash scripts/prove_watchlists_alerts.sh && bash scripts/prove_saved_searches_alerts_e2e.sh"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -396,7 +396,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && echo \"==== Pytest ====\" && pytest -q"
+        "set -euo pipefail && echo \"==== Pytest ====\" && ${workspaceFolder}/.venv/bin/pytest -q"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -414,7 +414,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && HA_PASS=$(grep \"PASS\" PROOF_HOURLY_ALERTS_SCHEDULER.txt 2>/dev/null | tail -n 1 || true) && COURTS_PASS=$(grep \"PASS\" PROOF_COURTS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && LIENS_PASS=$(grep \"PASS\" PROOF_LIENS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && REC_PASS=$(grep \"PASS\" PROOF_RECORDER_ENGINE.txt 2>/dev/null | tail -n 1 || true) && OR_PASS=$(grep \"PASS\" PROOF_OFFICIAL_RECORDS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && TC_PASS=$(grep \"PASS\" PROOF_TAX_COLLECTOR_ENGINE.txt 2>/dev/null | tail -n 1 || true) && CE_PASS=$(grep \"PASS\" PROOF_CODE_ENFORCEMENT_ENGINE.txt 2>/dev/null | tail -n 1 || true) && TR_PASS=$(grep \"PASS\" PROOF_TRIGGERS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && PA_PASS=$(grep \"PASS\" PROOF_PROPERTY_APPRAISER_ENGINE.txt 2>/dev/null | tail -n 1 || true) && PERM_PASS=$(grep \"PASS\" PROOF_PERMITS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"PROOF_HOURLY_ALERTS_SCHEDULER.txt: ${HA_PASS}\" && echo \"PROOF_COURTS_ENGINE.txt: ${COURTS_PASS}\" && echo \"PROOF_LIENS_ENGINE.txt: ${LIENS_PASS}\" && echo \"PROOF_RECORDER_ENGINE.txt: ${REC_PASS}\" && echo \"PROOF_OFFICIAL_RECORDS_ENGINE.txt: ${OR_PASS}\" && echo \"PROOF_TAX_COLLECTOR_ENGINE.txt: ${TC_PASS}\" && echo \"PROOF_CODE_ENFORCEMENT_ENGINE.txt: ${CE_PASS}\" && echo \"PROOF_TRIGGERS_ENGINE.txt: ${TR_PASS}\" && echo \"PROOF_PROPERTY_APPRAISER_ENGINE.txt: ${PA_PASS}\" && echo \"PROOF_PERMITS_ENGINE.txt: ${PERM_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
+        "set -euo pipefail && echo \"==== FINAL VERIFICATION ====\" && BRANCH=$(git rev-parse --abbrev-ref HEAD) && HEAD=$(git rev-parse --short HEAD) && UP=$(git rev-parse --short @{u}) && echo \"branch=${BRANCH} HEAD=${HEAD} upstream=${UP}\" && if [ -z \"$(git status --porcelain=v1)\" ]; then echo \"clean_tree=yes\"; else echo \"clean_tree=no\"; fi && echo \"\" && echo \"==== pytest -q (last line) ====\" && PYTEST_LAST=$(${workspaceFolder}/.venv/bin/pytest -q 2>&1 | tail -n 1) && echo \"${PYTEST_LAST}\" && echo \"\" && echo \"==== proofs (last PASS line) ====\" && WL_PASS=$(grep \"PASS\" PROOF_WATCHLISTS_ALERTS.txt 2>/dev/null | tail -n 1 || true) && SS_PASS=$(grep \"PASS\" PROOF_SAVED_SEARCHES_ALERTS_E2E.txt 2>/dev/null | tail -n 1 || true) && HA_PASS=$(grep \"PASS\" PROOF_HOURLY_ALERTS_SCHEDULER.txt 2>/dev/null | tail -n 1 || true) && COURTS_PASS=$(grep \"PASS\" PROOF_COURTS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && LIENS_PASS=$(grep \"PASS\" PROOF_LIENS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && REC_PASS=$(grep \"PASS\" PROOF_RECORDER_ENGINE.txt 2>/dev/null | tail -n 1 || true) && OR_PASS=$(grep \"PASS\" PROOF_OFFICIAL_RECORDS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && TC_PASS=$(grep \"PASS\" PROOF_TAX_COLLECTOR_ENGINE.txt 2>/dev/null | tail -n 1 || true) && CE_PASS=$(grep \"PASS\" PROOF_CODE_ENFORCEMENT_ENGINE.txt 2>/dev/null | tail -n 1 || true) && TR_PASS=$(grep \"PASS\" PROOF_TRIGGERS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && PA_PASS=$(grep \"PASS\" PROOF_PROPERTY_APPRAISER_ENGINE.txt 2>/dev/null | tail -n 1 || true) && PERM_PASS=$(grep \"PASS\" PROOF_PERMITS_ENGINE.txt 2>/dev/null | tail -n 1 || true) && echo \"PROOF_WATCHLISTS_ALERTS.txt: ${WL_PASS}\" && echo \"PROOF_SAVED_SEARCHES_ALERTS_E2E.txt: ${SS_PASS}\" && echo \"PROOF_HOURLY_ALERTS_SCHEDULER.txt: ${HA_PASS}\" && echo \"PROOF_COURTS_ENGINE.txt: ${COURTS_PASS}\" && echo \"PROOF_LIENS_ENGINE.txt: ${LIENS_PASS}\" && echo \"PROOF_RECORDER_ENGINE.txt: ${REC_PASS}\" && echo \"PROOF_OFFICIAL_RECORDS_ENGINE.txt: ${OR_PASS}\" && echo \"PROOF_TAX_COLLECTOR_ENGINE.txt: ${TC_PASS}\" && echo \"PROOF_CODE_ENFORCEMENT_ENGINE.txt: ${CE_PASS}\" && echo \"PROOF_TRIGGERS_ENGINE.txt: ${TR_PASS}\" && echo \"PROOF_PROPERTY_APPRAISER_ENGINE.txt: ${PA_PASS}\" && echo \"PROOF_PERMITS_ENGINE.txt: ${PERM_PASS}\" && echo \"\" && echo \"==== ping ====\" && set +e && PING=$(curl -sS http://127.0.0.1:8000/api/debug/ping 2>&1) && RC=$? && set -e && echo \"${PING}\" && if [ ${RC} -ne 0 ]; then echo \"curl_error=${PING}\"; fi && echo \"\" && echo \"ASSERTION: ping.git.sha should match HEAD (${HEAD})\""
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -937,7 +937,7 @@ echo; git status --porcelain=v1 && echo && git status"
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; pytest -q tests/test_triggers_engine.py"
+        "set -euo pipefail; ${workspaceFolder}/.venv/bin/pytest -q tests/test_triggers_engine.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -955,7 +955,7 @@ echo; git status --porcelain=v1 && echo && git status"
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; pytest -q"
+        "set -euo pipefail; ${workspaceFolder}/.venv/bin/pytest -q"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

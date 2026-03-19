@@ -1,0 +1,607 @@
+{
+  "started_at": "2026-03-12T17:10:33.301252+00:00",
+  "ended_at": "2026-03-12T17:12:03.969172+00:00",
+  "county": "seminole",
+  "provider_status_http": 200,
+  "provider_status": {
+    "ok": true,
+    "county": "seminole",
+    "checked_at": "2026-03-12T17:10:33+00:00",
+    "categories": {
+      "parcels": {
+        "status": "OK",
+        "reason": "parcels_sqlite",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [],
+        "mode": "live"
+      },
+      "appraiser": {
+        "status": "OK",
+        "reason": "pa_properties",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "kind": "pa",
+            "base_url": "https://www.scpafl.org/",
+            "notes": "Property Appraiser"
+          }
+        ],
+        "mode": "live"
+      },
+      "tax": {
+        "status": "DEGRADED",
+        "reason": "catalog_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "kind": "tax",
+            "base_url": "https://www.seminolecounty.tax/",
+            "notes": "Tax Collector"
+          }
+        ],
+        "mode": "planned"
+      },
+      "permits": {
+        "status": "DEGRADED",
+        "reason": "catalog_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "kind": "permits",
+            "base_url": "https://aca.seminolecountyfl.gov/",
+            "notes": "Accela permits portal"
+          }
+        ],
+        "mode": "planned"
+      },
+      "courts": {
+        "status": "DEGRADED",
+        "reason": "catalog_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "kind": "clerk",
+            "base_url": "https://www.seminoleclerk.org/",
+            "notes": "Clerk of Court"
+          }
+        ],
+        "mode": "planned"
+      },
+      "deeds": {
+        "status": "DEGRADED",
+        "reason": "target_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "kind": "clerk",
+            "base_url": "https://www.seminoleclerk.org/",
+            "notes": "Clerk of Court"
+          }
+        ],
+        "mode": "planned"
+      },
+      "official_records": {
+        "status": "OK",
+        "reason": "implemented",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "provider_id": "official_records_sqlite",
+            "method": "sqlite",
+            "status": "implemented",
+            "base_url": "",
+            "notes": "Public official-records evidence from ingested county records table"
+          },
+          {
+            "provider_id": "seminole_clerk_official_records",
+            "method": "fixture",
+            "status": "implemented",
+            "base_url": "https://www.seminoleclerk.org/",
+            "notes": "Clerk of Court (official records) - fixture only"
+          }
+        ],
+        "mode": "live"
+      },
+      "code_enforcement": {
+        "status": "OK",
+        "reason": "implemented",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "provider_id": "code_enforcement_stub",
+            "method": "sqlite",
+            "status": "implemented",
+            "base_url": "",
+            "notes": "Public code enforcement evidence from ingested county events table"
+          },
+          {
+            "provider_id": "seminole_code_enforcement",
+            "method": "not_supported",
+            "status": "not_implemented",
+            "base_url": "https://www.seminolecountyfl.gov/",
+            "notes": "Code Enforcement (placeholder)"
+          }
+        ],
+        "mode": "live"
+      },
+      "utilities": {
+        "status": "DEGRADED",
+        "reason": "planned_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "provider_id": "seminole_utilities",
+            "method": "not_supported",
+            "status": "not_implemented",
+            "base_url": "",
+            "notes": "Planned public utilities connector"
+          },
+          {
+            "provider_id": "seminole_utilities",
+            "method": "not_supported",
+            "status": "not_implemented",
+            "base_url": "https://www.seminolecountyfl.gov/",
+            "notes": "Utilities (placeholder)"
+          }
+        ],
+        "mode": "planned"
+      },
+      "liens": {
+        "status": "DEGRADED",
+        "reason": "planned_only",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "provider_id": "seminole_liens",
+            "method": "not_supported",
+            "status": "not_implemented",
+            "base_url": "",
+            "notes": "Planned public liens connector"
+          },
+          {
+            "provider_id": "seminole_liens",
+            "method": "not_supported",
+            "status": "not_implemented",
+            "base_url": "https://www.seminoleclerk.org/",
+            "notes": "Liens (placeholder)"
+          }
+        ],
+        "mode": "planned"
+      },
+      "photos": {
+        "status": "OK",
+        "reason": "implemented",
+        "last_checked": "2026-03-12T17:10:33+00:00",
+        "providers": [
+          {
+            "provider_id": "pa_photo",
+            "method": "html",
+            "status": "implemented",
+            "base_url": "",
+            "notes": "Property appraiser parcel photo when available"
+          }
+        ],
+        "mode": "live"
+      }
+    },
+    "providers": [
+      {
+        "kind": "pa",
+        "base_url": "https://www.scpafl.org/",
+        "notes": "Property Appraiser"
+      },
+      {
+        "kind": "tax",
+        "base_url": "https://www.seminolecounty.tax/",
+        "notes": "Tax Collector"
+      },
+      {
+        "kind": "clerk",
+        "base_url": "https://www.seminoleclerk.org/",
+        "notes": "Clerk of Court"
+      },
+      {
+        "kind": "permits",
+        "base_url": "https://aca.seminolecountyfl.gov/",
+        "notes": "Accela permits portal"
+      }
+    ],
+    "reference_sources": [
+      {
+        "source_type": "target",
+        "category": "pa",
+        "provider_id": "seminole:pa",
+        "url": "https://www.scpafl.org/",
+        "notes": "Property Appraiser"
+      },
+      {
+        "source_type": "target",
+        "category": "tax",
+        "provider_id": "seminole:tax",
+        "url": "https://www.seminolecounty.tax/",
+        "notes": "Tax Collector"
+      },
+      {
+        "source_type": "target",
+        "category": "clerk",
+        "provider_id": "seminole:clerk",
+        "url": "https://www.seminoleclerk.org/",
+        "notes": "Clerk of Court"
+      },
+      {
+        "source_type": "target",
+        "category": "permits",
+        "provider_id": "seminole:permits",
+        "url": "https://aca.seminolecountyfl.gov/",
+        "notes": "Accela permits portal"
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "parcels",
+        "provider_id": "fdor_statewide_centroids",
+        "status": "implemented",
+        "url": "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0",
+        "notes": "Statewide centroid + owner/address base feed",
+        "supported_fields": [
+          "parcel_id",
+          "owner_name",
+          "situs_address",
+          "county",
+          "land_sqft",
+          "year_built",
+          "sale_price"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "official_records",
+        "provider_id": "official_records_sqlite",
+        "status": "implemented",
+        "url": "",
+        "notes": "Public official-records evidence from ingested county records table",
+        "supported_fields": [
+          "official_record_doc_type",
+          "official_record_rec_date",
+          "official_record_parties",
+          "last_sale_date",
+          "last_sale_price"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "property_appraiser",
+        "provider_id": "pa_snapshot_stub",
+        "status": "implemented",
+        "url": "",
+        "notes": "Public property appraiser snapshot evidence from local PA table",
+        "supported_fields": [
+          "situs_address",
+          "owner_mailing_address",
+          "mailing_state",
+          "last_sale_date",
+          "last_sale_price",
+          "assessed_value",
+          "total_value",
+          "photo_url",
+          "mortgage_amount",
+          "mortgage_date",
+          "mortgage_lender"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "photos",
+        "provider_id": "pa_photo",
+        "status": "implemented",
+        "url": "",
+        "notes": "Property appraiser parcel photo when available",
+        "supported_fields": [
+          "photo_url"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "permits",
+        "provider_id": "permits_stub",
+        "status": "implemented",
+        "url": "",
+        "notes": "Public permit evidence from ingested permits table",
+        "supported_fields": [
+          "permit_last_major_date",
+          "permit_last_minor_date"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "tax",
+        "provider_id": "tax_collector_stub",
+        "status": "implemented",
+        "url": "",
+        "notes": "Public tax collector evidence from ingested tax events table",
+        "supported_fields": [
+          "tax_status",
+          "tax_delinquent_years"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "code_enforcement",
+        "provider_id": "code_enforcement_stub",
+        "status": "implemented",
+        "url": "",
+        "notes": "Public code enforcement evidence from ingested county events table",
+        "supported_fields": [
+          "code_enforcement_status",
+          "code_case_opened_date"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "manual",
+        "provider_id": "manual_ingest",
+        "status": "implemented",
+        "url": "",
+        "notes": "Manual public-record evidence fallback",
+        "supported_fields": [
+          "official_record_doc_type",
+          "official_record_rec_date",
+          "last_sale_date",
+          "last_sale_price",
+          "tax_status",
+          "tax_delinquent_years",
+          "code_enforcement_status",
+          "code_case_opened_date",
+          "permit_last_major_date",
+          "permit_last_minor_date",
+          "owner_mailing_address",
+          "situs_address",
+          "mailing_state",
+          "mortgage_amount",
+          "mortgage_date",
+          "assessed_value",
+          "total_value",
+          "photo_url"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "courts",
+        "provider_id": "seminole_courts",
+        "status": "not_implemented",
+        "url": "",
+        "notes": "Planned public courts connector",
+        "supported_fields": [
+          "case_type",
+          "filed_date",
+          "parties"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "liens",
+        "provider_id": "seminole_liens",
+        "status": "not_implemented",
+        "url": "",
+        "notes": "Planned public liens connector",
+        "supported_fields": [
+          "lien_type",
+          "recorded_date",
+          "amount"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "utilities",
+        "provider_id": "seminole_utilities",
+        "status": "not_implemented",
+        "url": "",
+        "notes": "Planned public utilities connector",
+        "supported_fields": [
+          "account_status",
+          "service_address"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "official_records",
+        "provider_id": "seminole_clerk_official_records",
+        "status": "implemented",
+        "url": "https://www.seminoleclerk.org/",
+        "notes": "Clerk of Court (official records) - fixture only",
+        "supported_fields": [
+          "doc_type",
+          "rec_date",
+          "parties",
+          "book_page_or_instrument",
+          "consideration",
+          "owner_name",
+          "address"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "tax",
+        "provider_id": "seminole_tax_collector",
+        "status": "not_implemented",
+        "url": "https://www.seminolecounty.tax/",
+        "notes": "Tax Collector",
+        "supported_fields": [
+          "event_type",
+          "event_date",
+          "amount_due",
+          "status",
+          "description"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "permits",
+        "provider_id": "seminole_permits_accela",
+        "status": "not_implemented",
+        "url": "https://aca.seminolecountyfl.gov/",
+        "notes": "Accela permits portal",
+        "supported_fields": [
+          "permit_number",
+          "permit_type",
+          "status",
+          "issue_date",
+          "final_date",
+          "description",
+          "address",
+          "parcel_id"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "code_enforcement",
+        "provider_id": "seminole_code_enforcement",
+        "status": "not_implemented",
+        "url": "https://www.seminolecountyfl.gov/",
+        "notes": "Code Enforcement (placeholder)",
+        "supported_fields": [
+          "event_type",
+          "event_date",
+          "case_number",
+          "status",
+          "description"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "courts",
+        "provider_id": "seminole_courts",
+        "status": "not_implemented",
+        "url": "https://www.seminoleclerk.org/",
+        "notes": "Courts (placeholder)",
+        "supported_fields": [
+          "case_type",
+          "filed_date",
+          "parties"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "liens",
+        "provider_id": "seminole_liens",
+        "status": "not_implemented",
+        "url": "https://www.seminoleclerk.org/",
+        "notes": "Liens (placeholder)",
+        "supported_fields": [
+          "lien_type",
+          "recorded_date",
+          "amount"
+        ]
+      },
+      {
+        "source_type": "provider_catalog",
+        "category": "utilities",
+        "provider_id": "seminole_utilities",
+        "status": "not_implemented",
+        "url": "https://www.seminolecountyfl.gov/",
+        "notes": "Utilities (placeholder)",
+        "supported_fields": [
+          "account_status",
+          "service_address"
+        ]
+      }
+    ]
+  },
+  "owner_provider_env": "not_set",
+  "pdl_api_key_configured": false,
+  "bulk_enrichment": {
+    "parcel_ids_loaded": 300,
+    "batches": 6,
+    "batches_ok": 6,
+    "total_evidence": 0,
+    "total_enriched": 0,
+    "errors": []
+  },
+  "owner_enrichment": {
+    "checked": 200,
+    "ok": 200,
+    "failed": 0,
+    "with_phone": 0,
+    "with_email": 0,
+    "phone_hit_rate_pct": 0.0,
+    "email_hit_rate_pct": 0.0
+  },
+  "search_http": 200,
+  "search_count": 500,
+  "field_coverage": {
+    "total": 500,
+    "fields": {
+      "owner_name": {
+        "present": 500,
+        "pct": 100.0
+      },
+      "situs_address": {
+        "present": 470,
+        "pct": 94.0
+      },
+      "owner_mailing_address": {
+        "present": 500,
+        "pct": 100.0
+      },
+      "living_area_sqft": {
+        "present": 463,
+        "pct": 92.6
+      },
+      "lot_size_sqft": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "beds": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "baths": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "year_built": {
+        "present": 467,
+        "pct": 93.4
+      },
+      "zoning": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "future_land_use": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "last_sale_date": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "last_sale_price": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "land_value": {
+        "present": 471,
+        "pct": 94.2
+      },
+      "building_value": {
+        "present": 466,
+        "pct": 93.2
+      },
+      "total_value": {
+        "present": 471,
+        "pct": 94.2
+      },
+      "assessed_value": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "taxable_value": {
+        "present": 0,
+        "pct": 0.0
+      },
+      "photo_url": {
+        "present": 0,
+        "pct": 0.0
+      }
+    }
+  }
+}

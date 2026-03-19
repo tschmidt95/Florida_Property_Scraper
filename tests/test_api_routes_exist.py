@@ -21,3 +21,4 @@ def test_api_routes_when_fastapi_present():
     assert "/health" in paths
     assert "/counties" in paths
     assert "/api/triggers/by_parcel" in paths
+    assert "/api/debug/runtime_audit" in paths

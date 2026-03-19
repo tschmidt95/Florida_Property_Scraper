@@ -1,12 +1,8 @@
 import {
-  Component,
-  lazy,
-  Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from 'react';
 
 import type { LatLngLiteral } from 'leaflet';
@@ -21,47 +17,9 @@ import {
   type ParcelRecord,
   type SearchResult,
 } from './lib/api';
-
-const LazyMapSearch = lazy(() => import('./pages/MapSearch'));
-const LazySafeMap = lazy(() => import('./pages/SafeMap'));
+import MapSearch from './pages/MapSearch';
 
 type MapStatus = 'loading' | 'loaded' | 'failed';
-
-class MapErrorBoundary extends Component<
-  { children: ReactNode; onSafeMapStatus: (status: MapStatus) => void },
-  { hasError: boolean }
-> {
-  state: { hasError: boolean } = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch() {
-    // show banner; error details are in console
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="m-4 space-y-3">
-          <div className="rounded-xl border border-cre-accent/40 bg-cre-surface p-4">
-            <div className="text-sm font-semibold text-cre-accent">
-              Map view is temporarily unavailable
-            </div>
-            <div className="mt-1 text-xs text-cre-muted">
-              Showing a simplified map so you can continue working.
-            </div>
-          </div>
-          <Suspense fallback={<div className="p-4 text-sm text-cre-text">Loading safe map…</div>}>
-            <LazySafeMap onStatus={this.props.onSafeMapStatus} />
-          </Suspense>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 function FitToFeatures({ fc }: { fc: GeoJSON.FeatureCollection | null }) {
   const map = useMap();
@@ -132,26 +90,16 @@ export default function App() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
 
-  // MapSearch v2 (web/src/pages/MapSearch.tsx) is the primary map UI.
-  // Keep the legacy map panel code for now, but do not render it, otherwise
-  // we end up with multiple Leaflet containers + duplicated controls.
-  const showLegacyMapPanel = false;
+  // In full-shell mode, prefer the legacy map panel to ensure a stable
+  // polygon drawing workflow.
+  const showLegacyMapPanel = true;
 
-  // Default OFF: the legacy App shell renders a second (confusing) UI below
-  // MapSearch. If you need it for dev, use ?legacy=1.
-  const enableLegacyUi = useMemo(() => {
-    try {
-      if (typeof window === 'undefined') return false;
-      const v = new URLSearchParams(window.location.search).get('legacy');
-      return v === '1' || v === 'true';
-    } catch {
-      return false;
-    }
-  }, []);
+  // Default to MapSearch UI, which includes trigger filters and drawers.
+  const enableLegacyUi = false;
 
   const [mode, setMode] = useState<'search' | 'map'>('map');
   const [query, setQuery] = useState('');
-  const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(false);
+  const [geometrySearchEnabled, setGeometrySearchEnabled] = useState(true);
   const [selectedCounty, setSelectedCounty] = useState('Orange');
   const [liveFetchEnabled, setLiveFetchEnabled] = useState(false);
   const [lookupCaps, setLookupCaps] = useState<
@@ -493,13 +441,9 @@ export default function App() {
           </div>
         </div>
 
-        <MapErrorBoundary onSafeMapStatus={setMapStatus}>
-          <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
-            <div className="min-h-[520px]">
-              <LazyMapSearch onMapStatus={setMapStatus} backendOk={apiOk} backendError={apiError} />
-            </div>
-          </Suspense>
-        </MapErrorBoundary>
+        <div className="min-h-[520px]">
+          <MapSearch onMapStatus={setMapStatus} backendOk={apiOk} backendError={apiError} />
+        </div>
       </div>
     );
   }
@@ -609,14 +553,6 @@ export default function App() {
       <div className="border-b border-cre-border/20 bg-cre-surface px-4 py-2 text-xs text-cre-muted">
         {buildBanner}
       </div>
-
-      <MapErrorBoundary onSafeMapStatus={setMapStatus}>
-        <Suspense fallback={<div className="p-6 text-sm text-cre-text">Loading…</div>}>
-          <div className="h-[70vh] min-h-[520px]">
-            <LazyMapSearch onMapStatus={setMapStatus} />
-          </div>
-        </Suspense>
-      </MapErrorBoundary>
 
       <div className="flex">
         <aside className="w-80 border-r border-cre-border/30 bg-cre-surface p-4">

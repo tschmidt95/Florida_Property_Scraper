@@ -55,6 +55,30 @@ _APP_START_TS = time.time()
 _LAST_ERROR_ID: str | None = None
 _LAST_ERROR_TIME: str | None = None
 
+_RUNTIME_AUDIT_STATE: dict[str, Any] = {
+    "watchlists": {
+        "enabled": False,
+        "interval_s": None,
+        "last_started_at": None,
+        "last_completed_at": None,
+        "last_duration_ms": None,
+        "last_error": None,
+        "tick_count": 0,
+        "last_summary": {},
+    },
+    "statewide_refresh": {
+        "enabled": False,
+        "interval_s": None,
+        "last_started_at": None,
+        "last_completed_at": None,
+        "last_duration_ms": None,
+        "last_error": None,
+        "tick_count": 0,
+        "preloaded_once": False,
+        "last_summary": {},
+    },
+}
+
 install_process_watch()
 
 
@@ -91,6 +115,33 @@ def _record_last_error(error_id: str) -> None:
     global _LAST_ERROR_TIME
     _LAST_ERROR_ID = str(error_id)
     _LAST_ERROR_TIME = datetime.now(timezone.utc).isoformat()
+
+
+def _runtime_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _runtime_parse_iso(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _runtime_age_seconds(value: str | None) -> int | None:
+    dt = _runtime_parse_iso(value)
+    if dt is None:
+        return None
+    try:
+        age = int((datetime.now(timezone.utc) - dt).total_seconds())
+    except Exception:
+        return None
+    if age < 0:
+        return 0
+    return age
 
 
 def _search_explain_contract(
@@ -473,6 +524,7 @@ def _health_payload() -> dict[str, Any]:
         sha = sha or ""
 
     payload: dict[str, Any] = {
+        "status": "ok",
         "ok": bool(ok),
         "sha": sha or "dev",
         "uptime_s": int(max(0, time.time() - _APP_START_TS)),
@@ -1101,7 +1153,7 @@ if app:
         if offset is not None:
             payload["offset"] = offset
 
-        for key in ("cursor", "next_cursor", "sort"):
+        for key in ("cursor", "next_cursor", "sort", "q", "query", "search_text"):
             val = _get(key)
             if val:
                 payload[key] = val
@@ -1121,11 +1173,12 @@ if app:
     def api_parcels_search_get(request: Request):
         payload = _search_payload_from_query(request)
         has_geometry = any(k in payload for k in ("geometry", "polygon_geojson", "radius", "center"))
-        if not has_geometry:
+        has_text = bool(str(payload.get("search_text") or payload.get("q") or payload.get("query") or "").strip())
+        if not has_geometry and not has_text:
             return JSONResponse(
                 _search_empty_payload(
                     warnings=["missing_geometry"],
-                    details={"hint": "Provide geometry, polygon_geojson, radius, or center+radius_m."},
+                    details={"hint": "Provide geometry/radius or q/search_text."},
                 )
             )
         return _api_parcels_search_impl(request, payload)
@@ -1134,11 +1187,12 @@ if app:
     def api_parcels_search_normalized_get(request: Request):
         payload = _search_payload_from_query(request)
         has_geometry = any(k in payload for k in ("geometry", "polygon_geojson", "radius", "center"))
-        if not has_geometry:
+        has_text = bool(str(payload.get("search_text") or payload.get("q") or payload.get("query") or "").strip())
+        if not has_geometry and not has_text:
             return JSONResponse(
                 _search_empty_payload(
                     warnings=["missing_geometry"],
-                    details={"hint": "Provide geometry, polygon_geojson, radius, or center+radius_m."},
+                    details={"hint": "Provide geometry/radius or q/search_text."},
                 )
             )
         payload["normalized"] = True
@@ -1148,6 +1202,8 @@ if app:
     def api_parcels_search(request: Request, payload: dict = Body(default={})): 
         try:
             return _api_parcels_search_impl(request, payload)
+        except HTTPException:
+            raise
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
                 raise
@@ -1174,7 +1230,12 @@ if app:
                 status_code=500,
                 content={
                     "ok": False,
-                    "error": "server_error",
+                    "error": {
+                        "type": "server_error",
+                        "code": "server_error",
+                        "message": str(exc)[:500],
+                    },
+                    "error_code": "server_error",
                     "correlation_id": correlation_id,
                     "detail": str(exc)[:500],
                     "hint": "See .logs/backend_signals.log and server logs for the error_id.",
@@ -1189,6 +1250,8 @@ if app:
             payload = payload if isinstance(payload, dict) else {}
             payload["normalized"] = True
             return _api_parcels_search_impl(request, payload)
+        except HTTPException:
+            raise
         except BaseException as exc:
             if isinstance(exc, KeyboardInterrupt):
                 raise
@@ -1197,7 +1260,12 @@ if app:
                 status_code=500,
                 content={
                     "ok": False,
-                    "error": "server_error",
+                    "error": {
+                        "type": "server_error",
+                        "code": "server_error",
+                        "message": str(exc)[:500],
+                    },
+                    "error_code": "server_error",
                     "correlation_id": error_id,
                     "detail": str(exc)[:500],
                     "hint": "See .logs/backend_signals.log and server logs for the error_id.",
@@ -1348,6 +1416,46 @@ if app:
                     return None
             return None
 
+        def _canonical_lot_sizes(land_sf_raw: object, land_acres_raw: object) -> tuple[float | None, float | None]:
+            def _pos_num(v: object) -> float | None:
+                try:
+                    if v is None:
+                        return None
+                    n = float(v)
+                    if n <= 0:
+                        return None
+                    return n
+                except Exception:
+                    return None
+
+            lot_sqft = _pos_num(land_sf_raw)
+            lot_acres = _pos_num(land_acres_raw)
+
+            if lot_sqft is None and lot_acres is None:
+                return None, None
+            if lot_sqft is None and lot_acres is not None:
+                return lot_acres * 43560.0, lot_acres
+            if lot_acres is None and lot_sqft is not None:
+                return lot_sqft, (lot_sqft / 43560.0)
+
+            # Both values exist: reconcile obvious unit drift before emitting/filtering.
+            expected_sqft = float(lot_acres or 0) * 43560.0
+            if expected_sqft <= 0:
+                return lot_sqft, lot_acres
+
+            ratio = float(lot_sqft or 0) / expected_sqft
+            if 0.8 <= ratio <= 1.25:
+                return lot_sqft, lot_acres
+
+            # Common ingest bug: land_sf carries acres value. Convert to sqft.
+            same_units = abs(float(lot_sqft or 0) - float(lot_acres or 0)) <= max(0.1, 0.02 * float(lot_acres or 0))
+            tiny_sqft_vs_acres = float(lot_sqft or 0) <= 50.0 and float(lot_acres or 0) >= 0.5
+            if same_units or tiny_sqft_vs_acres:
+                return expected_sqft, lot_acres
+
+            # Fallback: trust sqft and derive acres deterministically.
+            return lot_sqft, (float(lot_sqft or 0) / 43560.0)
+
         def _normalize_last_sale_date_range(filters_obj: object) -> tuple[object, bool]:
             if not isinstance(filters_obj, dict):
                 return filters_obj, False
@@ -1471,6 +1579,21 @@ if app:
         from florida_property_scraper.pa.ui_computed import compute_ui_fields
 
         raw_county = (payload.get("county") or "").strip().lower()
+        raw_filters_for_text = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
+        raw_search_text = ""
+        try:
+            raw_search_text = str(
+                raw_filters_for_text.get("search_text")
+                or raw_filters_for_text.get("q")
+                or payload.get("search_text")
+                or payload.get("q")
+                or payload.get("query")
+                or ""
+            )
+        except Exception:
+            raw_search_text = ""
+        search_text = " ".join(raw_search_text.split()).strip()
+        text_only_mode = False
 
         parcels_db_path = _resolve_db_path("PARCELS_DB_PATH", DEFAULT_PARCELS_DB)
         leads_db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
@@ -1482,7 +1605,9 @@ if app:
         if not leads_db_ok:
             pre_warnings.append("leads_db_missing")
 
-        geojson_dir = REPO_ROOT / "data" / "parcels"
+        geojson_dir_env = str(os.getenv("PARCEL_GEOJSON_DIR", "") or "").strip()
+        geojson_dir = Path(geojson_dir_env) if geojson_dir_env else (REPO_ROOT / "data" / "parcels")
+        use_geojson_override = bool(geojson_dir_env)
         geojson_available = False
         try:
             geojson_available = any(geojson_dir.glob("*.geojson"))
@@ -1533,6 +1658,15 @@ if app:
         county_keys = [raw_county] if raw_county else _available_geometry_counties()
         if not county_keys:
             county_keys = ["seminole"]
+        live_env_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
+            "1",
+            "true",
+            "True",
+        }
+        # When live mode is requested without a county, treat it as a statewide
+        # search and route through FDOR centroid coverage.
+        if live_env_enabled and not raw_county and bool(payload.get("live", False)):
+            county_keys = ["statewide"]
         multi_county = bool(len(county_keys) > 1 or not raw_county)
         county_key = raw_county or county_keys[0] or "seminole"
         county_label = "all" if multi_county else county_key
@@ -1540,14 +1674,8 @@ if app:
         if "live" in payload:
             requested_live = bool(payload.get("live", False))
         else:
-            requested_live = (
-                os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {"1", "true", "True"}
-                and county_key in {"orange", "seminole"}
-            )
-        # Deterministic local-only search: never use live enrichment for /search.
-        live = False
-        if requested_live:
-            pre_warnings.append("live_disabled_local_only")
+            requested_live = live_env_enabled
+        live = bool(requested_live)
         include_geometry = bool(payload.get("include_geometry", False))
         limit = None
         try:
@@ -1596,6 +1724,7 @@ if app:
                     "limit": int(limit) if limit is not None else int(max_limit),
                     "include_geometry": bool(include_geometry),
                     "has_filters": isinstance(payload.get("filters"), dict) and bool(payload.get("filters")),
+                    "has_search_text": bool(search_text),
                     "enrich": payload.get("enrich", None),
                     "enrich_limit": payload.get("enrich_limit", None),
                     "polygon_match_mode": str(payload.get("polygon_match_mode") or "intersects"),
@@ -1671,10 +1800,26 @@ if app:
                 miles=float(miles),
             )
 
+        if geometry is None and search_text:
+            text_only_mode = True
+            # World bounds polygon lets us reuse the same candidate/filter pipeline.
+            geometry = {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [-180.0, -90.0],
+                        [180.0, -90.0],
+                        [180.0, 90.0],
+                        [-180.0, 90.0],
+                        [-180.0, -90.0],
+                    ]
+                ],
+            }
+
         if geometry is None:
             return _bad_request_response(
                 "Missing geometry",
-                hint="Provide one of: geometry, polygon_geojson, radius{center,miles}, or center{lat,lng}+radius_m",
+                hint="Provide geometry/radius or search_text/q for text-based search",
             )
 
         if not isinstance(geometry, dict):
@@ -1714,7 +1859,6 @@ if app:
         # --- BEGIN PATCH: Use parcels.sqlite + RTree for polygon search ---
         import sqlite3
         import json as _json
-        from pathlib import Path
         from types import SimpleNamespace
 
         intersecting = []
@@ -1722,13 +1866,92 @@ if app:
         candidates = []
         seminole_db = parcels_db_path
         seminole_db_exists = bool(seminole_db and os.path.exists(seminole_db))
+        if use_geojson_override:
+            # Deterministic test/dev mode: prefer explicit geojson directory over
+            # workspace-wide parcels.sqlite sources.
+            seminole_db_exists = False
         seminole_sql_count = None
         sqlite_counties: set[str] = set()
 
         def _wrap_candidate(pid: str, geom: object, ckey: str) -> SimpleNamespace:
             return SimpleNamespace(parcel_id=pid, geometry=geom, county=ckey)
 
-        if geometry and seminole_db_exists:
+        if text_only_mode and seminole_db_exists:
+            db_path = seminole_db
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                leads_join = ""
+                try:
+                    if leads_db_ok and leads_db_path and os.path.exists(leads_db_path):
+                        conn.execute("ATTACH DATABASE ? AS leads", (str(leads_db_path),))
+                        leads_join = (
+                            " LEFT JOIN leads.pa_properties lp"
+                            " ON LOWER(COALESCE(lp.county,'')) = LOWER(COALESCE(p.county,''))"
+                            " AND lp.parcel_id = p.parcel_id"
+                        )
+                except Exception:
+                    leads_join = ""
+                q = """
+                    SELECT p.parcel_id, p.geom_geojson, p.county
+                    FROM parcels p
+                    LEFT JOIN parcels_pa pa
+                      ON pa.county = p.county AND pa.parcel_id = p.parcel_id
+                    WHERE 1=1
+                """
+                if leads_join:
+                    q = q.replace("WHERE 1=1", f"{leads_join} WHERE 1=1")
+                params: list[object] = []
+                if not multi_county and county_key and county_key != "statewide":
+                    q += " AND p.county = ?"
+                    params.append(county_key)
+                elif county_keys:
+                    placeholders = ",".join(["?"] * len(county_keys))
+                    q += f" AND p.county IN ({placeholders})"
+                    params.extend(county_keys)
+
+                tokens = [t.strip().lower() for t in re.split(r"\s+", search_text) if t.strip()]
+                if not tokens:
+                    tokens = [search_text.lower()]
+                tokens = tokens[:6]
+
+                for tok in tokens:
+                    like = f"%{tok}%"
+                    token_clause = (
+                        " AND ("
+                        "LOWER(p.parcel_id) LIKE ? OR "
+                        "LOWER(COALESCE(pa.owner_name,'')) LIKE ? OR "
+                        "LOWER(COALESCE(pa.situs_address,'')) LIKE ? OR "
+                        "LOWER(COALESCE(pa.mailing_address,'')) LIKE ?"
+                    )
+                    if leads_join:
+                        token_clause += " OR LOWER(COALESCE(lp.record_json,'')) LIKE ?"
+                    token_clause += ")"
+                    q += token_clause
+                    token_params = [like, like, like, like]
+                    if leads_join:
+                        token_params.append(like)
+                    params.extend(token_params)
+
+                text_candidate_cap = int(min(max((limit or 500) * 25, 2500), 20000))
+                q += " LIMIT ?"
+                params.append(text_candidate_cap)
+
+                rows = conn.execute(q, params).fetchall()
+                seminole_sql_count = len(rows)
+                for row in rows:
+                    try:
+                        parcel_geom = _json.loads(row["geom_geojson"])
+                        ckey = str(row["county"] or "").strip().lower() or county_key
+                        sqlite_counties.add(ckey)
+                        candidates.append(_wrap_candidate(row["parcel_id"], parcel_geom, ckey))
+                    except Exception:
+                        continue
+                conn.close()
+            except Exception as e:
+                provider_warnings.append(f"parcels_sqlite_error:{e}")
+
+        elif geometry and seminole_db_exists:
             db_path = seminole_db
             try:
                 conn = sqlite3.connect(db_path)
@@ -1766,9 +1989,17 @@ if app:
         if multi_county:
             for ck in remaining_counties:
                 try:
-                    provider = get_geometry_provider(ck)
+                    if live:
+                        from florida_property_scraper.parcels.providers.fdor_centroids import (
+                            FDORCentroidsProvider,
+                        )
+
+                        provider = FDORCentroidsProvider(county=ck)
+                        provider.load()
+                    else:
+                        provider = get_geometry_provider(ck)
                     provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
-                    fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
+                    fdor_enabled = live or os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
                         "1",
                         "true",
                         "True",
@@ -1800,9 +2031,17 @@ if app:
                             pass
         elif not candidates:
             # fallback to original provider logic for other single counties
-            provider = get_geometry_provider(county_key)
+            if live:
+                from florida_property_scraper.parcels.providers.fdor_centroids import (
+                    FDORCentroidsProvider,
+                )
+
+                provider = FDORCentroidsProvider(county=county_key)
+                provider.load()
+            else:
+                provider = get_geometry_provider(county_key)
             provider_is_live = provider.__class__.__name__ == "FDORCentroidsProvider"
-            fdor_enabled = os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
+            fdor_enabled = live or os.getenv("FPS_USE_FDOR_CENTROIDS", "").strip() in {
                 "1",
                 "true",
                 "True",
@@ -2550,7 +2789,10 @@ if app:
                 # do NOT fall back to demo data. Treat the request county as a hint
                 # only; bbox+geometry is authoritative.
                 if provider_is_live and fdor_enabled:
-                    enrich_ids = missing_ids[: min(limit, 250)]
+                    live_cap = int(os.getenv("LIVE_PARCEL_ENRICH_LIMIT", "1000") or 1000)
+                    if live_cap < 0:
+                        live_cap = 0
+                    enrich_ids = missing_ids[: min(live_cap, limit)]
                 else:
                     live_cap = int(os.getenv("LIVE_PARCEL_ENRICH_LIMIT", "40"))
                     if live_cap < 0:
@@ -2776,17 +3018,11 @@ if app:
                         pa_tmp = pa_by_id.get(pid)
                         if pa_tmp is None:
                             return 0.0
-                        try:
-                            land_sf = float(getattr(pa_tmp, "land_sf", 0) or 0)
-                        except Exception:
-                            land_sf = 0.0
-                        try:
-                            land_acres = float(getattr(pa_tmp, "land_acres", 0) or 0)
-                        except Exception:
-                            land_acres = 0.0
-                        if land_sf <= 0 and land_acres > 0:
-                            land_sf = land_acres * 43560.0
-                        return float(land_sf or 0)
+                        lot_sqft, _lot_acres = _canonical_lot_sizes(
+                            getattr(pa_tmp, "land_sf", None),
+                            getattr(pa_tmp, "land_acres", None),
+                        )
+                        return float(lot_sqft or 0.0)
 
                     if isinstance(raw_filters, dict):
                         min_lot_sqft_v: float | None = None
@@ -2938,23 +3174,19 @@ if app:
                                 except Exception:
                                     fields_tmp["living_area_sqft"] = None
                                 try:
-                                    land_sf = float(_pa.land_sf or 0) or 0.0
-                                    land_acres = float(_pa.land_acres or 0) or 0.0
-                                    lot_sqft = land_sf
-                                    if lot_sqft <= 0 and land_acres > 0:
-                                        lot_sqft = land_acres * 43560.0
+                                    lot_sqft, lot_acres = _canonical_lot_sizes(
+                                        getattr(_pa, "land_sf", None),
+                                        getattr(_pa, "land_acres", None),
+                                    )
                                     fields_tmp["lot_size_sqft"] = lot_sqft if lot_sqft > 0 else None
                                 except Exception:
                                     fields_tmp["lot_size_sqft"] = None
                                 try:
-                                    lot_acres = float(_pa.land_acres or 0) or 0.0
-                                    if lot_acres <= 0:
-                                        lot_sqft_any = fields_tmp.get("lot_size_sqft")
-                                        if isinstance(lot_sqft_any, (int, float, str)):
-                                            lot_sqft = float(lot_sqft_any) or 0.0
-                                        else:
-                                            lot_sqft = 0.0
-                                        lot_acres = (lot_sqft / 43560.0) if lot_sqft > 0 else 0.0
+                                    lot_sqft_any = fields_tmp.get("lot_size_sqft")
+                                    lot_sqft, lot_acres = _canonical_lot_sizes(
+                                        lot_sqft_any,
+                                        getattr(_pa, "land_acres", None),
+                                    )
                                     fields_tmp["lot_size_acres"] = lot_acres if lot_acres > 0 else None
                                 except Exception:
                                     fields_tmp["lot_size_acres"] = None
@@ -4131,23 +4363,19 @@ if app:
                 except Exception:
                     pass
                 try:
-                    land_sf = float(pa.land_sf or 0) or 0.0
-                    land_acres = float(pa.land_acres or 0) or 0.0
-                    lot_sqft = land_sf
-                    if lot_sqft <= 0 and land_acres > 0:
-                        lot_sqft = land_acres * 43560.0
+                    lot_sqft, _lot_acres = _canonical_lot_sizes(
+                        getattr(pa, "land_sf", None),
+                        getattr(pa, "land_acres", None),
+                    )
                     _set_field_if_present("lot_size_sqft", lot_sqft)
                 except Exception:
                     pass
                 try:
-                    lot_acres = float(pa.land_acres or 0) or 0.0
-                    if lot_acres <= 0:
-                        lot_sqft_any = fields.get("lot_size_sqft")
-                        if isinstance(lot_sqft_any, (int, float, str)):
-                            lot_sqft = float(lot_sqft_any) or 0.0
-                        else:
-                            lot_sqft = 0.0
-                        lot_acres = (lot_sqft / 43560.0) if lot_sqft > 0 else 0.0
+                    lot_sqft_any = fields.get("lot_size_sqft")
+                    _lot_sqft, lot_acres = _canonical_lot_sizes(
+                        lot_sqft_any,
+                        getattr(pa, "land_acres", None),
+                    )
                     _set_field_if_present("lot_size_acres", lot_acres)
                 except Exception:
                     pass
@@ -4317,6 +4545,34 @@ if app:
                 except Exception:
                     pass
 
+            try:
+                search_parts: list[str] = [
+                    str(feat.parcel_id or "").strip(),
+                    str(feat_pa_parcel_id or "").strip(),
+                    str(feat_county or "").strip(),
+                    str(fields.get("owner_name") or "").strip(),
+                    str(fields.get("situs_address") or "").strip(),
+                    str(fields.get("owner_mailing_address") or "").strip(),
+                    str(fields.get("property_type") or "").strip(),
+                    str(fields.get("zoning") or "").strip(),
+                    str(fields.get("future_land_use") or "").strip(),
+                    str(fields.get("last_sale_date") or "").strip(),
+                    str(fields.get("beds") or "").strip(),
+                    str(fields.get("baths") or "").strip(),
+                    str(fields.get("year_built") or "").strip(),
+                    str(fields.get("living_area_sqft") or "").strip(),
+                    str(fields.get("lot_size_sqft") or "").strip(),
+                    str(fields.get("lot_size_acres") or "").strip(),
+                    str(fields.get("total_value") or "").strip(),
+                    str(fields.get("land_value") or "").strip(),
+                    str(fields.get("building_value") or "").strip(),
+                    str(fields.get("assessed_value") or "").strip(),
+                    str(fields.get("taxable_value") or "").strip(),
+                ]
+                fields["search_text_blob"] = " | ".join([p for p in search_parts if p])
+            except Exception:
+                pass
+
             if explain_enabled and filters and filter_explain_counts:
                 missing_ok_raw = fields.get("__missing_ok_fields")
                 missing_ok: set[str] = set()
@@ -4367,10 +4623,13 @@ if app:
             polygon_match_mode = str(payload.get("polygon_match_mode") or "intersects").strip().lower()
             if polygon_match_mode not in {"intersects", "centroid_inside", "contains"}:
                 polygon_match_mode = "intersects"
-            try:
-                geom_ok = bool(feat.geometry) and match_geometry(geometry, feat.geometry, polygon_match_mode)
-            except Exception:
-                geom_ok = False
+            if text_only_mode:
+                geom_ok = True
+            else:
+                try:
+                    geom_ok = bool(feat.geometry) and match_geometry(geometry, feat.geometry, polygon_match_mode)
+                except Exception:
+                    geom_ok = False
 
             if not geom_ok:
                 filter_stage_counts["geometry_failed"] += 1
@@ -4685,17 +4944,11 @@ if app:
                 if living_area_sqft is not None and living_area_sqft > 0:
                     _set_source("living_area_sqft", "pa_properties", living_area_sqft)
 
-                lot_size_sqft = _norm_num(pa.land_sf)
-                lot_size_acres = _norm_num(pa.land_acres)
+                lot_size_sqft, lot_size_acres = _canonical_lot_sizes(pa.land_sf, pa.land_acres)
                 if lot_size_sqft is not None and lot_size_sqft > 0:
                     _set_source("lot_size_sqft", "pa_properties", lot_size_sqft)
                 if lot_size_acres is not None and lot_size_acres > 0:
                     _set_source("lot_size_acres", "pa_properties", lot_size_acres)
-                if lot_size_acres is None and lot_size_sqft is not None:
-                    try:
-                        lot_size_acres = float(lot_size_sqft) / 43560.0
-                    except Exception:
-                        lot_size_acres = None
 
                 beds = int(pa.bedrooms) if int(pa.bedrooms or 0) > 0 else None
                 baths = float(pa.bathrooms) if float(pa.bathrooms or 0) > 0 else None
@@ -4968,6 +5221,11 @@ if app:
                 property_type_raw_out = str(land_use or property_class or "").strip() or None
             except Exception:
                 property_type_raw_out = None
+
+            try:
+                lot_size_sqft, lot_size_acres = _canonical_lot_sizes(lot_size_sqft, lot_size_acres)
+            except Exception:
+                pass
 
             sqft: list[dict] = []
             if living_area_sqft is not None:
@@ -5299,7 +5557,49 @@ if app:
                 return ""
 
         if not sort_key:
-            records_all.sort(key=_pid)
+            def _source_rank(item: dict) -> int:
+                src = str(item.get("source") or "").strip().lower()
+                if src == "cache":
+                    return 0
+                if src == "live":
+                    return 1
+                if src == "missing":
+                    return 3
+                return 2
+
+            def _completeness_score(item: dict) -> int:
+                score = 0
+                for field in (
+                    "owner_name",
+                    "owner_mailing_address",
+                    "living_area_sqft",
+                    "lot_size_sqft",
+                    "zoning",
+                    "future_land_use",
+                    "total_value",
+                    "assessed_value",
+                    "taxable_value",
+                    "photo_url",
+                ):
+                    v = item.get(field)
+                    if v is None:
+                        continue
+                    if isinstance(v, str) and not v.strip():
+                        continue
+                    if isinstance(v, (int, float)) and float(v) <= 0.0:
+                        continue
+                    if isinstance(v, (list, tuple, set, dict)) and len(v) == 0:
+                        continue
+                    score += 1
+                return score
+
+            records_all.sort(
+                key=lambda r: (
+                    _source_rank(r),
+                    -_completeness_score(r),
+                    _pid(r),
+                )
+            )
 
         try:
             results_map = {str(r.get("parcel_id") or "").strip(): r for r in results_all}
@@ -5457,6 +5757,69 @@ if app:
             field_stats_returned["sample_candidate"] = field_stats_candidates.get("sample_candidate")
         # Return merged-record coverage for UI filter availability.
         field_stats = field_stats_returned
+
+        completeness_gate: dict[str, Any] = {
+            "status": "not_evaluated",
+            "sample_size": int(field_stats_returned.get("scanned", 0) or 0),
+            "min_sample": 20,
+            "checks": [],
+            "failed_checks": [],
+        }
+        try:
+            coverage_map = (
+                (field_stats_returned.get("coverage_returned") or {}).get("coverage")
+                if isinstance(field_stats_returned.get("coverage_returned"), dict)
+                else {}
+            )
+            if not isinstance(coverage_map, dict):
+                coverage_map = {}
+            sample_size = int(field_stats_returned.get("scanned", 0) or 0)
+            min_sample = 20
+            thresholds: dict[str, float] = {
+                "owner_name": 0.95,
+                "owner_mailing_address": 0.60,
+                "total_value": 0.70,
+            }
+
+            checks: list[dict[str, Any]] = []
+            failed_checks: list[dict[str, Any]] = []
+            if sample_size >= min_sample:
+                for field_key, threshold in thresholds.items():
+                    cov_val = float(coverage_map.get(field_key, 0.0) or 0.0)
+                    check = {
+                        "field": field_key,
+                        "coverage": round(cov_val, 4),
+                        "threshold": float(threshold),
+                        "status": "pass" if cov_val >= threshold else "fail",
+                    }
+                    checks.append(check)
+                    if check["status"] == "fail":
+                        failed_checks.append(check)
+                completeness_gate = {
+                    "status": "fail" if failed_checks else "pass",
+                    "sample_size": sample_size,
+                    "min_sample": min_sample,
+                    "checks": checks,
+                    "failed_checks": failed_checks,
+                }
+            else:
+                completeness_gate = {
+                    "status": "insufficient_sample",
+                    "sample_size": sample_size,
+                    "min_sample": min_sample,
+                    "checks": checks,
+                    "failed_checks": failed_checks,
+                }
+
+            for failed in failed_checks:
+                f = str(failed.get("field") or "")
+                c = float(failed.get("coverage") or 0.0)
+                t = float(failed.get("threshold") or 0.0)
+                token = f"completeness_low:{f}:{int(round(c * 100))}%<{int(round(t * 100))}%"
+                if token not in warnings:
+                    warnings.append(token)
+        except Exception:
+            pass
 
         debug_flags: dict[str, Any] | None = None
         if debug_response_enabled:
@@ -5627,10 +5990,15 @@ if app:
             details=explain_payload,
         )
 
+        data_quality_payload = {
+            "mode": "evidence_only",
+            "completeness_gate": completeness_gate,
+        }
+
         return JSONResponse(
             {
                 "ok": True,
-                "data_quality": {"mode": "evidence_only"},
+                "data_quality": data_quality_payload,
                 "hover_fields_mode": "evidence_only",
                 "search_id": search_id,
                 "correlation_id": correlation_id,
@@ -7652,7 +8020,7 @@ if app:
             return _safe_error_response(error="trigger_eval_failed", detail=str(exc), status_code=500)
 
     def _provider_status_payload(county_key: str) -> dict[str, Any]:
-        from florida_property_scraper.providers.catalog import get_targets
+        from florida_property_scraper.providers.catalog import get_provider_catalog, get_targets
 
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         targets = get_targets(county_key)
@@ -7714,6 +8082,64 @@ if app:
                 "mode": "planned",
             }
 
+        catalog_entries = list(get_provider_catalog(county_key) or [])
+
+        def _status_from_category(category: str, fallback_targets: list | None = None) -> dict[str, Any]:
+            entries = [e for e in catalog_entries if str(getattr(e, "category", "") or "").strip().lower() == category]
+            provider_entries = [
+                {
+                    "provider_id": str(getattr(e, "provider_id", "") or ""),
+                    "method": str(getattr(e, "method", "") or ""),
+                    "status": str(getattr(e, "status", "") or ""),
+                    "base_url": str(getattr(e, "base_url", "") or ""),
+                    "notes": getattr(e, "notes", None),
+                }
+                for e in entries
+            ]
+
+            if not entries:
+                if fallback_targets:
+                    return {
+                        "status": "DEGRADED",
+                        "reason": "target_only",
+                        "last_checked": now,
+                        "providers": [_provider_entry(p) for p in fallback_targets],
+                        "mode": "planned",
+                    }
+                return {
+                    "status": "DOWN",
+                    "reason": "no_provider_catalog",
+                    "last_checked": now,
+                    "providers": [],
+                    "mode": "planned",
+                }
+
+            statuses = {str(getattr(e, "status", "") or "").strip().lower() for e in entries}
+            if "implemented" in statuses:
+                return {
+                    "status": "OK",
+                    "reason": "implemented",
+                    "last_checked": now,
+                    "providers": provider_entries,
+                    "mode": "live",
+                }
+            if "planned" in statuses or "not_implemented" in statuses:
+                return {
+                    "status": "DEGRADED",
+                    "reason": "planned_only",
+                    "last_checked": now,
+                    "providers": provider_entries,
+                    "mode": "planned",
+                }
+
+            return {
+                "status": "DEGRADED",
+                "reason": "catalog_only",
+                "last_checked": now,
+                "providers": provider_entries,
+                "mode": "planned",
+            }
+
         categories: dict[str, Any] = {
             "parcels": {
                 "status": "OK" if parcels_ok else "DOWN",
@@ -7732,12 +8158,55 @@ if app:
             "tax": _status_from_catalog(providers_map.get("tax", []), default_reason="catalog_only"),
             "permits": _status_from_catalog(providers_map.get("permits", []), default_reason="catalog_only"),
             "courts": _status_from_catalog(providers_map.get("clerk", []), default_reason="catalog_only"),
-            "deeds": _status_from_catalog([], default_reason="catalog_only"),
-            "official_records": _status_from_catalog([], default_reason="catalog_only"),
-            "code_enforcement": _status_from_catalog([], default_reason="catalog_only"),
-            "utilities": _status_from_catalog([], default_reason="catalog_only"),
-            "liens": _status_from_catalog([], default_reason="catalog_only"),
+            "deeds": _status_from_category("deeds", providers_map.get("clerk", [])),
+            "official_records": _status_from_category("official_records", providers_map.get("clerk", [])),
+            "code_enforcement": _status_from_category("code_enforcement"),
+            "utilities": _status_from_category("utilities"),
+            "liens": _status_from_category("liens"),
+            "photos": _status_from_category("photos", providers_map.get("pa", [])),
         }
+
+        reference_sources: list[dict[str, Any]] = []
+        seen_refs: set[tuple[str, str, str]] = set()
+
+        for p in targets:
+            kind = str(getattr(p, "kind", "") or "").strip().lower()
+            base_url = str(getattr(p, "base_url", "") or "").strip()
+            if not kind and not base_url:
+                continue
+            key = (kind, base_url, "target")
+            if key in seen_refs:
+                continue
+            seen_refs.add(key)
+            reference_sources.append(
+                {
+                    "source_type": "target",
+                    "category": kind,
+                    "provider_id": f"{county_key}:{kind}",
+                    "url": base_url,
+                    "notes": getattr(p, "notes", None),
+                }
+            )
+
+        for entry in get_provider_catalog(county_key):
+            base_url = str(getattr(entry, "base_url", "") or "").strip()
+            provider_id = str(getattr(entry, "provider_id", "") or "").strip()
+            category = str(getattr(entry, "category", "") or "").strip().lower()
+            key = (provider_id, base_url, "catalog")
+            if key in seen_refs:
+                continue
+            seen_refs.add(key)
+            reference_sources.append(
+                {
+                    "source_type": "provider_catalog",
+                    "category": category,
+                    "provider_id": provider_id,
+                    "status": str(getattr(entry, "status", "") or ""),
+                    "url": base_url,
+                    "notes": getattr(entry, "notes", None),
+                    "supported_fields": list(getattr(entry, "supported_fields", []) or []),
+                }
+            )
 
         return {
             "ok": True,
@@ -7745,12 +8214,211 @@ if app:
             "checked_at": now,
             "categories": categories,
             "providers": [_provider_entry(p) for p in targets],
+            "reference_sources": reference_sources,
         }
 
     @app.get("/api/debug/provider_status")
     def debug_provider_status(county: str = "seminole"):
         county_key = (county or "").strip().lower() or "seminole"
         return _provider_status_payload(county_key)
+
+    @app.get("/api/debug/runtime_audit")
+    def debug_runtime_audit(county: str = "seminole"):
+        import sqlite3
+
+        county_key = (county or "").strip().lower() or "seminole"
+        now_iso = _runtime_now_iso()
+
+        runtime_watch = dict(_RUNTIME_AUDIT_STATE.get("watchlists") or {})
+        runtime_refresh = dict(_RUNTIME_AUDIT_STATE.get("statewide_refresh") or {})
+
+        watch_age_s = _runtime_age_seconds(runtime_watch.get("last_completed_at"))
+        refresh_age_s = _runtime_age_seconds(runtime_refresh.get("last_completed_at"))
+
+        watch_interval = int(runtime_watch.get("interval_s") or 3600)
+        refresh_interval = int(runtime_refresh.get("interval_s") or 3600)
+        watch_fresh_s = max(3600, int(watch_interval * 1.5))
+        refresh_fresh_s = max(3600, int(refresh_interval * 1.5))
+
+        watch_fresh = (watch_age_s is not None) and (watch_age_s <= watch_fresh_s)
+        refresh_fresh = (refresh_age_s is not None) and (refresh_age_s <= refresh_fresh_s)
+
+        evidence_db = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+        preload_stats: dict[str, Any] = {
+            "db_path": evidence_db,
+            "db_exists": _db_exists(evidence_db),
+            "provider_evidence_count": 0,
+            "enrichment_snapshot_count": 0,
+            "trigger_results_count": 0,
+            "latest_evidence_at": None,
+            "latest_snapshot_at": None,
+            "latest_trigger_evaluated_at": None,
+            "fresh_within_90m": False,
+        }
+
+        def _safe_scalar(conn: Any, sql: str, params: tuple[Any, ...] = ()) -> Any:
+            try:
+                row = conn.execute(sql, params).fetchone()
+                if not row:
+                    return None
+                return row[0]
+            except Exception:
+                return None
+
+        if preload_stats["db_exists"]:
+            try:
+                con = sqlite3.connect(evidence_db)
+                try:
+                    if _table_exists(con, "provider_evidence"):
+                        preload_stats["provider_evidence_count"] = int(
+                            _safe_scalar(
+                                con,
+                                "SELECT COUNT(*) FROM provider_evidence WHERE lower(county)=?",
+                                (county_key,),
+                            )
+                            or 0
+                        )
+                        preload_stats["latest_evidence_at"] = _safe_scalar(
+                            con,
+                            "SELECT MAX(COALESCE(retrieved_at, fetched_at)) FROM provider_evidence WHERE lower(county)=?",
+                            (county_key,),
+                        )
+
+                    if _table_exists(con, "parcel_enrichment_snapshot"):
+                        preload_stats["enrichment_snapshot_count"] = int(
+                            _safe_scalar(
+                                con,
+                                "SELECT COUNT(*) FROM parcel_enrichment_snapshot WHERE lower(county)=?",
+                                (county_key,),
+                            )
+                            or 0
+                        )
+                        preload_stats["latest_snapshot_at"] = _safe_scalar(
+                            con,
+                            "SELECT MAX(snapshot_at) FROM parcel_enrichment_snapshot WHERE lower(county)=?",
+                            (county_key,),
+                        )
+
+                    if _table_exists(con, "trigger_results"):
+                        preload_stats["trigger_results_count"] = int(
+                            _safe_scalar(
+                                con,
+                                "SELECT COUNT(*) FROM trigger_results WHERE lower(county)=?",
+                                (county_key,),
+                            )
+                            or 0
+                        )
+                        preload_stats["latest_trigger_evaluated_at"] = _safe_scalar(
+                            con,
+                            "SELECT MAX(evaluated_at) FROM trigger_results WHERE lower(county)=?",
+                            (county_key,),
+                        )
+                finally:
+                    con.close()
+            except Exception:
+                pass
+
+        latest_data_ts = max(
+            [
+                _runtime_age_seconds(preload_stats.get("latest_evidence_at"))
+                if _runtime_age_seconds(preload_stats.get("latest_evidence_at")) is not None
+                else -1,
+                _runtime_age_seconds(preload_stats.get("latest_snapshot_at"))
+                if _runtime_age_seconds(preload_stats.get("latest_snapshot_at")) is not None
+                else -1,
+                _runtime_age_seconds(preload_stats.get("latest_trigger_evaluated_at"))
+                if _runtime_age_seconds(preload_stats.get("latest_trigger_evaluated_at")) is not None
+                else -1,
+            ]
+        )
+        preload_stats["fresh_within_90m"] = bool(latest_data_ts >= 0 and latest_data_ts <= 5400)
+
+        warnings: list[str] = []
+        if runtime_watch.get("enabled") and not watch_fresh:
+            warnings.append("watchlists_scheduler_stale")
+        if runtime_refresh.get("enabled") and not refresh_fresh:
+            warnings.append("statewide_refresh_scheduler_stale")
+        if runtime_refresh.get("enabled") and not runtime_refresh.get("preloaded_once"):
+            warnings.append("statewide_preload_not_completed")
+        if int(preload_stats.get("provider_evidence_count") or 0) <= 0:
+            warnings.append("provider_evidence_empty")
+        if int(preload_stats.get("enrichment_snapshot_count") or 0) <= 0:
+            warnings.append("enrichment_snapshot_empty")
+
+        ready = len(warnings) == 0
+
+        return {
+            "ok": True,
+            "ready": bool(ready),
+            "checked_at": now_iso,
+            "uptime_s": int(time.time() - _APP_START_TS),
+            "county": county_key,
+            "hourly_policy": {
+                "target_interval_s": 3600,
+                "watchlists_interval_s": watch_interval,
+                "statewide_refresh_interval_s": refresh_interval,
+            },
+            "schedulers": {
+                "watchlists": {
+                    **runtime_watch,
+                    "last_age_s": watch_age_s,
+                    "fresh": bool(watch_fresh),
+                    "fresh_threshold_s": watch_fresh_s,
+                },
+                "statewide_refresh": {
+                    **runtime_refresh,
+                    "last_age_s": refresh_age_s,
+                    "fresh": bool(refresh_fresh),
+                    "fresh_threshold_s": refresh_fresh_s,
+                },
+            },
+            "preload": preload_stats,
+            "warnings": warnings,
+        }
+
+    @app.post("/api/debug/runtime_repair")
+    def debug_runtime_repair(county: str = "seminole"):
+        county_key = (county or "").strip().lower() or "seminole"
+        now_iso = _runtime_now_iso()
+        out: dict[str, Any] = {
+            "ok": True,
+            "county": county_key,
+            "started_at": now_iso,
+            "statewide_refresh": None,
+            "errors": [],
+        }
+
+        try:
+            from florida_property_scraper.scheduler.statewide_refresh import run_statewide_refresh_tick
+
+            db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            batch_size = int(float(os.getenv("FPS_STATEWIDE_REFRESH_BATCH_SIZE", "100") or 100))
+            max_parcels = int(
+                float(os.getenv("FPS_STATEWIDE_REFRESH_MAX_PARCELS_PER_COUNTY", "1000") or 1000)
+            )
+            result = run_statewide_refresh_tick(
+                db_path=db_path,
+                counties=[county_key],
+                batch_size=batch_size,
+                max_parcels_per_county=max_parcels,
+                min_confidence_label=str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "low") or "low"),
+            )
+            out["statewide_refresh"] = result
+            _RUNTIME_AUDIT_STATE["statewide_refresh"].update(
+                {
+                    "last_completed_at": _runtime_now_iso(),
+                    "last_error": None,
+                    "preloaded_once": True,
+                }
+            )
+        except Exception as exc:
+            out["ok"] = False
+            out["errors"].append(f"statewide_refresh_failed:{exc}")
+            _RUNTIME_AUDIT_STATE["statewide_refresh"]["last_error"] = str(exc)
+
+        out["finished_at"] = _runtime_now_iso()
+        out["audit"] = debug_runtime_audit(county=county_key)
+        return out
 
     @app.get("/api/debug/process")
     def debug_process():
@@ -7947,6 +8615,7 @@ if app:
         from florida_property_scraper.enrichment.providers.registry import get_owner_enrichment_provider
         from florida_property_scraper.pa.storage import PASQLite
         from florida_property_scraper.storage import SQLiteStore
+        import sqlite3
 
         county_key = (county or "").strip().lower()
         pid = str(parcel_id or "").strip()
@@ -7982,22 +8651,70 @@ if app:
         finally:
             pa_store.close()
 
-        if pa is None:
-            raise HTTPException(status_code=404, detail="PA record not found")
+        owner_name = ""
+        mailing_address = ""
+        lead_phones: list[str] = []
+        lead_emails: list[str] = []
+        pa_missing = pa is None
 
-        owner_name = "; ".join([n for n in (pa.owner_names or []) if n]).strip()
-        mailing_address = ", ".join(
-            [
-                str(pa.mailing_address or "").strip(),
-                " ".join(
-                    [
-                        str(pa.mailing_city or "").strip(),
-                        str(pa.mailing_state or "").strip(),
-                        str(pa.mailing_zip or "").strip(),
-                    ]
-                ).strip(),
-            ]
-        ).replace(" ,", ",").strip(" ,")
+        if pa is not None:
+            owner_name = "; ".join([n for n in (pa.owner_names or []) if n]).strip()
+            mailing_address = ", ".join(
+                [
+                    str(pa.mailing_address or "").strip(),
+                    " ".join(
+                        [
+                            str(pa.mailing_city or "").strip(),
+                            str(pa.mailing_state or "").strip(),
+                            str(pa.mailing_zip or "").strip(),
+                        ]
+                    ).strip(),
+                ]
+            ).replace(" ,", ",").strip(" ,")
+
+        def _parse_contact_list(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, list):
+                return [str(v).strip() for v in value if str(v).strip()]
+            s = str(value).strip()
+            if not s:
+                return []
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(v).strip() for v in parsed if str(v).strip()]
+            except Exception:
+                pass
+            return [x.strip() for x in s.split(",") if x.strip()]
+
+        try:
+            leads_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
+            if os.path.exists(leads_path):
+                con = sqlite3.connect(leads_path)
+                con.row_factory = sqlite3.Row
+                try:
+                    row = con.execute(
+                        """
+                        SELECT owner_name, mailing_address, contact_phones, contact_emails
+                        FROM leads
+                        WHERE lower(county)=? AND (parcel_id=? OR parcel_id=?)
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (county_key, pid, pa_parcel_id),
+                    ).fetchone()
+                    if row:
+                        if not owner_name:
+                            owner_name = str(row["owner_name"] or "").strip()
+                        if not mailing_address:
+                            mailing_address = str(row["mailing_address"] or "").strip()
+                        lead_phones = _parse_contact_list(row["contact_phones"])
+                        lead_emails = _parse_contact_list(row["contact_emails"])
+                finally:
+                    con.close()
+        except Exception:
+            pass
 
         provider = get_owner_enrichment_provider()
         provider_name = provider.name if provider is not None else ""
@@ -8023,14 +8740,19 @@ if app:
                         "owner_mailing_address": mailing_address or None,
                         "provider": provider_name,
                         "configured": provider_configured,
-                        "status": cached.get("status"),
-                        "phones": cached.get("phones") or [],
-                        "emails": cached.get("emails") or [],
+                        "status": cached.get("status") or ("pa_missing_cache" if pa_missing else "cache"),
+                        "phones": cached.get("phones") or lead_phones,
+                        "emails": cached.get("emails") or lead_emails,
                         "cache_hit": True,
                     }
                 )
 
             if not provider_configured:
+                status = "not_configured"
+                if pa_missing and (lead_phones or lead_emails):
+                    status = "local_cache_only"
+                elif pa_missing:
+                    status = "pa_record_missing"
                 return JSONResponse(
                     {
                         "county": county_key,
@@ -8040,9 +8762,9 @@ if app:
                         "owner_mailing_address": mailing_address or None,
                         "provider": provider_name,
                         "configured": False,
-                        "status": "not_configured",
-                        "phones": [],
-                        "emails": [],
+                        "status": status,
+                        "phones": lead_phones,
+                        "emails": lead_emails,
                         "cache_hit": False,
                     }
                 )
@@ -8150,6 +8872,7 @@ if app:
         enrichment_snapshot = None
         merged_fields: dict[str, Any] = {}
         evidence_ids: list[int] = []
+        owner_enrichment = None
         try:
             from florida_property_scraper.storage import SQLiteStore
 
@@ -8165,10 +8888,56 @@ if app:
                     county=county_key,
                     parcel_id=enrichment_pid,
                 )
+                if not isinstance(enrichment_snapshot, dict) or not isinstance(
+                    enrichment_snapshot.get("merged_fields"), dict
+                ):
+                    # Fallback: build a fresh snapshot directly from provider evidence
+                    # so parcel detail remains complete even before a scheduler refresh.
+                    ev_rows = store.list_provider_evidence_for_parcels(
+                        county=county_key,
+                        parcel_ids=[enrichment_pid],
+                    )
+                    if ev_rows:
+                        min_conf_label = (
+                            str(os.getenv("FPS_EVIDENCE_MIN_CONFIDENCE", "low")).strip().lower() or "low"
+                        )
+                        merged, ev_ids = store.build_enriched_fields(
+                            evidence_rows=ev_rows,
+                            min_confidence_label=min_conf_label,
+                        )
+                        if merged:
+                            snapshot_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                            # Save the snapshot if possible, but always use merged_fields regardless
+                            try:
+                                store.save_parcel_enrichment_snapshot(
+                                    county=county_key,
+                                    parcel_id=enrichment_pid,
+                                    snapshot_at=snapshot_at,
+                                    merged_fields=merged,
+                                    evidence_ids=ev_ids,
+                                )
+                            except Exception:
+                                pass  # snapshot save failed, but we still use merged
+                            enrichment_snapshot = {
+                                "merged_fields": merged,
+                                "evidence_ids": ev_ids,
+                                "snapshot_at": snapshot_at,
+                            }
+                owner_enrichment = store.get_latest_owner_enrichment(
+                    county=county_key,
+                    parcel_id=enrichment_pid,
+                )
             finally:
                 store.close()
-        except Exception:
+        except Exception as _enrichment_exc:
+            import traceback
+            try:
+                import logging
+                logging.getLogger("fps.parcel_detail").exception("enrichment fallback failed: %s", _enrichment_exc)
+            except Exception:
+                pass
             enrichment_snapshot = None
+            owner_enrichment = None
 
         if isinstance(enrichment_snapshot, dict):
             merged_fields = enrichment_snapshot.get("merged_fields") or {}
@@ -8213,6 +8982,135 @@ if app:
 
         computed = compute_ui_fields(pa)
 
+        owner_enrichment_payload = {
+            "provider": (owner_enrichment or {}).get("provider"),
+            "status": (owner_enrichment or {}).get("status"),
+            "phones": (owner_enrichment or {}).get("phones") or [],
+            "emails": (owner_enrichment or {}).get("emails") or [],
+            "owner_name": (owner_enrichment or {}).get("owner_name"),
+            "mailing_address": (owner_enrichment or {}).get("mailing_address"),
+            "updated_at": (owner_enrichment or {}).get("updated_at"),
+        }
+
+        profile_canonical: dict[str, Any] = {}
+        if isinstance(pa, dict):
+            profile_canonical.update(pa)
+        if isinstance(merged_fields, dict):
+            _overlay_missing_fields(profile_canonical, merged_fields)
+
+        owner_name_from_contacts = str(owner_enrichment_payload.get("owner_name") or "").strip()
+        if owner_name_from_contacts and _is_missing_value(
+            "owner_name", profile_canonical.get("owner_name")
+        ):
+            profile_canonical["owner_name"] = owner_name_from_contacts
+
+        phones = owner_enrichment_payload.get("phones") or []
+        if phones and _is_missing_value("owner_phone", profile_canonical.get("owner_phone")):
+            profile_canonical["owner_phone"] = str(phones[0] or "").strip()
+
+        emails = owner_enrichment_payload.get("emails") or []
+        if emails and _is_missing_value("owner_email", profile_canonical.get("owner_email")):
+            profile_canonical["owner_email"] = str(emails[0] or "").strip()
+
+        if _is_missing_value("mailing_address", profile_canonical.get("mailing_address")):
+            mailing_from_owner = str(owner_enrichment_payload.get("mailing_address") or "").strip()
+            if mailing_from_owner:
+                profile_canonical["mailing_address"] = mailing_from_owner
+
+        for k, v in (computed or {}).items():
+            key = str(k)
+            if _is_missing_value(key, profile_canonical.get(key)) and not _is_missing_value(key, v):
+                profile_canonical[key] = v
+
+        # Canonical profile uses UI-facing aliases; keep PA field names for back-compat
+        # while ensuring completeness checks see equivalent populated fields.
+        canonical_aliases: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("owner_name", ("owner_name", "owner_names")),
+            ("beds", ("beds", "bedrooms")),
+            ("baths", ("baths", "bathrooms")),
+            ("living_area_sqft", ("living_area_sqft", "living_sf", "building_sf")),
+            ("lot_size_sqft", ("lot_size_sqft", "land_sf")),
+            ("lot_size_acres", ("lot_size_acres", "land_acres")),
+            ("building_value", ("building_value", "improvement_value")),
+            ("total_value", ("total_value", "just_value")),
+        )
+        for target_key, source_keys in canonical_aliases:
+            if not _is_missing_value(target_key, profile_canonical.get(target_key)):
+                continue
+            for source_key in source_keys:
+                source_val = profile_canonical.get(source_key)
+                if _is_missing_value(source_key, source_val):
+                    continue
+                if target_key == "owner_name" and source_key == "owner_names":
+                    if isinstance(source_val, list):
+                        joined = "; ".join([str(x).strip() for x in source_val if str(x).strip()])
+                        if joined:
+                            profile_canonical[target_key] = joined
+                            break
+                    continue
+                profile_canonical[target_key] = source_val
+                break
+
+        completeness_checklist = [
+            "parcel_id",
+            "situs_address",
+            "situs_city",
+            "situs_state",
+            "situs_zip",
+            "owner_name",
+            "mailing_address",
+            "mailing_city",
+            "mailing_state",
+            "mailing_zip",
+            "beds",
+            "baths",
+            "year_built",
+            "living_area_sqft",
+            "lot_size_sqft",
+            "lot_size_acres",
+            "zoning",
+            "future_land_use",
+            "last_sale_date",
+            "last_sale_price",
+            "just_value",
+            "assessed_value",
+            "taxable_value",
+            "land_value",
+            "building_value",
+            "total_value",
+            "owner_phone",
+            "owner_email",
+        ]
+        completeness_missing = [
+            k for k in completeness_checklist if _is_missing_value(k, profile_canonical.get(k))
+        ]
+        completeness_present = [k for k in completeness_checklist if k not in completeness_missing]
+        completeness_pct = 0
+        if completeness_checklist:
+            completeness_pct = int(
+                round(
+                    (len(completeness_present) / float(len(completeness_checklist))) * 100.0,
+                    0,
+                )
+            )
+
+        coverage_payload = {
+            "required_fields": completeness_checklist,
+            "present_fields": completeness_present,
+            "missing_fields": completeness_missing,
+            "present_count": int(len(completeness_present)),
+            "required_count": int(len(completeness_checklist)),
+            "completeness_pct": int(completeness_pct),
+        }
+
+        property_profile = {
+            "canonical": profile_canonical,
+            "pa_fields": pa or {},
+            "enrichment_fields": merged_fields if isinstance(merged_fields, dict) else {},
+            "computed_fields": computed or {},
+            "owner_enrichment": owner_enrichment_payload,
+        }
+
         payload = {
             "county": county_key,
             "parcel_id": parcel_key,
@@ -8223,6 +9121,9 @@ if app:
             else empty_user_meta(county=county_key, parcel_id=parcel_key),
             "merged_fields": merged_fields if isinstance(merged_fields, dict) else {},
             "evidence_ids": [int(x) for x in (evidence_ids or []) if int(x) > 0],
+            "owner_enrichment": owner_enrichment_payload,
+            "property_profile": property_profile,
+            "coverage": coverage_payload,
         }
 
         if not include_fields:
@@ -8354,43 +9255,57 @@ if app:
         if result.get("year_built") in (None, "") and pa_dict.get("year_built") is not None:
             result["year_built"] = pa_dict.get("year_built")
 
-            # FLATTEN_PA_TOPLEVEL: expose key PA fields at top-level for UI panels
-            # (Use setdefault so Seminole fallback / earlier values are not overwritten)
-            _pa = pa_dict
-            for _k in (
-                "owner_names",
-                "mailing_address",
-                "mailing_city",
-                "mailing_state",
-                "mailing_zip",
-                "year_built",
-                "living_area_sqft",
-                "lot_size_sqft",
-                "lot_size_acres",
-                "zoning",
-                "future_land_use",
-                "property_class",
-                "use_type",
-                "land_value",
-                "building_value",
-                "total_value",
-                "assessed_value",
-                "taxable_value",
-            ):
-                try:
-                    result.setdefault(_k, _pa.get(_k))
-                except Exception:
-                    pass
+        # FLATTEN_PA_TOPLEVEL: expose key PA fields at top-level for UI panels
+        # (Use setdefault so Seminole fallback / earlier values are not overwritten)
+        _pa = pa_dict
+        for _k in (
+            "owner_names",
+            "mailing_address",
+            "mailing_city",
+            "mailing_state",
+            "mailing_zip",
+            "year_built",
+            "living_area_sqft",
+            "lot_size_sqft",
+            "lot_size_acres",
+            "zoning",
+            "future_land_use",
+            "property_class",
+            "use_type",
+            "land_value",
+            "building_value",
+            "total_value",
+            "assessed_value",
+            "taxable_value",
+            "owner_phone",
+            "owner_email",
+        ):
+            try:
+                result.setdefault(_k, _pa.get(_k))
+            except Exception:
+                pass
 
-            result.setdefault("situs_address", pa_dict.get("situs_address") or "")
-            result.setdefault("situs_city", pa_dict.get("situs_city") or "")
-            result.setdefault("situs_state", pa_dict.get("situs_state") or "")
-            result.setdefault("situs_zip", pa_dict.get("situs_zip") or "")
-            owners = pa_dict.get("owner_names") or []
-            result["owner_name"] = (owners[0] if owners else (pa_dict.get("owner_name") or ""))
-            result["last_sale_date"] = pa_dict.get("last_sale_date") or ""
-            result["last_sale_price"] = pa_dict.get("last_sale_price") or 0
-            result["just_value"] = pa_dict.get("just_value") or 0
+        owner_enrich_data = result.get("owner_enrichment") or {}
+        owner_phones = owner_enrich_data.get("phones") or []
+        owner_emails = owner_enrich_data.get("emails") or []
+        if owner_phones:
+            result.setdefault("owner_phone", str(owner_phones[0] or "").strip())
+        if owner_emails:
+            result.setdefault("owner_email", str(owner_emails[0] or "").strip())
+
+        result.setdefault("situs_address", pa_dict.get("situs_address") or "")
+        result.setdefault("situs_city", pa_dict.get("situs_city") or "")
+        result.setdefault("situs_state", pa_dict.get("situs_state") or "")
+        result.setdefault("situs_zip", pa_dict.get("situs_zip") or "")
+        owners = pa_dict.get("owner_names") or []
+        result["owner_name"] = (owners[0] if owners else (pa_dict.get("owner_name") or ""))
+        if not str(result.get("owner_name") or "").strip():
+            result["owner_name"] = str(owner_enrich_data.get("owner_name") or "").strip()
+        if result.get("mailing_address") in (None, ""):
+            result["mailing_address"] = str(owner_enrich_data.get("mailing_address") or "").strip()
+        result["last_sale_date"] = pa_dict.get("last_sale_date") or ""
+        result["last_sale_price"] = pa_dict.get("last_sale_price") or 0
+        result["just_value"] = pa_dict.get("just_value") or 0
 
         # Source URLs and missing fields for UI
         try:
@@ -8413,42 +9328,39 @@ if app:
             pass
 
         try:
-            checklist = [
-                "parcel_id",
-                "situs_address",
-                "situs_city",
-                "situs_state",
-                "situs_zip",
-                "owner_name",
-                "mailing_address",
-                "mailing_city",
-                "mailing_state",
-                "mailing_zip",
-                "beds",
-                "baths",
-                "year_built",
-                "living_area_sqft",
-                "lot_size_sqft",
-                "lot_size_acres",
-                "zoning",
-                "future_land_use",
-                "last_sale_date",
-                "last_sale_price",
-                "just_value",
-                "assessed_value",
-                "taxable_value",
-                "land_value",
-                "building_value",
-                "total_value",
-            ]
+            checklist = coverage_payload.get("required_fields") or []
             missing = []
             for k in checklist:
                 v = result.get(k)
                 if v is None or v == "" or v == []:
                     missing.append(k)
             result["missing_fields"] = missing
+            present = [k for k in checklist if k not in missing]
+            result["coverage"] = {
+                "required_fields": checklist,
+                "present_fields": present,
+                "missing_fields": missing,
+                "present_count": int(len(present)),
+                "required_count": int(len(checklist)),
+                "completeness_pct": int(
+                    round((len(present) / float(len(checklist))) * 100.0, 0)
+                )
+                if checklist
+                else 0,
+            }
         except Exception:
             pass
+
+        profile_payload = result.get("property_profile") or {}
+        canonical = profile_payload.get("canonical")
+        if not isinstance(canonical, dict):
+            canonical = {}
+        for key in (result.get("coverage") or {}).get("required_fields") or []:
+            k = str(key)
+            if _is_missing_value(k, canonical.get(k)) and not _is_missing_value(k, result.get(k)):
+                canonical[k] = result.get(k)
+        profile_payload["canonical"] = canonical
+        result["property_profile"] = profile_payload
 
         return JSONResponse(result)
 
@@ -8853,12 +9765,14 @@ if app:
     async def _start_watchlists_scheduler():
         import asyncio
 
-        enabled = os.getenv("FPS_WATCHLIST_SCHEDULER", "0").strip() == "1"
+        enabled = os.getenv("FPS_WATCHLIST_SCHEDULER", "1").strip() == "1"
+        _RUNTIME_AUDIT_STATE["watchlists"]["enabled"] = bool(enabled)
         if not enabled:
             return
 
         interval_s = int(float(os.getenv("FPS_WATCHLIST_INTERVAL_S", "3600") or 3600))
         interval_s = max(30, interval_s)
+        _RUNTIME_AUDIT_STATE["watchlists"]["interval_s"] = int(interval_s)
         connector_limit = int(float(os.getenv("FPS_TRIGGER_CONNECTOR_LIMIT", "50") or 50))
         connector_limit = max(1, min(connector_limit, 500))
 
@@ -8880,6 +9794,8 @@ if app:
             db_path = os.getenv("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
 
             while True:
+                tick_started_at = _runtime_now_iso()
+                tick_t0 = time.perf_counter()
                 try:
                     now = utc_now_iso()
                     store = SQLiteStore(db_path)
@@ -8927,9 +9843,34 @@ if app:
                             if not sid:
                                 continue
                             store.sync_saved_search_inbox_from_trigger_alerts(saved_search_id=sid, now_iso=now)
+
+                        _RUNTIME_AUDIT_STATE["watchlists"].update(
+                            {
+                                "last_started_at": tick_started_at,
+                                "last_completed_at": _runtime_now_iso(),
+                                "last_duration_ms": int((time.perf_counter() - tick_t0) * 1000),
+                                "last_error": None,
+                                "tick_count": int(_RUNTIME_AUDIT_STATE["watchlists"].get("tick_count") or 0) + 1,
+                                "last_summary": {
+                                    "saved_searches_checked": len(ss_rows[:50]),
+                                    "saved_searches_inbox_synced": len(ss_rows[:100]),
+                                    "counties_with_enabled_searches": len(counties),
+                                    "connectors_per_county": len(connector_keys),
+                                },
+                            }
+                        )
                     finally:
                         store.close()
                 except Exception as e:
+                    _RUNTIME_AUDIT_STATE["watchlists"].update(
+                        {
+                            "last_started_at": tick_started_at,
+                            "last_completed_at": _runtime_now_iso(),
+                            "last_duration_ms": int((time.perf_counter() - tick_t0) * 1000),
+                            "last_error": str(e),
+                            "tick_count": int(_RUNTIME_AUDIT_STATE["watchlists"].get("tick_count") or 0) + 1,
+                        }
+                    )
                     logger.warning("scheduler tick failed: %s", e)
 
                 await asyncio.sleep(interval_s)
@@ -8955,12 +9896,14 @@ if app:
     async def _start_statewide_refresh_scheduler():
         import asyncio
 
-        enabled = os.getenv("FPS_STATEWIDE_REFRESH_SCHEDULER", "0").strip() == "1"
+        enabled = os.getenv("FPS_STATEWIDE_REFRESH_SCHEDULER", "1").strip() == "1"
+        _RUNTIME_AUDIT_STATE["statewide_refresh"]["enabled"] = bool(enabled)
         if not enabled:
             return
 
-        interval_s = int(float(os.getenv("FPS_STATEWIDE_REFRESH_INTERVAL_S", "900") or 900))
+        interval_s = int(float(os.getenv("FPS_STATEWIDE_REFRESH_INTERVAL_S", "3600") or 3600))
         interval_s = max(30, interval_s)
+        _RUNTIME_AUDIT_STATE["statewide_refresh"]["interval_s"] = int(interval_s)
         batch_size = int(float(os.getenv("FPS_STATEWIDE_REFRESH_BATCH_SIZE", "100") or 100))
         max_parcels = int(float(os.getenv("FPS_STATEWIDE_REFRESH_MAX_PARCELS_PER_COUNTY", "1000") or 1000))
         counties_raw = str(os.getenv("FPS_STATEWIDE_REFRESH_COUNTIES", "")).strip()
@@ -8980,6 +9923,8 @@ if app:
 
             db_path = _resolve_db_path("LEADS_SQLITE_PATH", DEFAULT_LEADS_DB)
             while True:
+                tick_started_at = _runtime_now_iso()
+                tick_t0 = time.perf_counter()
                 try:
                     result = run_statewide_refresh_tick(
                         db_path=db_path,
@@ -8996,7 +9941,33 @@ if app:
                         (stats or {}).get("evidence_rows_written", 0),
                         (stats or {}).get("trigger_results_written", 0),
                     )
+                    _RUNTIME_AUDIT_STATE["statewide_refresh"].update(
+                        {
+                            "last_started_at": tick_started_at,
+                            "last_completed_at": _runtime_now_iso(),
+                            "last_duration_ms": int((time.perf_counter() - tick_t0) * 1000),
+                            "last_error": None,
+                            "tick_count": int(_RUNTIME_AUDIT_STATE["statewide_refresh"].get("tick_count") or 0) + 1,
+                            "preloaded_once": True,
+                            "last_summary": {
+                                "counties_processed": int((stats or {}).get("counties_processed", 0) or 0),
+                                "parcels_considered": int((stats or {}).get("parcels_considered", 0) or 0),
+                                "parcels_enriched": int((stats or {}).get("parcels_enriched", 0) or 0),
+                                "evidence_rows_written": int((stats or {}).get("evidence_rows_written", 0) or 0),
+                                "trigger_results_written": int((stats or {}).get("trigger_results_written", 0) or 0),
+                            },
+                        }
+                    )
                 except Exception as e:
+                    _RUNTIME_AUDIT_STATE["statewide_refresh"].update(
+                        {
+                            "last_started_at": tick_started_at,
+                            "last_completed_at": _runtime_now_iso(),
+                            "last_duration_ms": int((time.perf_counter() - tick_t0) * 1000),
+                            "last_error": str(e),
+                            "tick_count": int(_RUNTIME_AUDIT_STATE["statewide_refresh"].get("tick_count") or 0) + 1,
+                        }
+                    )
                     logger.warning("statewide refresh tick failed: %s", e)
 
                 await asyncio.sleep(interval_s)

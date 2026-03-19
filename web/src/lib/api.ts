@@ -108,10 +108,83 @@ export type ProviderStatusResponse = {
   providers?: Array<Record<string, unknown>>;
 };
 
+export type RuntimeAuditScheduler = {
+  enabled?: boolean;
+  interval_s?: number | null;
+  last_started_at?: string | null;
+  last_completed_at?: string | null;
+  last_duration_ms?: number | null;
+  last_error?: string | null;
+  tick_count?: number;
+  preloaded_once?: boolean;
+  last_age_s?: number | null;
+  fresh?: boolean;
+  fresh_threshold_s?: number;
+  last_summary?: Record<string, unknown>;
+};
+
+export type RuntimeAuditResponse = {
+  ok: boolean;
+  ready: boolean;
+  checked_at: string;
+  uptime_s: number;
+  county: string;
+  hourly_policy: {
+    target_interval_s: number;
+    watchlists_interval_s: number;
+    statewide_refresh_interval_s: number;
+  };
+  schedulers: {
+    watchlists: RuntimeAuditScheduler;
+    statewide_refresh: RuntimeAuditScheduler;
+  };
+  preload: {
+    db_path: string;
+    db_exists: boolean;
+    provider_evidence_count: number;
+    enrichment_snapshot_count: number;
+    trigger_results_count: number;
+    latest_evidence_at: string | null;
+    latest_snapshot_at: string | null;
+    latest_trigger_evaluated_at: string | null;
+    fresh_within_90m: boolean;
+  };
+  warnings: string[];
+};
+
+export type RuntimeRepairResponse = {
+  ok: boolean;
+  county: string;
+  started_at: string;
+  finished_at: string;
+  statewide_refresh?: Record<string, unknown> | null;
+  errors: string[];
+  audit?: RuntimeAuditResponse;
+};
+
 export async function fetchProviderStatus(county: string): Promise<ProviderStatusResponse> {
   const res = await apiFetch(apiUrl('/api/debug/provider_status', { county }));
   if (!res.ok) throw new Error('Failed to fetch provider status');
   return (await res.json()) as ProviderStatusResponse;
+}
+
+export async function fetchRuntimeAudit(county: string): Promise<RuntimeAuditResponse> {
+  const res = await apiFetch(apiUrl('/api/debug/runtime_audit', { county }));
+  if (!res.ok) throw new Error('Failed to fetch runtime audit');
+  return (await res.json()) as RuntimeAuditResponse;
+}
+
+export async function runRuntimeRepair(county: string): Promise<RuntimeRepairResponse> {
+  const res = await apiFetch(apiUrl('/api/debug/runtime_repair', { county }), {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${res.status} ${res.statusText}${detail}`);
+  }
+  return (await res.json()) as RuntimeRepairResponse;
 }
 
 export async function fetchSourceCoverage(county: string): Promise<SourceCoverage> {
@@ -979,6 +1052,53 @@ export async function createSavedSearch(payload: {
   const ss = (data as any).saved_search;
   if (!ss || typeof ss !== 'object') throw new Error('Unexpected response: expected saved_search');
   return ss as SavedSearchRecord;
+}
+
+export async function updateSavedSearch(payload: {
+  saved_search_id: string;
+  name: string;
+}): Promise<SavedSearchRecord> {
+  const sid = payload.saved_search_id.trim();
+  const name = payload.name.trim();
+  if (!sid) throw new Error('saved_search_id is required');
+  if (!name) throw new Error('name is required');
+
+  const resp = await apiFetch(`/api/saved-searches/${encodeURIComponent(sid)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  const ss = (data as any).saved_search;
+  if (!ss || typeof ss !== 'object') throw new Error('Unexpected response: expected saved_search');
+  return ss as SavedSearchRecord;
+}
+
+export async function deleteSavedSearch(savedSearchId: string): Promise<boolean> {
+  const sid = savedSearchId.trim();
+  if (!sid) throw new Error('saved_search_id is required');
+
+  const resp = await apiFetch(`/api/saved-searches/${encodeURIComponent(sid)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    const detail = text ? `: ${text}` : '';
+    throw new Error(`HTTP ${resp.status} ${resp.statusText}${detail}`);
+  }
+  const data: unknown = await resp.json();
+  if (!data || typeof data !== 'object') throw new Error('Unexpected response: expected an object');
+  return Boolean((data as any).deleted);
 }
 
 export async function runSavedSearch(params: {

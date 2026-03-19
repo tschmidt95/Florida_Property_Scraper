@@ -1115,6 +1115,43 @@ class SQLiteStore:
             rec["raw"] = {}
         return rec
 
+    def get_latest_owner_enrichment(
+        self,
+        *,
+        county: str,
+        parcel_id: str,
+    ) -> Dict[str, Any] | None:
+        county_key = (county or "").strip().lower()
+        pid = str(parcel_id or "").strip()
+        if not county_key or not pid:
+            return None
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM owner_enrichment
+            WHERE county=? AND parcel_id=?
+            ORDER BY COALESCE(updated_at, '') DESC, id DESC
+            LIMIT 1
+            """,
+            (county_key, pid),
+        ).fetchone()
+        if not row:
+            return None
+        rec = dict(row)
+        try:
+            rec["phones"] = json.loads(rec.get("phones_json") or "[]")
+        except Exception:
+            rec["phones"] = []
+        try:
+            rec["emails"] = json.loads(rec.get("emails_json") or "[]")
+        except Exception:
+            rec["emails"] = []
+        try:
+            rec["raw"] = json.loads(rec.get("raw_json") or "{}")
+        except Exception:
+            rec["raw"] = {}
+        return rec
+
     def upsert_owner_enrichment(
         self,
         *,
@@ -1601,8 +1638,12 @@ class SQLiteStore:
         pid = str(parcel_id or "").strip()
         field_key = str(field or "").strip()
         chash = str(content_hash or "").strip()
-        if not prov or not county_key or not pid or not field_key or not chash:
+        if not prov or not county_key or not pid or not field_key:
             return None
+        # Auto-generate content hash if not provided
+        if not chash:
+            import hashlib
+            chash = hashlib.sha256(str(value or "").encode()).hexdigest()[:12]
 
         raw_ref = str(raw_reference or "").strip() or None
         fetched = str(fetched_at or "").strip() or None
@@ -2011,6 +2052,44 @@ class SQLiteStore:
             return None
         r = self.conn.execute("SELECT * FROM saved_searches WHERE id=? LIMIT 1", (sid,)).fetchone()
         return dict(r) if r else None
+
+    def update_saved_search_name(self, *, saved_search_id: str, name: str) -> Dict[str, Any] | None:
+        sid = str(saved_search_id or "").strip()
+        if not sid:
+            return None
+        ss = self.get_saved_search(saved_search_id=sid)
+        if not ss:
+            return None
+        next_name = str(name or "").strip()
+        if not next_name:
+            return None
+        now = self._utc_now_iso()
+        self.conn.execute(
+            "UPDATE saved_searches SET name=?, updated_at=? WHERE id=?",
+            (next_name, now, sid),
+        )
+        wid = str(ss.get("watchlist_id") or "").strip()
+        if wid:
+            self.conn.execute(
+                "UPDATE watchlists SET name=?, updated_at=? WHERE id=?",
+                (next_name, now, wid),
+            )
+        self.conn.commit()
+        return self.get_saved_search(saved_search_id=sid)
+
+    def delete_saved_search(self, *, saved_search_id: str) -> bool:
+        sid = str(saved_search_id or "").strip()
+        if not sid:
+            return False
+        ss = self.get_saved_search(saved_search_id=sid)
+        if not ss:
+            return False
+        self.conn.execute("DELETE FROM alerts_inbox WHERE saved_search_id=?", (sid,))
+        self.conn.execute("DELETE FROM saved_search_members WHERE saved_search_id=?", (sid,))
+        self.conn.execute("DELETE FROM watchlist_runs WHERE saved_search_id=?", (sid,))
+        self.conn.execute("DELETE FROM saved_searches WHERE id=?", (sid,))
+        self.conn.commit()
+        return True
 
     def add_member_to_saved_search(
         self,
